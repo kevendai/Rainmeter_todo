@@ -92,15 +92,15 @@ $ErrorActionPreference = 'Stop'
 $packageRoot = $PSScriptRoot
 $sourceSkins = Join-Path $packageRoot 'Skins'
 if ([string]::IsNullOrWhiteSpace($RainmeterRoot)) {
-    $RainmeterRoot = Read-Host '请输入 Rainmeter 便携安装目录（包含 Rainmeter.exe 的文件夹）'
+    $RainmeterRoot = Read-Host 'Enter Rainmeter portable directory containing Rainmeter.exe'
 }
 $RainmeterRoot = $RainmeterRoot.Trim().Trim('"')
 if ([string]::IsNullOrWhiteSpace($RainmeterRoot)) {
-    throw 'Rainmeter 安装目录不能为空'
+    throw 'RainmeterRoot cannot be empty.'
 }
 $rainmeterExe = Join-Path $RainmeterRoot 'Rainmeter.exe'
 if (-not (Test-Path -LiteralPath $rainmeterExe)) {
-    throw "Rainmeter.exe not found in '$RainmeterRoot'. 请确认输入的是包含 Rainmeter.exe 的便携安装目录。"
+    throw "Rainmeter.exe not found in '$RainmeterRoot'. Enter the portable install directory that contains Rainmeter.exe."
 }
 if ($WaitForProcessId -gt 0) {
     try { Wait-Process -Id $WaitForProcessId -Timeout 30 -ErrorAction SilentlyContinue } catch {}
@@ -117,7 +117,7 @@ foreach ($skin in @('Todo', 'Calendar')) {
         if (Test-Path -LiteralPath $path) { $preserved[$name] = [IO.File]::ReadAllBytes($path) }
     }
 
-    Copy-Item -LiteralPath (Join-Path $source '*') -Destination $target -Recurse -Force
+    Copy-Item -Path (Join-Path $source '*') -Destination $target -Recurse -Force
 
     foreach ($name in $preserved.Keys) {
         $destination = Join-Path $target ('@Resources\' + $name)
@@ -149,7 +149,6 @@ Write-Host "Installed skins to $RainmeterRoot\Skins"
 '@
     Set-Content -LiteralPath $Path -Value $content -Encoding UTF8
 }
-
 function New-Package {
     param(
         [string]$Flavor,
