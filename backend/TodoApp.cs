@@ -343,7 +343,7 @@ internal static class TodoApp
         Button close = DarkUi.Button("×", 500, 22, 34, DialogResult.Cancel); close.Height = 34; f.Controls.Add(close);
 
         TextBox title = Field(f, "标题 *", x, 112, w, editing ? S(task, "title") : "");
-        TextBox target = FieldWithButton(f, "打开目标 *", x, 204, w, editing ? S(task, "target") : "", "浏览");
+        TextBox target = FieldWithButton(f, "打开目标", x, 204, w, editing ? S(task, "target") : "", "浏览");
         TextBox available = DateField(f, "开始时间", x, 304, 230, RuntimeUtil.Date(task, "available_from"));
         TextBox due = DateField(f, "截止时间", 302, 304, 230, RuntimeUtil.Date(task, "due_at"));
 
@@ -679,8 +679,9 @@ internal static class TodoApp
             selectedId = Convert.ToString(control.Tag);
             paintRows();
         };
-        Action reload = null;
-        reload = delegate {
+        Action<bool> reload = null;
+        reload = delegate(bool preserveScroll) {
+            int previousScrollY = preserveScroll ? Math.Max(0, -table.AutoScrollPosition.Y) : 0;
             List<Dictionary<string, object>> all = Tasks(state);
             DateTimeOffset now = DateTimeOffset.Now;
             allTab.Text = "全部  " + all.Count;
@@ -714,31 +715,34 @@ internal static class TodoApp
                 Button openBtn = RowIcon("\xE72A", 914, 5);
                 Button editBtn = RowIcon("\xE70F", 948, 5);
                 Button deleteBtn = RowIcon("\xE74D", 982, 5);
-                openBtn.Click += delegate { bool changed=false; Open(state, id, ref changed); managerChanged |= changed; if (changed) reload(); };
-                editBtn.Click += delegate { bool changed=false; Edit(state, id, ref changed); managerChanged |= changed; reload(); };
-                deleteBtn.Click += delegate { bool changed=false; Delete(state, id, ref changed); managerChanged |= changed; reload(); };
+                openBtn.Click += delegate { bool changed=false; Open(state, id, ref changed); managerChanged |= changed; if (changed) reload(true); };
+                editBtn.Click += delegate { bool changed=false; Edit(state, id, ref changed); managerChanged |= changed; if (changed) reload(true); };
+                deleteBtn.Click += delegate { bool changed=false; Delete(state, id, ref changed); managerChanged |= changed; if (changed) reload(true); };
                 row.Controls.Add(openBtn); row.Controls.Add(editBtn); row.Controls.Add(deleteBtn);
                 table.Controls.Add(row); rowPanels[id] = row; y += 42;
             }
-            table.ResumeLayout(); DarkUi.SetRedraw(table, true); paintTabs(); paintRows(); selectionHint.Text = "已选择 " + rowChecks.Count(c => c.Checked) + " 项";
+            table.ResumeLayout();
+            int maxScrollY = Math.Max(0, table.DisplayRectangle.Height - table.ClientSize.Height);
+            if (previousScrollY > 0) table.AutoScrollPosition = new Point(0, Math.Min(previousScrollY, maxScrollY));
+            DarkUi.SetRedraw(table, true); paintTabs(); paintRows(); selectionHint.Text = "已选择 " + rowChecks.Count(c => c.Checked) + " 项";
         };
-        allTab.Click += delegate { filter = 0; reload(); };
-        overdueTab.Click += delegate { filter = 1; reload(); };
-        futureTab.Click += delegate { filter = 2; reload(); };
-        pendingTab.Click += delegate { filter = 3; reload(); };
-        doneTab.Click += delegate { filter = 4; reload(); };
-        search.TextChanged += delegate { reload(); };
-        onlyOpen.CheckedChanged += delegate { reload(); };
-        searchButton.Click += delegate { reload(); };
+        allTab.Click += delegate { filter = 0; reload(false); };
+        overdueTab.Click += delegate { filter = 1; reload(false); };
+        futureTab.Click += delegate { filter = 2; reload(false); };
+        pendingTab.Click += delegate { filter = 3; reload(false); };
+        doneTab.Click += delegate { filter = 4; reload(false); };
+        search.TextChanged += delegate { reload(false); };
+        onlyOpen.CheckedChanged += delegate { reload(false); };
+        searchButton.Click += delegate { reload(false); };
         search.Parent.BringToFront();
         search.BringToFront();
         searchButton.BringToFront();
         close.BringToFront();
-        reload();
-        edit.Click += delegate { if (selectedId == "") { selectionHint.Text="请先选中一项需要修改的任务。"; selectionHint.ForeColor=DarkUi.Danger; return; } bool changed=false; Edit(state, selectedId, ref changed); managerChanged |= changed; selectionHint.ForeColor=DarkUi.Muted; reload(); };
-        toggle.Click += delegate { List<string> selected=rowChecks.Where(c=>c.Checked).Select(c=>Convert.ToString(c.Tag)).ToList(); if(selected.Count==0){selectionHint.Text="请先勾选需要完成或恢复的任务。";selectionHint.ForeColor=DarkUi.Danger;return;} foreach (string id in selected) { bool changed=false; Toggle(state,id,ref changed); managerChanged |= changed; } selectionHint.ForeColor=DarkUi.Muted; reload(); };
-        delete.Click += delegate { List<string> selected=rowChecks.Where(c=>c.Checked).Select(c=>Convert.ToString(c.Tag)).ToList(); if(selected.Count==0){selectionHint.Text="请先勾选需要删除的任务。";selectionHint.ForeColor=DarkUi.Danger;return;} if(!DarkUi.Confirm("确定删除勾选的 "+selected.Count+" 项任务？","批量删除"))return; foreach (string id in selected) Tasks(state).RemoveAll(t => S(t, "id") == id); Meta(state)["status"]="已批量删除";Commit(state);managerChanged=true;selectionHint.ForeColor=DarkUi.Muted;reload(); };
-        add.Click += delegate { bool changed=false; Add(state, ref changed); managerChanged |= changed; reload(); };
+        reload(false);
+        edit.Click += delegate { if (selectedId == "") { selectionHint.Text="请先选中一项需要修改的任务。"; selectionHint.ForeColor=DarkUi.Danger; return; } bool changed=false; Edit(state, selectedId, ref changed); managerChanged |= changed; selectionHint.ForeColor=DarkUi.Muted; if (changed) reload(true); };
+        toggle.Click += delegate { List<string> selected=rowChecks.Where(c=>c.Checked).Select(c=>Convert.ToString(c.Tag)).ToList(); if(selected.Count==0){selectionHint.Text="请先勾选需要完成或恢复的任务。";selectionHint.ForeColor=DarkUi.Danger;return;} foreach (string id in selected) { bool changed=false; Toggle(state,id,ref changed); managerChanged |= changed; } selectionHint.ForeColor=DarkUi.Muted; reload(true); };
+        delete.Click += delegate { List<string> selected=rowChecks.Where(c=>c.Checked).Select(c=>Convert.ToString(c.Tag)).ToList(); if(selected.Count==0){selectionHint.Text="请先勾选需要删除的任务。";selectionHint.ForeColor=DarkUi.Danger;return;} if(!DarkUi.Confirm("确定删除勾选的 "+selected.Count+" 项任务？","批量删除"))return; foreach (string id in selected) Tasks(state).RemoveAll(t => S(t, "id") == id); Meta(state)["status"]="已批量删除";Commit(state);managerChanged=true;selectionHint.ForeColor=DarkUi.Muted;reload(true); };
+        add.Click += delegate { bool changed=false; Add(state, ref changed); managerChanged |= changed; if (changed) reload(false); };
         table.DoubleClick += delegate { edit.PerformClick(); }; f.ShowDialog(); refresh |= managerChanged;
     }
 
