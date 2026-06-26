@@ -79,18 +79,25 @@ function Convert-IniToUtf16 {
 
 function New-InstallScript {
     param([string]$Path)
-    $content = @'
+$content = @'
 param(
-    [string]$RainmeterRoot = 'D:\Program Files (x86)\Rainmeter',
+    [string]$RainmeterRoot,
     [switch]$Activate
 )
 
 $ErrorActionPreference = 'Stop'
 $packageRoot = Split-Path $PSScriptRoot -Parent
 $sourceSkins = Join-Path $packageRoot 'Skins'
+if ([string]::IsNullOrWhiteSpace($RainmeterRoot)) {
+    $RainmeterRoot = Read-Host '请输入 Rainmeter 便携安装目录（包含 Rainmeter.exe 的文件夹）'
+}
+$RainmeterRoot = $RainmeterRoot.Trim().Trim('"')
+if ([string]::IsNullOrWhiteSpace($RainmeterRoot)) {
+    throw 'Rainmeter 安装目录不能为空'
+}
 $rainmeterExe = Join-Path $RainmeterRoot 'Rainmeter.exe'
 if (-not (Test-Path -LiteralPath $rainmeterExe)) {
-    throw "Rainmeter.exe not found. Install Rainmeter in portable mode first: $RainmeterRoot"
+    throw "Rainmeter.exe not found in '$RainmeterRoot'. 请确认输入的是包含 Rainmeter.exe 的便携安装目录。"
 }
 
 foreach ($skin in @('Todo', 'Calendar')) {

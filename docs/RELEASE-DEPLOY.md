@@ -9,15 +9,16 @@
 
 1. 解压对应 zip。
 2. 运行包内 `Rainmeter-4.5.26.exe`。
-3. 安装时选择 Portable installation，目标目录建议使用 `D:\Program Files (x86)\Rainmeter`。
+3. 安装时选择 Portable installation，并自行选择一个 Rainmeter 便携安装目录。记下这个目录，后面部署皮肤时会用到。
 4. 安装完成后关闭 Rainmeter。
 5. 在解压目录运行：
 
    ```powershell
-   powershell -ExecutionPolicy Bypass -File .\Install-Skins.ps1 -RainmeterRoot 'D:\Program Files (x86)\Rainmeter' -Activate
+   powershell -ExecutionPolicy Bypass -File .\Install-Skins.ps1 -Activate
    ```
 
-6. 启动或刷新 Rainmeter 后，应看到 `Todo` 和 `Calendar` 两个皮肤。
+6. 脚本会询问 Rainmeter 安装目录。输入第 3 步选择的目录，例如包含 `Rainmeter.exe` 的那个文件夹。
+7. 启动或刷新 Rainmeter 后，应看到 `Todo` 和 `Calendar` 两个皮肤。
 
 ## 凭据与数据
 
