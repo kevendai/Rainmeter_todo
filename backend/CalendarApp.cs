@@ -579,7 +579,20 @@ internal static class CalendarApp
             DateTimeOffset ds=new DateTimeOffset(date,TimeZoneInfo.Local.GetUtcOffset(date)),de=ds.AddDays(1);
             return visibleEvents().Count(e=>RuntimeUtil.Date(e,"start_at").Value<de&&RuntimeUtil.Date(e,"end_at").Value>ds);
         };
-        Action<Button,bool> paintFilter = delegate(Button b,bool active) { b.BackColor=active?DarkUi.AccentFill:DarkUi.Panel;b.ForeColor=active?Color.White:DarkUi.Text;b.Text=(active?"✓  ":"   ")+Regex.Replace(b.Text,@"^[✓ ]+\s*",""); };
+        Action<Button,bool> paintFilter = delegate(Button b,bool active) {
+            Color back = active ? DarkUi.AccentFill : Color.FromArgb(235,245,253);
+            b.Tag = active;
+            b.BackColor = back;
+            b.ForeColor = active ? Color.White : DarkUi.Text;
+            b.FlatAppearance.MouseOverBackColor = back;
+            b.FlatAppearance.MouseDownBackColor = active ? Color.FromArgb(38,118,222) : Color.FromArgb(218,236,251);
+            b.Text=(active?"✓  ":"   ")+Regex.Replace(b.Text,@"^[✓ ]+\s*","");
+        };
+        Action<Button> keepFilterHover = delegate(Button b) {
+            b.MouseEnter += delegate { paintFilter(b, b.Tag is bool && (bool)b.Tag); };
+            b.MouseLeave += delegate { paintFilter(b, b.Tag is bool && (bool)b.Tag); };
+        };
+        keepFilterHover(allFilter); keepFilterHover(localFilter); keepFilterHover(caldavFilter);
         Action updateFilters = delegate {
             int allCount=visibleEvents().Count(), localCount=AllEvents(cache,state).Count(e=>S(e,"source")=="local"), caldavCount=AllEvents(cache,state).Count(e=>S(e,"source")=="caldav");
             allFilter.Text=(showLocal&&showCalDav?"✓  ":"   ")+"全部日程      "+allCount;
