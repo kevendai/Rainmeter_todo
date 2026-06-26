@@ -89,7 +89,7 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
-$packageRoot = Split-Path $PSScriptRoot -Parent
+$packageRoot = $PSScriptRoot
 $sourceSkins = Join-Path $packageRoot 'Skins'
 if ([string]::IsNullOrWhiteSpace($RainmeterRoot)) {
     $RainmeterRoot = Read-Host '请输入 Rainmeter 便携安装目录（包含 Rainmeter.exe 的文件夹）'
