@@ -39,3 +39,8 @@
 - 部署：`powershell -ExecutionPolicy Bypass -File scripts/Deploy-Calendar.ps1 -Activate`
 - 从 Davis CalDAV 只读同步当天 VEVENT，支持跨天、冲突提示和单向转为带时间待办。
 - 详细规则：`docs/CALENDAR-TILE.md`
+
+## 维护提醒
+
+- 每次改完源码、脚本、文档或部署配置后，先运行相关检查，再用 Git 提交并推送到 GitHub 做备份。
+- 不要提交 `translation.secret`、`caldav.secret`、`tasks.json`、缓存、备份 JSON 或编译出来的 exe。
