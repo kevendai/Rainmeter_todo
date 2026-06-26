@@ -517,11 +517,9 @@ internal static class CalendarApp
     private static void ManageEvents(Dictionary<string,object> state, Dictionary<string,object> cache, ref bool refreshTodo)
     {
         bool managerRefreshTodo = false;
-        string selectedId = "";
-        string viewMode = "list";
+        bool showLocal = true, showCalDav = true;
         DateTime selectedDate = DateTime.Now.Date;
-        bool syncingFilters = false;
-        Action reload = null;
+        Action reload = null, renderCalendar = null;
         Form f = DarkUi.Form("日程管理", 1180, 760);
         Panel headerIcon = RoundedPanel(30, 26, 42, 42, DarkUi.AccentFill, Color.FromArgb(92, 162, 246), 12);
         headerIcon.Controls.Add(IconPanel("calendar", 7, 7, 28, Color.White));
@@ -535,100 +533,121 @@ internal static class CalendarApp
         f.Controls.AddRange(new Control[] { headerIcon, title, subtitle, searchBox, close });
 
         Panel left = RoundedPanel(28, 112, 330, 540, Color.FromArgb(248,252,255), Color.FromArgb(224,233,244), 18);
-        MonthCalendar calendar = new MonthCalendar { Left = 22, Top = 18, MaxSelectionCount = 1, ShowTodayCircle = true };
-        calendar.DateSelected += delegate(object sender, DateRangeEventArgs e) { selectedDate = e.Start.Date; viewMode = "day"; reload(); };
-        left.Controls.Add(calendar);
-        Panel filters = RoundedPanel(20, 226, 288, 210, Color.FromArgb(252,254,255), Color.FromArgb(224,233,244), 14);
-        Label filterTitle = new Label { Text = "日历筛选", Left = 18, Top = 16, Width = 160, Height = 24, BackColor = Color.Transparent, ForeColor = DarkUi.Text, Font = new System.Drawing.Font("Microsoft YaHei UI", 10.5F, System.Drawing.FontStyle.Bold) };
-        CheckBox showAll = new CheckBox { Text = "全部日程", Checked = true, Left = 18, Top = 50, Width = 180, Height = 28, BackColor = Color.Transparent, ForeColor = DarkUi.Text, FlatStyle = FlatStyle.Flat };
-        CheckBox showLocal = new CheckBox { Text = "本地日历", Checked = true, Left = 18, Top = 84, Width = 180, Height = 28, BackColor = Color.Transparent, ForeColor = DarkUi.Text, FlatStyle = FlatStyle.Flat };
-        CheckBox showCalDav = new CheckBox { Text = "CalDAV 日历", Checked = true, Left = 18, Top = 118, Width = 180, Height = 28, BackColor = Color.Transparent, ForeColor = DarkUi.Text, FlatStyle = FlatStyle.Flat };
-        CheckBox showPast = new CheckBox { Text = "过期项", Checked = true, Left = 18, Top = 152, Width = 180, Height = 28, BackColor = Color.Transparent, ForeColor = DarkUi.Text, FlatStyle = FlatStyle.Flat };
-        filters.Controls.AddRange(new Control[] { filterTitle, showAll, showLocal, showCalDav, showPast });
-        Button settingsLeft = DarkUi.Button("显示选项  ›", 20, 452, 288, DialogResult.None); settingsLeft.Height = 42;
+        Button prevMonth = DarkUi.Button("‹", 22, 22, 38, DialogResult.None);
+        Button nextMonth = DarkUi.Button("›", 270, 22, 38, DialogResult.None);
+        Label monthTitle = new Label { Left = 70, Top = 29, Width = 190, Height = 24, BackColor = Color.Transparent, ForeColor = DarkUi.Text, TextAlign = ContentAlignment.MiddleCenter, Font = new System.Drawing.Font("Microsoft YaHei UI", 12F, System.Drawing.FontStyle.Bold) };
+        Button todayButton = DarkUi.Button("今天", 238, 66, 70, DialogResult.None); todayButton.Height = 32;
+        Panel calendarGrid = new Panel { Left = 22, Top = 102, Width = 286, Height = 250, BackColor = Color.Transparent };
+        left.Controls.AddRange(new Control[] { prevMonth, nextMonth, monthTitle, todayButton, calendarGrid });
+        Panel filters = RoundedPanel(20, 370, 288, 118, Color.FromArgb(252,254,255), Color.FromArgb(224,233,244), 14);
+        Label filterTitle = new Label { Text = "日历筛选", Left = 18, Top = 14, Width = 160, Height = 24, BackColor = Color.Transparent, ForeColor = DarkUi.Text, Font = new System.Drawing.Font("Microsoft YaHei UI", 10.5F, System.Drawing.FontStyle.Bold) };
+        Button allFilter = DarkUi.Button("✓  全部日程", 18, 46, 252, DialogResult.None);
+        Button localFilter = DarkUi.Button("✓  本地日历", 18, 78, 120, DialogResult.None);
+        Button caldavFilter = DarkUi.Button("✓  CalDAV 日历", 150, 78, 120, DialogResult.None);
+        allFilter.Height = localFilter.Height = caldavFilter.Height = 28;
+        allFilter.TextAlign = localFilter.TextAlign = caldavFilter.TextAlign = ContentAlignment.MiddleLeft;
+        filters.Controls.AddRange(new Control[] { filterTitle, allFilter, localFilter, caldavFilter });
+        Button settingsLeft = DarkUi.Button("显示选项  ›", 20, 502, 288, DialogResult.None); settingsLeft.Height = 38;
         left.Controls.Add(filters); left.Controls.Add(settingsLeft); f.Controls.Add(left);
 
         Panel main = RoundedPanel(382, 112, 760, 540, Color.FromArgb(248,252,255), Color.FromArgb(224,233,244), 18);
-        Panel tabs = RoundedPanel(20, 18, 260, 40, Color.FromArgb(235,245,253), Color.FromArgb(235,245,253), 12);
-        Button tabList = DarkUi.PrimaryButton("日程列表", 0, 0, 86, DialogResult.None);
-        Button tabWeek = DarkUi.Button("周视图", 86, 0, 86, DialogResult.None);
-        Button tabMonth = DarkUi.Button("月视图", 172, 0, 88, DialogResult.None);
-        tabList.Height = tabWeek.Height = tabMonth.Height = 40;
-        tabs.Controls.AddRange(new Control[] { tabList, tabWeek, tabMonth });
+        Label dayHeader = new Label { Left = 22, Top = 24, Width = 430, Height = 30, BackColor = Color.Transparent, ForeColor = DarkUi.Text, Font = new System.Drawing.Font("Microsoft YaHei UI", 12F, System.Drawing.FontStyle.Bold) };
         ComboBox timeFilter = new ComboBox { Left = 520, Top = 20, Width = 100, Height = 34, DropDownStyle = ComboBoxStyle.DropDownList, BackColor = Color.FromArgb(252,254,255), ForeColor = DarkUi.Text };
         timeFilter.Items.AddRange(new object[] { "全部时间", "今天", "未来7天" }); timeFilter.SelectedIndex = 0;
         ComboBox sort = new ComboBox { Left = 634, Top = 20, Width = 106, Height = 34, DropDownStyle = ComboBoxStyle.DropDownList, BackColor = Color.FromArgb(252,254,255), ForeColor = DarkUi.Text };
         sort.Items.AddRange(new object[] { "按开始时间", "按标题" }); sort.SelectedIndex = 0;
-        Label dayHeader = new Label { Left = 22, Top = 78, Width = 700, Height = 28, BackColor = Color.Transparent, ForeColor = DarkUi.Text, Font = new System.Drawing.Font("Microsoft YaHei UI", 12F, System.Drawing.FontStyle.Bold) };
-        FlowLayoutPanel list = new FlowLayoutPanel { Left = 20, Top = 114, Width = 720, Height = 404, BackColor = Color.Transparent, AutoScroll = true, FlowDirection = FlowDirection.TopDown, WrapContents = false };
-        main.Controls.AddRange(new Control[] { tabs, timeFilter, sort, dayHeader, list }); f.Controls.Add(main);
+        FlowLayoutPanel list = new FlowLayoutPanel { Left = 20, Top = 72, Width = 720, Height = 446, BackColor = Color.Transparent, AutoScroll = true, FlowDirection = FlowDirection.TopDown, WrapContents = false };
+        main.Controls.AddRange(new Control[] { dayHeader, timeFilter, sort, list }); f.Controls.Add(main);
 
         Panel footer = RoundedPanel(28, 674, 1114, 58, Color.FromArgb(248, 252, 255), Color.FromArgb(224, 233, 244), 16);
-        Label hint = DarkUi.Label("已选择 0 项", 22, 18, 260); footer.Controls.Add(hint);
-        Button settings = DarkUi.Button(" 设置", 770, 10, 92, DialogResult.None);
-        Button edit = DarkUi.Button(" 编辑", 874, 10, 92, DialogResult.None);
+        Label footerSummary = DarkUi.Label("当前日期：" + selectedDate.ToString("yyyy/M/d") + " · 0 项日程", 22, 18, 460); footer.Controls.Add(footerSummary);
+        Button settings = DarkUi.Button(" 设置", 660, 10, 92, DialogResult.None);
+        Button sync = DarkUi.Button(" 刷新同步", 766, 10, 118, DialogResult.None);
         Button add = DarkUi.PrimaryButton(" 新建日程", 978, 10, 112, DialogResult.None);
-        settings.Font = edit.Font = add.Font = new System.Drawing.Font("Microsoft YaHei UI", 9F, System.Drawing.FontStyle.Bold);
-        footer.Controls.AddRange(new Control[] { settings, edit, add }); f.Controls.Add(footer);
+        settings.Font = sync.Font = add.Font = new System.Drawing.Font("Microsoft YaHei UI", 9F, System.Drawing.FontStyle.Bold);
+        footer.Controls.AddRange(new Control[] { settings, sync, add }); f.Controls.Add(footer);
+
+        Func<Dictionary<string,object>,bool> isVisibleSource = delegate(Dictionary<string,object> e) { return (showLocal && S(e,"source")=="local") || (showCalDav && S(e,"source")=="caldav"); };
+        Func<IEnumerable<Dictionary<string,object>>> visibleEvents = delegate {
+            HashSet<string> hidden = new HashSet<string>(Conversions(state).Where(c => JsonUtil.Bool(c, "hide_event", true)).Select(c => S(c, "occurrence_key")));
+            foreach(Dictionary<string,object> h in HiddenEvents(state)) hidden.Add(S(h,"occurrence_key"));
+            IEnumerable<Dictionary<string,object>> query=AllEvents(cache,state).Where(e=>RuntimeUtil.Date(e,"start_at").HasValue&&RuntimeUtil.Date(e,"end_at").HasValue&&!hidden.Contains(S(e,"occurrence_key"))&&isVisibleSource(e));
+            if(search.Text.Trim()!=""){string q=search.Text.Trim();query=query.Where(e=>CleanTitle(S(e,"title")).IndexOf(q,StringComparison.OrdinalIgnoreCase)>=0||S(e,"location").IndexOf(q,StringComparison.OrdinalIgnoreCase)>=0||S(e,"description").IndexOf(q,StringComparison.OrdinalIgnoreCase)>=0);}
+            return query;
+        };
+        Func<DateTime,int> countOnDate = delegate(DateTime date) {
+            DateTimeOffset ds=new DateTimeOffset(date,TimeZoneInfo.Local.GetUtcOffset(date)),de=ds.AddDays(1);
+            return visibleEvents().Count(e=>RuntimeUtil.Date(e,"start_at").Value<de&&RuntimeUtil.Date(e,"end_at").Value>ds);
+        };
+        Action<Button,bool> paintFilter = delegate(Button b,bool active) { b.BackColor=active?DarkUi.AccentFill:DarkUi.Panel;b.ForeColor=active?Color.White:DarkUi.Text;b.Text=(active?"✓  ":"   ")+Regex.Replace(b.Text,@"^[✓ ]+\s*",""); };
+        Action updateFilters = delegate {
+            int allCount=visibleEvents().Count(), localCount=AllEvents(cache,state).Count(e=>S(e,"source")=="local"), caldavCount=AllEvents(cache,state).Count(e=>S(e,"source")=="caldav");
+            allFilter.Text=(showLocal&&showCalDav?"✓  ":"   ")+"全部日程      "+allCount;
+            localFilter.Text=(showLocal?"✓  ":"   ")+"本地      "+localCount;
+            caldavFilter.Text=(showCalDav?"✓  ":"   ")+"CalDAV      "+caldavCount;
+            paintFilter(allFilter,showLocal&&showCalDav);paintFilter(localFilter,showLocal);paintFilter(caldavFilter,showCalDav);
+        };
+        renderCalendar = delegate {
+            calendarGrid.Controls.Clear();
+            monthTitle.Text=selectedDate.ToString("yyyy 年 M 月",CultureInfo.GetCultureInfo("zh-CN"));
+            string[] names={"一","二","三","四","五","六","日"};
+            for(int i=0;i<7;i++)calendarGrid.Controls.Add(new Label{Text=names[i],Left=i*40,Top=0,Width=34,Height=24,TextAlign=ContentAlignment.MiddleCenter,BackColor=Color.Transparent,ForeColor=DarkUi.Muted,Font=new System.Drawing.Font("Microsoft YaHei UI",9F,System.Drawing.FontStyle.Bold)});
+            DateTime first=new DateTime(selectedDate.Year,selectedDate.Month,1);
+            int offset=((int)first.DayOfWeek+6)%7;
+            DateTime cursor=first.AddDays(-offset);
+            DateTime today=DateTime.Now.Date;
+            for(int cell=0;cell<42;cell++){
+                DateTime d=cursor.AddDays(cell);bool inMonth=d.Month==selectedDate.Month,selected=d.Date==selectedDate.Date, isToday=d.Date==today, has=countOnDate(d)>0;
+                Label day=new Label{Text=d.Day.ToString(CultureInfo.InvariantCulture),Left=(cell%7)*40,Top=28+(cell/7)*35,Width=34,Height=30,TextAlign=ContentAlignment.MiddleCenter,BackColor=selected?DarkUi.AccentFill:Color.Transparent,ForeColor=selected?Color.White:inMonth?DarkUi.Text:Color.FromArgb(170,185,205),Font=new System.Drawing.Font("Microsoft YaHei UI",10F,selected?System.Drawing.FontStyle.Bold:System.Drawing.FontStyle.Regular),Tag=d};
+                DarkUi.Round(day,10);day.Cursor=Cursors.Hand;day.Click+=delegate(object sender,EventArgs args){selectedDate=((DateTime)((Control)sender).Tag).Date;reload();};calendarGrid.Controls.Add(day);
+                if(has){Panel dot=new Panel{Left=day.Left+15,Top=day.Top+25,Width=4,Height=4,BackColor=selected?Color.White:DarkUi.Accent};DarkUi.Round(dot,2);calendarGrid.Controls.Add(dot);}
+                else if(isToday&&!selected){Panel ring=new Panel{Left=day.Left+14,Top=day.Top+25,Width=6,Height=6,BackColor=Color.FromArgb(190,220,255)};DarkUi.Round(ring,3);calendarGrid.Controls.Add(ring);}
+            }
+        };
 
         reload = delegate {
             list.Controls.Clear();
             DateTimeOffset now=DateTimeOffset.Now, dayStart=new DateTimeOffset(selectedDate,TimeZoneInfo.Local.GetUtcOffset(selectedDate)), dayEnd=dayStart.AddDays(1);
-            HashSet<string> hidden = new HashSet<string>(Conversions(state).Where(c => JsonUtil.Bool(c, "hide_event", true)).Select(c => S(c, "occurrence_key")));
-            foreach(Dictionary<string,object> h in HiddenEvents(state)) hidden.Add(S(h,"occurrence_key"));
-            IEnumerable<Dictionary<string,object>> query=AllEvents(cache,state).Where(e=>RuntimeUtil.Date(e,"start_at").HasValue&&RuntimeUtil.Date(e,"end_at").HasValue&&!hidden.Contains(S(e,"occurrence_key")));
-            if(!showAll.Checked){if(!showLocal.Checked)query=query.Where(e=>S(e,"source")!="local");if(!showCalDav.Checked)query=query.Where(e=>S(e,"source")!="caldav");}
-            if(!showPast.Checked)query=query.Where(e=>RuntimeUtil.Date(e,"end_at").Value>=now);
-            if(search.Text.Trim()!=""){string q=search.Text.Trim();query=query.Where(e=>CleanTitle(S(e,"title")).IndexOf(q,StringComparison.OrdinalIgnoreCase)>=0||S(e,"location").IndexOf(q,StringComparison.OrdinalIgnoreCase)>=0||S(e,"description").IndexOf(q,StringComparison.OrdinalIgnoreCase)>=0);}
-            if(viewMode=="day"||timeFilter.SelectedIndex==1)query=query.Where(e=>RuntimeUtil.Date(e,"start_at").Value<dayEnd&&RuntimeUtil.Date(e,"end_at").Value>dayStart);
-            else if(viewMode=="week"||timeFilter.SelectedIndex==2){DateTimeOffset weekEnd=dayStart.AddDays(7);query=query.Where(e=>RuntimeUtil.Date(e,"start_at").Value<weekEnd&&RuntimeUtil.Date(e,"end_at").Value>dayStart);}
-            else if(viewMode=="month"){DateTime monthStart=new DateTime(selectedDate.Year,selectedDate.Month,1);DateTimeOffset ms=new DateTimeOffset(monthStart,TimeZoneInfo.Local.GetUtcOffset(monthStart)),me=ms.AddMonths(1);query=query.Where(e=>RuntimeUtil.Date(e,"start_at").Value<me&&RuntimeUtil.Date(e,"end_at").Value>ms);}
+            IEnumerable<Dictionary<string,object>> query=visibleEvents();
+            if(timeFilter.SelectedIndex==1)query=query.Where(e=>RuntimeUtil.Date(e,"start_at").Value<dayEnd&&RuntimeUtil.Date(e,"end_at").Value>dayStart);
+            else if(timeFilter.SelectedIndex==2){DateTimeOffset weekEnd=dayStart.AddDays(7);query=query.Where(e=>RuntimeUtil.Date(e,"start_at").Value<weekEnd&&RuntimeUtil.Date(e,"end_at").Value>dayStart);}
+            else query=query.Where(e=>RuntimeUtil.Date(e,"start_at").Value<dayEnd&&RuntimeUtil.Date(e,"end_at").Value>dayStart);
             List<Dictionary<string,object>> rows=(sort.SelectedIndex==1?query.OrderBy(e=>S(e,"title")):query.OrderBy(e=>RuntimeUtil.Date(e,"start_at"))).ThenBy(e=>RuntimeUtil.Date(e,"end_at")).ToList();
-            dayHeader.Text=(viewMode=="week"?"未来 7 天":viewMode=="month"?selectedDate.ToString("yyyy年M月"):selectedDate.ToString("yyyy年M月d日 dddd",CultureInfo.GetCultureInfo("zh-CN")))+" · "+rows.Count+" 项日程";
-            selectedId="";
+            dayHeader.Text=selectedDate.ToString("yyyy年M月d日 dddd",CultureInfo.GetCultureInfo("zh-CN"))+" · "+rows.Count+" 项日程";
+            footerSummary.Text="当前日期："+selectedDate.ToString("yyyy/M/d")+" · "+rows.Count+" 项日程";
+            updateFilters();renderCalendar();
             foreach(Dictionary<string,object> e in rows)
             {
                 bool caldav=S(e,"source")=="caldav";
                 Color stripe=caldav?DarkUi.Accent:Color.FromArgb(63,178,119);
-                Panel row=RoundedPanel(0,0,694,S(e,"location")==""?74:88,Color.FromArgb(252,254,255),Color.FromArgb(224,233,244),12);
+                Panel row=RoundedPanel(0,0,694,86,Color.FromArgb(252,254,255),Color.FromArgb(224,233,244),12);
                 row.Margin=new Padding(0,0,0,10);row.Tag=S(e,"id");row.Cursor=Cursors.Hand;
                 Panel mark=new Panel{Left=16,Top=16,Width=4,Height=row.Height-32,BackColor=stripe};DarkUi.Round(mark,2);row.Controls.Add(mark);
                 DateTimeOffset es=RuntimeUtil.Date(e,"start_at").Value,ee=RuntimeUtil.Date(e,"end_at").Value;
-                Label time=new Label{Text=B(e,"all_day")?"全天":es.ToString("HH:mm")+"\r\n"+ee.ToString("HH:mm"),Left=36,Top=14,Width=72,Height=48,BackColor=Color.Transparent,ForeColor=DarkUi.Text,Font=new System.Drawing.Font("Microsoft YaHei UI",10F,System.Drawing.FontStyle.Bold)};
-                Label name=new Label{Text=CleanTitle(S(e,"title")),Left=122,Top=14,Width=360,Height=24,BackColor=Color.Transparent,ForeColor=DarkUi.Text,Font=new System.Drawing.Font("Microsoft YaHei UI",11F,System.Drawing.FontStyle.Bold)};
-                Label loc=new Label{Text=S(e,"location")==""?"未设置地点":S(e,"location"),Left=122,Top=42,Width=330,Height=20,BackColor=Color.Transparent,ForeColor=DarkUi.Muted,Font=new System.Drawing.Font("Microsoft YaHei UI",9F)};
-                Label badge=new Label{Text=caldav?"CalDAV 日历":"本地日历",Left=470,Top=36,Width=96,Height=24,BackColor=caldav?Color.FromArgb(221,237,255):Color.FromArgb(218,246,231),ForeColor=caldav?DarkUi.Accent:Color.FromArgb(35,145,89),TextAlign=ContentAlignment.MiddleCenter,Font=new System.Drawing.Font("Microsoft YaHei UI",9F)};
+                Label time=new Label{Text=B(e,"all_day")?"全天":es.ToString("HH:mm")+" - "+ee.ToString("HH:mm"),Left=36,Top=30,Width=118,Height=24,BackColor=Color.Transparent,ForeColor=DarkUi.Text,Font=new System.Drawing.Font("Microsoft YaHei UI",10F,System.Drawing.FontStyle.Bold)};
+                Label name=new Label{Text=CleanTitle(S(e,"title")),Left=172,Top=16,Width=310,Height=24,BackColor=Color.Transparent,ForeColor=DarkUi.Text,Font=new System.Drawing.Font("Microsoft YaHei UI",11F,System.Drawing.FontStyle.Bold)};
+                Label loc=new Label{Text=S(e,"location")==""?"未设置地点":S(e,"location"),Left=172,Top=43,Width=310,Height=20,BackColor=Color.Transparent,ForeColor=DarkUi.Muted,Font=new System.Drawing.Font("Microsoft YaHei UI",9F)};
+                Label badge=new Label{Text=caldav?"CalDAV 日历":"本地日历",Left=172,Top=60,Width=96,Height=22,BackColor=caldav?Color.FromArgb(221,237,255):Color.FromArgb(218,246,231),ForeColor=caldav?DarkUi.Accent:Color.FromArgb(35,145,89),TextAlign=ContentAlignment.MiddleCenter,Font=new System.Drawing.Font("Microsoft YaHei UI",9F)};
                 DarkUi.Round(badge,8);
                 Button editRow=DarkUi.Button("",610,24,42,DialogResult.None);editRow.Font=new System.Drawing.Font("Segoe Fluent Icons",10F);editRow.Tag=S(e,"id");
                 row.Controls.AddRange(new Control[]{time,name,loc,badge,editRow});
-                EventHandler select=delegate(object sender,EventArgs args){selectedId=Convert.ToString(row.Tag);hint.Text="已选择 1 项";hint.ForeColor=DarkUi.Muted;foreach(Control c in list.Controls)c.BackColor=Color.FromArgb(252,254,255);row.BackColor=Color.FromArgb(235,246,255);};
-                row.Click+=select;time.Click+=select;name.Click+=select;loc.Click+=select;badge.Click+=select;
-                editRow.Click+=delegate{selectedId=Convert.ToString(((Control)editRow).Tag);edit.PerformClick();};
+                EventHandler editEvent=delegate(object sender,EventArgs args){Dictionary<string,object> ev=FindEvent(cache,state,Convert.ToString(((Control)editRow).Tag));if(ev!=null&&EditInteractive(ev,state,cache)){Save(StatePath,state);Save(CachePath,cache);reload();}};
+                row.DoubleClick+=editEvent;editRow.Click+=editEvent;
                 list.Controls.Add(row);
             }
             if(rows.Count==0){Panel empty=RoundedPanel(0,0,694,86,Color.FromArgb(252,254,255),Color.FromArgb(224,233,244),14);empty.Controls.Add(new Label{Text="这一天没有日程安排",Left=230,Top=30,Width=240,Height=24,TextAlign=ContentAlignment.MiddleCenter,BackColor=Color.Transparent,ForeColor=DarkUi.Muted,Font=new System.Drawing.Font("Microsoft YaHei UI",10F)});list.Controls.Add(empty);}
-            hint.Text="已选择 0 项";
         };
-        Action editSelected = delegate {
-            if(selectedId==""){hint.Text="请先选中一条日程。";hint.ForeColor=DarkUi.Danger;return;}
-            Dictionary<string,object> ev=FindEvent(cache,state,selectedId);
-            if(ev==null){hint.Text="这条日程已经不存在。";hint.ForeColor=DarkUi.Danger;reload();return;}
-            hint.ForeColor=DarkUi.Muted;
-            if(EditInteractive(ev,state,cache)){Save(StatePath,state);Save(CachePath,cache);reload();}
-        };
-        Action<string> setView=delegate(string mode){viewMode=mode;tabList.BackColor=mode=="list"?DarkUi.AccentFill:DarkUi.Panel;tabList.ForeColor=mode=="list"?Color.White:DarkUi.Text;tabWeek.BackColor=mode=="week"?DarkUi.AccentFill:DarkUi.Panel;tabWeek.ForeColor=mode=="week"?Color.White:DarkUi.Text;tabMonth.BackColor=mode=="month"?DarkUi.AccentFill:DarkUi.Panel;tabMonth.ForeColor=mode=="month"?Color.White:DarkUi.Text;reload();};
-        showAll.CheckedChanged += delegate { if(syncingFilters)return;syncingFilters=true;showLocal.Checked=showAll.Checked;showCalDav.Checked=showAll.Checked;syncingFilters=false;reload(); };
-        showLocal.CheckedChanged += delegate { if(syncingFilters)return;syncingFilters=true;showAll.Checked=showLocal.Checked&&showCalDav.Checked;syncingFilters=false;reload(); };
-        showCalDav.CheckedChanged += delegate { if(syncingFilters)return;syncingFilters=true;showAll.Checked=showLocal.Checked&&showCalDav.Checked;syncingFilters=false;reload(); };
-        showPast.CheckedChanged += delegate { reload(); };
+        prevMonth.Click += delegate { selectedDate=selectedDate.AddMonths(-1); reload(); };
+        nextMonth.Click += delegate { selectedDate=selectedDate.AddMonths(1); reload(); };
+        todayButton.Click += delegate { selectedDate=DateTime.Now.Date; reload(); };
+        allFilter.Click += delegate { showLocal=true;showCalDav=true;reload(); };
+        localFilter.Click += delegate { showLocal=!showLocal;if(!showLocal&&!showCalDav)showCalDav=true;reload(); };
+        caldavFilter.Click += delegate { showCalDav=!showCalDav;if(!showLocal&&!showCalDav)showLocal=true;reload(); };
         search.TextChanged += delegate { reload(); };
         timeFilter.SelectedIndexChanged += delegate { reload(); };
         sort.SelectedIndexChanged += delegate { reload(); };
-        tabList.Click += delegate { setView("list"); };
-        tabWeek.Click += delegate { setView("week"); };
-        tabMonth.Click += delegate { setView("month"); };
-        edit.Click += delegate { editSelected(); };
         add.Click += delegate { if(EditInteractive(null,state,cache)){Save(StatePath,state);Save(CachePath,cache);reload();} };
+        sync.Click += delegate { sync.Enabled=false;sync.Text=" 同步中";sync.Refresh();Sync(cache,state,ref managerRefreshTodo);Save(StatePath,state);Save(CachePath,cache);sync.Enabled=true;sync.Text=" 刷新同步";reload(); };
         settings.Click += delegate { Settings(state,cache,ref managerRefreshTodo); Save(StatePath,state); Save(CachePath,cache); reload(); };
         settingsLeft.Click += delegate { settings.PerformClick(); };
         close.Click += delegate { f.Close(); }; f.CancelButton = close;
