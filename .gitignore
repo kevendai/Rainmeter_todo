@@ -7,6 +7,8 @@ backups/*
 *.pdb
 *.build.exe
 visual-check/
+.release-cache/
+release-build/
 PaperCache/
 RefreshFrames/
 *.refresh-guard

@@ -13,6 +13,11 @@ using RainmeterBackend;
 
 internal static class TodoApp
 {
+#if NO_PAPER_FEATURES
+    private static readonly bool PaperFeaturesEnabled = false;
+#else
+    private static readonly bool PaperFeaturesEnabled = true;
+#endif
     private static string ResourceDir = AppDomain.CurrentDomain.BaseDirectory.TrimEnd(Path.DirectorySeparatorChar);
     private static string StatePath { get { return Path.Combine(ResourceDir, "tasks.json"); } }
     private static string IncludePath { get { return Path.Combine(ResourceDir, "Generated.inc"); } }
@@ -50,7 +55,7 @@ internal static class TodoApp
                 {
                     case "Startup":
                         bool guarded = ConsumeGuard();
-                        SyncArxiv(state, false, "");
+                        if (PaperFeaturesEnabled) SyncArxiv(state, false, "");
                         Save(state);
                         refresh |= Render(state) && !guarded;
                         break;
@@ -60,11 +65,13 @@ internal static class TodoApp
                     case "Toggle": Toggle(state, id, ref refresh); break;
                     case "Open": Open(state, id, ref refresh); break;
                     case "ClearArxiv":
+                        if (!PaperFeaturesEnabled) { Meta(state)["status"] = "此版本未包含论文功能"; Commit(state); refresh = true; break; }
                         Tasks(state).RemoveAll(t => S(t, "source") == "arxiv");
                         Meta(state)["last_arxiv_sync_date"] = "";
                         Meta(state)["status"] = "已清除论文待办";
                         Commit(state); refresh = true; break;
                     case "SyncArxiv":
+                        if (!PaperFeaturesEnabled) { Meta(state)["status"] = "此版本未包含论文功能"; Commit(state); refresh = true; break; }
                         SyncArxiv(state, force, ""); Commit(state); refresh = true; break;
                 }
                 if (refresh) Refresh();
@@ -136,6 +143,11 @@ internal static class TodoApp
 
     private static int SettingsInteractive()
     {
+        if (!PaperFeaturesEnabled)
+        {
+            DarkUi.Error("此版本未包含论文翻译设置。");
+            return 0;
+        }
         try { ShowSettings(); return 0; }
         catch (Exception ex) { DarkUi.Error("设置失败：" + ex.Message); return 1; }
     }
@@ -439,7 +451,9 @@ internal static class TodoApp
 
     private static IEnumerable<string> CommonLabels(Dictionary<string, object> task)
     {
-        string[] defaults = { "论文", "考试", "功能", "修复", "日程", "已读", "自动归档" };
+        string[] defaults = PaperFeaturesEnabled
+            ? new[] { "论文", "考试", "功能", "修复", "日程", "已读", "自动归档" }
+            : new[] { "考试", "功能", "修复", "日程" };
         return defaults.Concat(task == null ? Enumerable.Empty<string>() : Labels(task)).Where(x => !String.IsNullOrWhiteSpace(x)).Distinct();
     }
 
