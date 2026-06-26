@@ -14,7 +14,7 @@ using RainmeterBackend;
 
 internal static class TodoApp
 {
-    private const string AppVersion = "1.0.2";
+    private const string AppVersion = "1.0.3";
     private const string GitHubRepoApi = "https://api.github.com/repos/kevendai/Rainmeter_todo";
 #if NO_PAPER_FEATURES
     private static readonly bool PaperFeaturesEnabled = false;
@@ -989,8 +989,7 @@ if ($WaitForProcessId -gt 0) {
         bool managerChanged = false;
         Form f = DarkUi.Form("全部任务", 1120, 760); DarkUi.Heading(f, "全部任务", "管理你的所有待办事项，支持批量操作");
         Button close = DarkUi.Button("×", 1054, 22, 36, DialogResult.Cancel); close.Height = 34; f.Controls.Add(close);
-        TextBox search = SearchField(f, 560, 38, 330);
-        Button searchButton = DarkUi.Button("筛选", 904, 38, 84, DialogResult.None); f.Controls.Add(searchButton);
+        TextBox search = SearchField(f, 610, 38, 378);
         int filter = 0;
         CheckBox onlyOpen = new CheckBox { Left = 944, Top = 128, Width = 130, Height = 24, Text = "只看未完成", ForeColor = DarkUi.Text, BackColor = Color.Transparent, Font = new Font("Microsoft YaHei UI", 9F) };
         f.Controls.Add(onlyOpen);
@@ -1078,10 +1077,8 @@ if ($WaitForProcessId -gt 0) {
         doneTab.Click += delegate { filter = 4; reload(false); };
         search.TextChanged += delegate { reload(false); };
         onlyOpen.CheckedChanged += delegate { reload(false); };
-        searchButton.Click += delegate { reload(false); };
         search.Parent.BringToFront();
         search.BringToFront();
-        searchButton.BringToFront();
         close.BringToFront();
         reload(false);
         edit.Click += delegate { if (selectedId == "") { selectionHint.Text="请先选中一项需要修改的任务。"; selectionHint.ForeColor=DarkUi.Danger; return; } bool changed=false; Edit(state, selectedId, ref changed); managerChanged |= changed; selectionHint.ForeColor=DarkUi.Muted; if (changed) reload(true); };
