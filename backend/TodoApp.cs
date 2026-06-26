@@ -363,13 +363,14 @@ internal static class TodoApp
         Panel labelPanel = LabelSelector("标签", x, 400, w, CommonLabels(task), selectedLabels);
         f.Controls.Add(labelPanel);
 
-        f.Controls.Add(DarkUi.Label("备注", x, 546, w));
-        Panel noteSurface = new Panel { Left = x, Top = 568, Width = w, Height = 144, BackColor = DarkUi.Panel };
+        f.Controls.Add(DarkUi.Label("备注", x, 500, w));
+        Panel noteSurface = new Panel { Left = x, Top = 522, Width = w, Height = 144, BackColor = DarkUi.Panel };
         DarkUi.Round(noteSurface, 10);
         TextBox note = new TextBox { Left = 14, Top = 14, Width = w - 28, Height = 116, Text = editing ? S(task, "note") : "", Multiline = true, ScrollBars = ScrollBars.Vertical, AcceptsReturn = true, BorderStyle = BorderStyle.None, BackColor = DarkUi.Panel, ForeColor = DarkUi.Text, Font = new Font("Microsoft YaHei UI", 10F) };
         noteSurface.Controls.Add(note); f.Controls.Add(noteSurface);
-        Label hint = DarkUi.Label("标题为必填项。截止时间不能早于开始时间。", x, 728, 340); f.Controls.Add(hint);
-        Button cancel = DarkUi.Button("取消", 210, 768, 112, DialogResult.Cancel), save = DarkUi.PrimaryButton(editing ? "+ 保存修改" : "+ 添加待办", 338, 768, 194, DialogResult.OK);
+        labelPanel.BringToFront();
+        Label hint = DarkUi.Label("标题为必填项。截止时间不能早于开始时间。", x, 682, 340); f.Controls.Add(hint);
+        Button cancel = DarkUi.Button("取消", 210, 722, 112, DialogResult.Cancel), save = DarkUi.PrimaryButton(editing ? "+ 保存修改" : "+ 添加待办", 338, 722, 194, DialogResult.OK);
         f.Controls.Add(cancel); f.Controls.Add(save); f.AcceptButton = save; f.CancelButton = cancel;
         while (f.ShowDialog() == DialogResult.OK)
         {
@@ -464,14 +465,23 @@ internal static class TodoApp
         Panel surface = new Panel { Left = 0, Top = 28, Width = width, Height = 56, BackColor = DarkUi.Panel };
         DarkUi.Round(surface, 10);
         panel.Controls.Add(surface);
-        Button expand = DarkUi.Button("\xE70D", width - 44, 12, 30, DialogResult.None);
+        Button expand = DarkUi.Button("展开", width - 66, 12, 52, DialogResult.None);
         expand.Height = 30;
+        expand.Font = new Font("Microsoft YaHei UI", 9F, FontStyle.Bold);
+        expand.UseVisualStyleBackColor = false;
+        expand.BackColor = DarkUi.AccentFill;
+        expand.ForeColor = Color.White;
+        expand.FlatAppearance.BorderColor = Color.FromArgb(31, 103, 201);
+        expand.FlatAppearance.MouseOverBackColor = Color.FromArgb(31, 116, 224);
+        expand.FlatAppearance.MouseDownBackColor = Color.FromArgb(22, 88, 176);
+        expand.MouseEnter += delegate { if (expand.Enabled) expand.BackColor = Color.FromArgb(31, 116, 224); };
+        expand.MouseLeave += delegate { expand.BackColor = DarkUi.AccentFill; };
         surface.Controls.Add(expand);
         int left = 12, top = 13;
         foreach (string label in options)
         {
             int buttonWidth = Math.Max(58, Math.Min(104, TextRenderer.MeasureText(label, new Font("Microsoft YaHei UI", 9F)).Width + 28));
-            if (left + buttonWidth > width - 56) { left = 12; top += 32; }
+            if (left + buttonWidth > width - 76) { left = 12; top += 32; }
             Button button = DarkUi.Button(label, left, top, buttonWidth, DialogResult.None);
             button.Height = 28;
             button.Tag = label;
@@ -499,7 +509,10 @@ internal static class TodoApp
             expanded = !expanded;
             surface.Height = expanded ? 94 : 56;
             panel.Height = expanded ? 126 : 86;
-            expand.Text = expanded ? "\xE70E" : "\xE70D";
+            expand.Text = expanded ? "收起" : "展开";
+            expand.BackColor = DarkUi.AccentFill;
+            expand.ForeColor = Color.White;
+            if (expanded) panel.BringToFront();
             foreach (Control control in surface.Controls)
             {
                 Button chip = control as Button;
