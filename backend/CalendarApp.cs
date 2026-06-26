@@ -167,6 +167,26 @@ internal static class CalendarApp
         if (list.Items.Count == 0) list.Items.Add(new KeyValuePair<Dictionary<string,object>,string>(null, "还没有周期自动转入规则"));
     }
 
+    private static void StyleRuleList(ListBox list)
+    {
+        list.Font = new System.Drawing.Font("Microsoft YaHei UI", 10F);
+        list.DrawMode = DrawMode.OwnerDrawFixed;
+        list.IntegralHeight = false;
+        list.ItemHeight = Math.Max(32, list.Font.Height + 14);
+        list.DrawItem += delegate(object sender, DrawItemEventArgs e) {
+            if (e.Index < 0) return;
+            ListBox source = (ListBox)sender;
+            bool selected = (e.State & DrawItemState.Selected) == DrawItemState.Selected;
+            Color back = selected ? Color.FromArgb(11, 128, 214) : source.BackColor;
+            Color fore = selected ? Color.White : source.ForeColor;
+            using (SolidBrush background = new SolidBrush(back)) e.Graphics.FillRectangle(background, e.Bounds);
+            string text = source.GetItemText(source.Items[e.Index]);
+            Rectangle textBounds = new Rectangle(e.Bounds.Left + 4, e.Bounds.Top, e.Bounds.Width - 8, e.Bounds.Height);
+            TextRenderer.DrawText(e.Graphics, text, source.Font, textBounds, fore, TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis | TextFormatFlags.NoPrefix);
+            e.DrawFocusRectangle();
+        };
+    }
+
     private static void StyleTab(TabControl tabs)
     {
         tabs.Appearance = TabAppearance.FlatButtons;
@@ -358,7 +378,8 @@ internal static class CalendarApp
         TextBox password = AddCredentialField(accountPage, "lock", "密码", 174, S(credentials, "Password"), true, out reveal);
         if (reveal != null) reveal.Click += delegate { password.UseSystemPasswordChar = !password.UseSystemPasswordChar; reveal.Tag = password.UseSystemPasswordChar ? "eye-off" : "eye"; reveal.Invalidate(); };
 
-        ListBox list = new ListBox { Left = 34, Top = 28, Width = 588, Height = 176, BackColor = Color.FromArgb(252, 254, 255), ForeColor = DarkUi.Text, DisplayMember = "Value", BorderStyle = BorderStyle.None, Font = new System.Drawing.Font("Microsoft YaHei UI", 10F), ItemHeight = 30 };
+        ListBox list = new ListBox { Left = 34, Top = 28, Width = 588, Height = 176, BackColor = Color.FromArgb(252, 254, 255), ForeColor = DarkUi.Text, DisplayMember = "Value", BorderStyle = BorderStyle.None };
+        StyleRuleList(list);
         DarkUi.Round(list, 12);
         FillRules(list, state);
         rulePage.Controls.Add(list);
@@ -413,7 +434,8 @@ internal static class CalendarApp
         {
             Form f = DarkUi.Form("周期自动转入规则", 620, 500);
             DarkUi.Heading(f, "周期自动转入规则", "停止规则只影响未来周期，已经生成的待办保持不变。");
-            ListBox list = new ListBox { Left = 24, Top = 96, Width = 572, Height = 292, BackColor = DarkUi.Surface, ForeColor = DarkUi.Text, DisplayMember = "Value", BorderStyle = BorderStyle.FixedSingle, Font = new System.Drawing.Font("Microsoft YaHei UI", 10F), ItemHeight = 30 };
+            ListBox list = new ListBox { Left = 24, Top = 96, Width = 572, Height = 292, BackColor = DarkUi.Surface, ForeColor = DarkUi.Text, DisplayMember = "Value", BorderStyle = BorderStyle.FixedSingle };
+            StyleRuleList(list);
             DarkUi.Round(list, 10);
             foreach (Dictionary<string,object> rule in Rules(state)) list.Items.Add(new KeyValuePair<Dictionary<string,object>,string>(rule, S(rule, "title") == "" ? "周期日程" : S(rule, "title")));
             if (list.Items.Count == 0) list.Items.Add(new KeyValuePair<Dictionary<string,object>,string>(null, "还没有周期自动转入规则"));
