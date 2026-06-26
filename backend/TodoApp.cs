@@ -635,24 +635,26 @@ internal static class TodoApp
         UpdateInfo info = new UpdateInfo { Tag = tag, IsNewer = newer };
         if (!newer) return info;
 
-        string raw = GitHubGet(GitHubRepoApi + "/releases/tags/" + Uri.EscapeDataString(tag));
-        Dictionary<string, object> release = JsonUtil.Object(JsonUtil.Deserialize(raw));
-        string expectedPrefix = "rainmeter-desktop-widgets-" + AppFlavor + "-";
-        foreach (object item in JsonUtil.Array(JsonUtil.Get(release, "assets")))
-        {
-            Dictionary<string, object> asset = JsonUtil.Object(item);
-            string name = S(asset, "name");
-            string url = S(asset, "browser_download_url");
-            if (name.StartsWith(expectedPrefix, StringComparison.OrdinalIgnoreCase) && name.EndsWith(".zip", StringComparison.OrdinalIgnoreCase) && url != "")
-            {
-                info.AssetName = name;
-                info.AssetUrl = url;
-                break;
-            }
-        }
-        if (String.IsNullOrEmpty(info.AssetUrl)) throw new Exception("最新 release 中没有 " + AppFlavor + " 版本的 zip 包");
-
+        info.AssetName = "rainmeter-desktop-widgets-" + AppFlavor + "-" + latestVersion + ".zip";
+        info.AssetUrl = "https://raw.githubusercontent.com/kevendai/Rainmeter_todo/" + Uri.EscapeDataString(tag) + "/releases/" + Uri.EscapeDataString(tag) + "/" + Uri.EscapeDataString(info.AssetName);
+        EnsureRemotePackageExists(info.AssetUrl);
         return info;
+    }
+
+    private static void EnsureRemotePackageExists(string url)
+    {
+        HttpWebRequest request = (HttpWebRequest)WebRequest.Create(url);
+        request.Method = "HEAD";
+        request.Timeout = 10000;
+        request.ReadWriteTimeout = 10000;
+        request.UserAgent = "RainmeterDesktopWidgets/" + AppVersion;
+        try { using (request.GetResponse()) { } }
+        catch (WebException ex)
+        {
+            HttpWebResponse response = ex.Response as HttpWebResponse;
+            if (response != null && response.StatusCode == HttpStatusCode.NotFound) throw new Exception("最新标签下没有对应的 " + AppFlavor + " 版本 zip 包");
+            throw;
+        }
     }
 
     private static void DownloadAndStartUpdate(UpdateInfo info)

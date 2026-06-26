@@ -6,7 +6,7 @@
 - 论文设置窗口尺寸收回到 `620x560`，交互方式与日程设置的分页按钮保持一致，避免同步凭据和翻译凭据挤在同一个长表单中。
 - 论文同步凭据继续保存到 `paper-sync.secret`，标题翻译凭据继续保存到 `translation.secret`，不改变现有 DPAPI 加密和运行时读取逻辑。
 - 设置窗口新增 `关于` 页，显示当前版本号和 Full/Lite 版本类型，并提供 `检查更新`。
-- 检查更新会读取 GitHub tags 判断最新版本，并从对应 release 资产中按当前版本类型下载 `rainmeter-desktop-widgets-full-*.zip` 或 `rainmeter-desktop-widgets-lite-*.zip` 到用户 Downloads 目录。
+- 检查更新会读取 GitHub tags 判断最新版本，并从仓库对应 `releases/v*` 目录中按当前版本类型下载 `rainmeter-desktop-widgets-full-*.zip` 或 `rainmeter-desktop-widgets-lite-*.zip` 到用户 Downloads 目录。
 - 检查更新检测到新版本时会先询问是否更新；确认后才下载新版本包、自动解压并运行包内 `Install-Skins.ps1` 部署到当前 Rainmeter 安装目录。安装脚本部署后会自动重启 Rainmeter 并重新激活 Todo/Calendar 皮肤。
 - Todo 磁贴设置按钮的提示文案从“翻译设置”改为“待办设置”，和当前设置窗口包含的内容保持一致。
 
