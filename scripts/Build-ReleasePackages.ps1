@@ -1,5 +1,5 @@
 param(
-    [string]$Version = '1.0.1',
+    [string]$Version = '1.0.2',
     [string]$OutputRoot = (Join-Path (Split-Path $PSScriptRoot -Parent) 'release-build'),
     [string]$RainmeterInstallerUrl = 'https://github.com/rainmeter/rainmeter/releases/download/v4.5.26.3894/Rainmeter-4.5.26.exe'
 )
@@ -28,6 +28,7 @@ function Copy-Tree {
     param([string]$Source, [string]$Destination)
     $excludedNames = @(
         'translation.secret',
+        'paper-sync.secret',
         'caldav.secret',
         'tasks.json',
         'calendar-cache.json',
@@ -53,6 +54,7 @@ function Remove-ReleaseSecrets {
     param([string]$Root)
     $names = @(
         'translation.secret',
+        'paper-sync.secret',
         'caldav.secret',
         'tasks.json',
         'calendar-cache.json',
@@ -82,7 +84,8 @@ function New-InstallScript {
 $content = @'
 param(
     [string]$RainmeterRoot,
-    [switch]$Activate
+    [switch]$Activate,
+    [int]$WaitForProcessId = 0
 )
 
 $ErrorActionPreference = 'Stop'
@@ -99,6 +102,9 @@ $rainmeterExe = Join-Path $RainmeterRoot 'Rainmeter.exe'
 if (-not (Test-Path -LiteralPath $rainmeterExe)) {
     throw "Rainmeter.exe not found in '$RainmeterRoot'. 请确认输入的是包含 Rainmeter.exe 的便携安装目录。"
 }
+if ($WaitForProcessId -gt 0) {
+    try { Wait-Process -Id $WaitForProcessId -Timeout 30 -ErrorAction SilentlyContinue } catch {}
+}
 
 foreach ($skin in @('Todo', 'Calendar')) {
     $source = Join-Path $sourceSkins $skin
@@ -106,7 +112,7 @@ foreach ($skin in @('Todo', 'Calendar')) {
     New-Item -ItemType Directory -Path $target -Force | Out-Null
 
     $preserved = @{}
-    foreach ($name in @('tasks.json','Generated.inc','calendar-cache.json','calendar-state.json','caldav.secret','translation.secret')) {
+    foreach ($name in @('tasks.json','Generated.inc','calendar-cache.json','calendar-state.json','caldav.secret','translation.secret','paper-sync.secret')) {
         $path = Join-Path $target ('@Resources\' + $name)
         if (Test-Path -LiteralPath $path) { $preserved[$name] = [IO.File]::ReadAllBytes($path) }
     }
@@ -120,6 +126,17 @@ foreach ($skin in @('Todo', 'Calendar')) {
     }
 }
 
+$running = @(Get-Process -Name Rainmeter -ErrorAction SilentlyContinue | Where-Object { $_.Path -eq $rainmeterExe })
+if ($running.Count -gt 0) {
+    & $rainmeterExe '!Quit'
+    Start-Sleep -Milliseconds 1200
+    $remaining = @(Get-Process -Name Rainmeter -ErrorAction SilentlyContinue | Where-Object { $_.Path -eq $rainmeterExe })
+    foreach ($process in $remaining) {
+        try { $process.Kill(); $process.WaitForExit(3000) } catch {}
+    }
+}
+Start-Process -FilePath $rainmeterExe | Out-Null
+Start-Sleep -Milliseconds 1200
 & $rainmeterExe '!RefreshApp'
 if ($Activate) {
     Start-Sleep -Milliseconds 800
@@ -158,7 +175,6 @@ function New-Package {
         $todoIni = Join-Path $todoRoot 'Todo.ini'
         $ini = [IO.File]::ReadAllText($todoIni, [Text.UTF8Encoding]::new($false))
         $ini = $ini -replace '(?m)^Information=.*$', 'Information=Editable todo board without paper feed integration.'
-        $ini = $ini -replace '(?m)^LeftMouseUpAction=\["#@#TodoHost\.exe" "Settings"\]$', 'Hidden=1'
         $ini = $ini -replace '(?m)^LeftMouseUpAction=\["#@#TodoHost\.exe" "SyncArxiv" "Force"\]$', 'Hidden=1'
         $ini = $ini -replace '(?m)^MouseOverAction=\[!SetOption Sync FontColor.*$', 'Hidden=1'
         $ini = $ini -replace '(?m)^MouseLeaveAction=\[!SetOption Sync FontColor.*$', 'Hidden=1'
@@ -191,7 +207,7 @@ function New-Package {
         version = $Version
         rainmeter = '4.5.26.3894'
         paper_features = -not $NoPaperFeatures
-        excludes = @('translation.secret','caldav.secret','tasks.json','calendar-cache.json','calendar-state.json')
+        excludes = @('translation.secret','paper-sync.secret','caldav.secret','tasks.json','calendar-cache.json','calendar-state.json')
     } | ConvertTo-Json -Depth 4
     Set-Content -LiteralPath (Join-Path $packageRoot 'manifest.json') -Value $manifest -Encoding UTF8
 

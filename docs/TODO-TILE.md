@@ -8,7 +8,7 @@
 - `↶`：恢复为待办。
 - `✎`：修改任务内容和时间限制。
 - `×`：确认后删除。
-- `↻`：手动检查 daily_arxiv 前五篇。
+- `↻`：手动检查论文同步服务前五篇。
 - 点击任务文字：打开网页、文件、文件夹或应用。
 
 新增和修改待办时可以填写备注，并通过圆角标签按钮增删通用标签。备注和标签只保存在任务数据中，不显示在桌面磁贴及悬浮提示中。
@@ -33,11 +33,11 @@
 
 ## arXiv 自动逻辑
 
-Rainmeter 启动或皮肤加载时，仅在本地时间 08:00–20:00 检查。如果待办中没有论文，则读取 `daily_arxiv` 当日评分 JSON，按摘要分数降序、标题分数降序取前五篇。当日不会重复自动添加，arXiv ID 也会全局去重。
+Rainmeter 启动或皮肤加载时，仅在本地时间 08:00–20:00 检查。如果待办中没有论文，则直接通过网页同步服务读取当日评分 JSON，按摘要分数降序、标题分数降序取前五篇。当日不会重复自动添加，arXiv ID 也会全局去重。
 
-论文导入时直接把任务标题保存为 `(摘要分数) 翻译后标题`，备注保存论文英文原标题和 arXiv ID，点击后打开对应的 arXiv HTML 页面。任务数据不再保存 `abstract_score`、`translated_title` 或 `arxiv_id` 专用字段。如果本地没有当日 JSON，后端会按原 `daily_arxiv_tools.py` 的 File Browser 配置尝试下载，不会把账号或密码复制到本项目。
+论文导入时直接把任务标题保存为 `(摘要分数) 翻译后标题`，备注保存论文英文原标题和 arXiv ID，点击后打开对应的 arXiv HTML 页面。任务数据不再保存 `abstract_score`、`translated_title` 或 `arxiv_id` 专用字段。网页同步地址、账号和密码保存在 Todo 自己的 `paper-sync.secret`，不再依赖 `E:\Programmes\skills\daily_arxiv` 或其 `setting.yaml`。
 
-Rainmeter 自行下载的论文 JSON 放在 `Todo/@Resources/PaperCache/`，仅保留 14 天。清理只匹配 `*_papers.json`，不会删除 `daily_arxiv` 项目自己的历史数据。
+Rainmeter 自行下载的论文 JSON 放在 `Todo/@Resources/PaperCache/`，仅保留 14 天。清理只匹配 `*_papers.json`。
 
 ## 论文标题翻译
 

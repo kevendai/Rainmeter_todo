@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Drawing;
 using System.Globalization;
 using System.IO;
@@ -13,18 +14,23 @@ using RainmeterBackend;
 
 internal static class TodoApp
 {
+    private const string AppVersion = "1.0.2";
+    private const string GitHubRepoApi = "https://api.github.com/repos/kevendai/Rainmeter_todo";
 #if NO_PAPER_FEATURES
     private static readonly bool PaperFeaturesEnabled = false;
+    private const string AppFlavor = "lite";
+    private const string AppFlavorName = "Lite 精简版";
 #else
     private static readonly bool PaperFeaturesEnabled = true;
+    private const string AppFlavor = "full";
+    private const string AppFlavorName = "Full 完整版";
 #endif
     private static string ResourceDir = AppDomain.CurrentDomain.BaseDirectory.TrimEnd(Path.DirectorySeparatorChar);
     private static string StatePath { get { return Path.Combine(ResourceDir, "tasks.json"); } }
     private static string IncludePath { get { return Path.Combine(ResourceDir, "Generated.inc"); } }
     private static string GuardPath { get { return Path.Combine(ResourceDir, ".refresh-guard"); } }
-    private const string DailyRoot = @"E:\Programmes\skills\daily_arxiv";
-    private static string DailySetting { get { return Path.Combine(DailyRoot, "scripts", "setting.yaml"); } }
     private static string PaperCache { get { return Path.Combine(ResourceDir, "PaperCache"); } }
+    private static string PaperSyncSecret { get { return Path.Combine(ResourceDir, "paper-sync.secret"); } }
     private static string TranslationSecret { get { return Path.Combine(ResourceDir, "translation.secret"); } }
 
     [STAThread]
@@ -143,11 +149,6 @@ internal static class TodoApp
 
     private static int SettingsInteractive()
     {
-        if (!PaperFeaturesEnabled)
-        {
-            DarkUi.Error("此版本未包含论文翻译设置。");
-            return 0;
-        }
         try { ShowSettings(); return 0; }
         catch (Exception ex) { DarkUi.Error("设置失败：" + ex.Message); return 1; }
     }
@@ -387,26 +388,141 @@ internal static class TodoApp
     private static void ShowSettings()
     {
         Dictionary<string, object> credentials = ReadTranslationCredentials();
-        Form f = DarkUi.Form("待办设置", 620, 430);
-        DarkUi.Heading(f, "待办设置", "配置 arXiv 论文标题翻译使用的腾讯云凭据。");
+        Dictionary<string, object> paperSync = ReadPaperSyncSettings();
+        Form f = DarkUi.Form(PaperFeaturesEnabled ? "论文设置" : "关于", 620, 560);
+        DarkUi.Heading(f, PaperFeaturesEnabled ? "论文设置" : "关于", PaperFeaturesEnabled ? "分别配置论文网页同步、arXiv 标题翻译和版本更新。" : "查看当前版本并检查可用更新。");
         Button close = DarkUi.Button("×", 560, 22, 34, DialogResult.Cancel);
         close.Height = 34;
         f.Controls.Add(close);
 
         int x = 28, w = 564;
-        TextBox secretId = Field(f, "Tencent Cloud SecretId", x, 112, w, S(credentials, "SecretId"));
-        TextBox secretKey = PasswordField(f, "Tencent Cloud SecretKey", x, 206, w, S(credentials, "SecretKey"));
-        Label hint = DarkUi.Label("凭据会保存到 translation.secret，并使用 Windows DPAPI CurrentUser 加密。", x, 304, w);
-        Label status = DarkUi.Label(File.Exists(TranslationSecret) ? "已保存翻译凭据" : "尚未配置翻译凭据", x, 332, 300);
+        int tabCount = PaperFeaturesEnabled ? 3 : 1;
+        Panel tabRail = new Panel { Left = x, Top = 98, Width = 140 * tabCount, Height = 42, BackColor = Color.FromArgb(235, 245, 253) };
+        DarkUi.Round(tabRail, 11);
+        Button tabPaper = DarkUi.Button("论文同步", 0, 0, 140, DialogResult.None);
+        Button tabTranslation = DarkUi.Button("标题翻译", 140, 0, 140, DialogResult.None);
+        Button tabAbout = DarkUi.Button("关于", PaperFeaturesEnabled ? 280 : 0, 0, 140, DialogResult.None);
+        tabPaper.Height = tabTranslation.Height = tabAbout.Height = 42;
+        tabPaper.Font = tabTranslation.Font = tabAbout.Font = new Font("Microsoft YaHei UI", 10F, FontStyle.Bold);
+        if (PaperFeaturesEnabled) tabRail.Controls.AddRange(new Control[] { tabPaper, tabTranslation, tabAbout });
+        else tabRail.Controls.Add(tabAbout);
+        f.Controls.Add(tabRail);
+
+        Panel paperPage = new Panel { Left = x, Top = 154, Width = w, Height = 280, BackColor = Color.Transparent };
+        Panel translationPage = new Panel { Left = x, Top = 154, Width = w, Height = 280, BackColor = Color.Transparent, Visible = false };
+        Panel aboutPage = new Panel { Left = x, Top = 154, Width = w, Height = 280, BackColor = Color.Transparent, Visible = false };
+        f.Controls.AddRange(new Control[] { paperPage, translationPage, aboutPage });
+
+        TextBox paperBaseUrl = Field(paperPage, "论文网页同步地址", 0, 0, w, S(paperSync, "BaseUrl"));
+        TextBox paperAccount = Field(paperPage, "论文网页同步账号", 0, 94, w, S(paperSync, "Account"));
+        TextBox paperPassword = PasswordField(paperPage, "论文网页同步密码", 0, 188, w, S(paperSync, "Password"));
+        Label paperHint = DarkUi.Label("论文网页同步配置会保存到 paper-sync.secret，并使用 Windows DPAPI CurrentUser 加密。", x, 448, w);
+        Label paperStatus = DarkUi.Label(File.Exists(PaperSyncSecret) ? "已保存论文网页同步配置" : "尚未配置论文网页同步", x, 476, 250);
+        paperStatus.Font = new Font("Microsoft YaHei UI", 10F, FontStyle.Bold);
+        paperStatus.ForeColor = File.Exists(PaperSyncSecret) ? Color.FromArgb(63, 178, 119) : DarkUi.Muted;
+
+        Panel paperActions = new Panel { Left = 270, Top = 474, Width = 322, Height = 42, BackColor = Color.Transparent };
+        Button paperClear = DarkUi.DangerButton("清除同步", 0, 0, 94, DialogResult.None);
+        Button paperTest = DarkUi.Button("测试登录", 106, 0, 94, DialogResult.None);
+        Button paperSave = DarkUi.PrimaryButton("保存同步", 212, 0, 110, DialogResult.None);
+        paperClear.Height = paperTest.Height = paperSave.Height = 38;
+        paperClear.Font = paperTest.Font = paperSave.Font = new Font("Microsoft YaHei UI", 9F, FontStyle.Bold);
+        paperActions.Controls.AddRange(new Control[] { paperClear, paperTest, paperSave });
+
+        TextBox secretId = Field(translationPage, "Tencent Cloud SecretId", 0, 0, w, S(credentials, "SecretId"));
+        TextBox secretKey = PasswordField(translationPage, "Tencent Cloud SecretKey", 0, 94, w, S(credentials, "SecretKey"));
+        Label hint = DarkUi.Label("翻译凭据会保存到 translation.secret，并使用 Windows DPAPI CurrentUser 加密。", x, 448, w);
+        Label status = DarkUi.Label(File.Exists(TranslationSecret) ? "已保存翻译凭据" : "尚未配置翻译凭据", x, 476, 250);
         status.Font = new Font("Microsoft YaHei UI", 10F, FontStyle.Bold);
         status.ForeColor = File.Exists(TranslationSecret) ? Color.FromArgb(63, 178, 119) : DarkUi.Muted;
 
-        Button clear = DarkUi.DangerButton("清除设置", 270, 360, 94, DialogResult.None);
-        Button test = DarkUi.Button("测试连接", 376, 360, 94, DialogResult.None);
-        Button save = DarkUi.PrimaryButton("保存凭据", 482, 360, 110, DialogResult.None);
+        Panel translationActions = new Panel { Left = 270, Top = 474, Width = 322, Height = 42, BackColor = Color.Transparent, Visible = false };
+        Button clear = DarkUi.DangerButton("清除设置", 0, 0, 94, DialogResult.None);
+        Button test = DarkUi.Button("测试连接", 106, 0, 94, DialogResult.None);
+        Button save = DarkUi.PrimaryButton("保存凭据", 212, 0, 110, DialogResult.None);
         clear.Height = test.Height = save.Height = 38;
         clear.Font = test.Font = save.Font = new Font("Microsoft YaHei UI", 9F, FontStyle.Bold);
-        f.Controls.AddRange(new Control[] { hint, status, clear, test, save });
+        translationActions.Controls.AddRange(new Control[] { clear, test, save });
+        f.Controls.AddRange(new Control[] { paperHint, paperStatus, paperActions, hint, status, translationActions });
+
+        Label aboutTitle = new Label { Text = "Rainmeter Desktop Widgets", Left = 0, Top = 4, Width = w, Height = 32, ForeColor = DarkUi.Text, BackColor = Color.Transparent, Font = new Font("Microsoft YaHei UI", 14F, FontStyle.Bold) };
+        Label aboutVersion = new Label { Text = "当前版本：" + AppVersion + "（" + AppFlavorName + "）", Left = 0, Top = 54, Width = w, Height = 24, ForeColor = DarkUi.Text, BackColor = Color.Transparent, Font = new Font("Microsoft YaHei UI", 10F, FontStyle.Bold) };
+        Label aboutRepo = DarkUi.Label("更新源：github.com/kevendai/Rainmeter_todo", 0, 88, w);
+        Label aboutHint = DarkUi.Label("检查更新会下载与当前版本类型相同的 zip 包。", 0, 120, w);
+        aboutPage.Controls.AddRange(new Control[] { aboutTitle, aboutVersion, aboutRepo, aboutHint });
+
+        Label updateStatus = DarkUi.Label("尚未检查更新", x, 476, 300);
+        updateStatus.Font = new Font("Microsoft YaHei UI", 10F, FontStyle.Bold);
+        updateStatus.ForeColor = DarkUi.Muted;
+        Panel aboutActions = new Panel { Left = 412, Top = 474, Width = 180, Height = 42, BackColor = Color.Transparent, Visible = false };
+        Button checkUpdate = DarkUi.PrimaryButton("检查更新", 70, 0, 110, DialogResult.None);
+        checkUpdate.Height = 38;
+        checkUpdate.Font = new Font("Microsoft YaHei UI", 9F, FontStyle.Bold);
+        aboutActions.Controls.Add(checkUpdate);
+        f.Controls.AddRange(new Control[] { updateStatus, aboutActions });
+
+        Action<int> showPage = delegate(int page) {
+            bool paper = page == 0 && PaperFeaturesEnabled;
+            bool translation = page == 1 && PaperFeaturesEnabled;
+            bool about = page == 2 || !PaperFeaturesEnabled;
+            paperPage.Visible = paper;
+            translationPage.Visible = translation;
+            aboutPage.Visible = about;
+            paperHint.Visible = paper;
+            paperStatus.Visible = paper;
+            paperActions.Visible = paper;
+            hint.Visible = translation;
+            status.Visible = translation;
+            translationActions.Visible = translation;
+            updateStatus.Visible = about;
+            aboutActions.Visible = about;
+            PaintTabButton(tabPaper, paper);
+            PaintTabButton(tabTranslation, translation);
+            PaintTabButton(tabAbout, about);
+        };
+        tabPaper.Click += delegate { showPage(0); };
+        tabTranslation.Click += delegate { showPage(1); };
+        tabAbout.Click += delegate { showPage(2); };
+        showPage(PaperFeaturesEnabled ? 0 : 2);
+
+        paperTest.Click += delegate {
+            try
+            {
+                paperStatus.Text = "正在测试...";
+                paperStatus.ForeColor = DarkUi.Muted;
+                paperStatus.Refresh();
+                TestPaperSyncConnection(paperBaseUrl.Text, paperAccount.Text, paperPassword.Text);
+                paperStatus.Text = "连接成功";
+                paperStatus.ForeColor = Color.FromArgb(63, 178, 119);
+            }
+            catch (Exception ex)
+            {
+                DarkUi.Error("连接失败：" + ex.Message);
+                paperStatus.Text = "连接失败";
+                paperStatus.ForeColor = DarkUi.Danger;
+            }
+        };
+        paperSave.Click += delegate {
+            try
+            {
+                SavePaperSyncSettings(paperBaseUrl.Text, paperAccount.Text, paperPassword.Text);
+                paperStatus.Text = "已保存论文网页同步配置";
+                paperStatus.ForeColor = Color.FromArgb(63, 178, 119);
+            }
+            catch (Exception ex) { DarkUi.Error(ex.Message); }
+        };
+        paperClear.Click += delegate {
+            try
+            {
+                if (File.Exists(PaperSyncSecret)) File.Delete(PaperSyncSecret);
+                paperBaseUrl.Text = "";
+                paperAccount.Text = "";
+                paperPassword.Text = "";
+                paperStatus.Text = "尚未配置论文网页同步";
+                paperStatus.ForeColor = DarkUi.Muted;
+            }
+            catch (Exception ex) { DarkUi.Error(ex.Message); }
+        };
 
         test.Click += delegate {
             try
@@ -446,8 +562,208 @@ internal static class TodoApp
             catch (Exception ex) { DarkUi.Error(ex.Message); }
         };
 
+        checkUpdate.Click += delegate {
+            try
+            {
+                checkUpdate.Enabled = false;
+                updateStatus.Text = "正在检查 GitHub...";
+                updateStatus.ForeColor = DarkUi.Muted;
+                updateStatus.Refresh();
+                Application.DoEvents();
+                UpdateInfo info = CheckUpdate();
+                if (info.IsNewer)
+                {
+                    updateStatus.Text = "检测到新版本：" + info.Tag;
+                    updateStatus.ForeColor = DarkUi.Accent;
+                    DialogResult update = MessageBox.Show(
+                        "检测到新版本 " + info.Tag + "（" + AppFlavorName + "）。\r\n\r\n是否现在下载并自动部署？部署脚本会重启 Rainmeter。",
+                        "检查更新",
+                        MessageBoxButtons.YesNo,
+                        MessageBoxIcon.Question);
+                    if (update != DialogResult.Yes)
+                    {
+                        updateStatus.Text = "已取消更新：" + info.Tag;
+                        updateStatus.ForeColor = DarkUi.Muted;
+                        return;
+                    }
+                    updateStatus.Text = "正在下载 " + info.Tag + "...";
+                    updateStatus.ForeColor = DarkUi.Muted;
+                    updateStatus.Refresh();
+                    Application.DoEvents();
+                    DownloadAndStartUpdate(info);
+                    updateStatus.Text = "已下载并开始部署 " + info.Tag + "（" + AppFlavor + "）";
+                    updateStatus.ForeColor = Color.FromArgb(63, 178, 119);
+                    MessageBox.Show("已下载最新安装包并开始自动部署。\r\n部署脚本会重启 Rainmeter。\r\n\r\n" + info.DownloadPath, "检查更新", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    f.BeginInvoke(new Action(f.Close));
+                }
+                else
+                {
+                    updateStatus.Text = CompareVersions(NormalizeVersion(info.Tag), AppVersion) == 0 ? "已是最新版本：" + info.Tag : "当前版本高于最新标签：" + info.Tag;
+                    updateStatus.ForeColor = Color.FromArgb(63, 178, 119);
+                }
+            }
+            catch (Exception ex)
+            {
+                updateStatus.Text = "检查更新失败";
+                updateStatus.ForeColor = DarkUi.Danger;
+                DarkUi.Error("检查更新失败：" + ex.Message);
+            }
+            finally { checkUpdate.Enabled = true; }
+        };
+
         f.CancelButton = close;
         f.ShowDialog();
+    }
+
+    private sealed class UpdateInfo
+    {
+        public string Tag;
+        public string AssetName;
+        public string AssetUrl;
+        public string DownloadPath;
+        public bool IsNewer;
+    }
+
+    private static UpdateInfo CheckUpdate()
+    {
+        ServicePointManager.SecurityProtocol |= (SecurityProtocolType)3072;
+        string tagsRaw = GitHubGet(GitHubRepoApi + "/tags");
+        string tag = LatestTag(tagsRaw);
+        if (tag == "") throw new Exception("GitHub 上没有可用版本标签");
+        string latestVersion = NormalizeVersion(tag);
+        bool newer = CompareVersions(latestVersion, AppVersion) > 0;
+        UpdateInfo info = new UpdateInfo { Tag = tag, IsNewer = newer };
+        if (!newer) return info;
+
+        string raw = GitHubGet(GitHubRepoApi + "/releases/tags/" + Uri.EscapeDataString(tag));
+        Dictionary<string, object> release = JsonUtil.Object(JsonUtil.Deserialize(raw));
+        string expectedPrefix = "rainmeter-desktop-widgets-" + AppFlavor + "-";
+        foreach (object item in JsonUtil.Array(JsonUtil.Get(release, "assets")))
+        {
+            Dictionary<string, object> asset = JsonUtil.Object(item);
+            string name = S(asset, "name");
+            string url = S(asset, "browser_download_url");
+            if (name.StartsWith(expectedPrefix, StringComparison.OrdinalIgnoreCase) && name.EndsWith(".zip", StringComparison.OrdinalIgnoreCase) && url != "")
+            {
+                info.AssetName = name;
+                info.AssetUrl = url;
+                break;
+            }
+        }
+        if (String.IsNullOrEmpty(info.AssetUrl)) throw new Exception("最新 release 中没有 " + AppFlavor + " 版本的 zip 包");
+
+        return info;
+    }
+
+    private static void DownloadAndStartUpdate(UpdateInfo info)
+    {
+        if (info == null || String.IsNullOrEmpty(info.AssetUrl) || String.IsNullOrEmpty(info.AssetName)) throw new Exception("更新包信息不完整");
+        string downloads = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "Downloads");
+        Directory.CreateDirectory(downloads);
+        string target = Path.Combine(downloads, info.AssetName);
+        using (WebClient client = new WebClient())
+        {
+            client.Headers[HttpRequestHeader.UserAgent] = "RainmeterDesktopWidgets/" + AppVersion;
+            client.DownloadFile(info.AssetUrl, target);
+        }
+        info.DownloadPath = target;
+        StartUpdateInstaller(target);
+    }
+
+    private static void StartUpdateInstaller(string zipPath)
+    {
+        string rainmeterRoot = CurrentRainmeterRoot();
+        string script = Path.Combine(Path.GetTempPath(), "RainmeterDesktopWidgetsUpdate-" + Guid.NewGuid().ToString("N") + ".ps1");
+        string content =
+@"param(
+    [string]$ZipPath,
+    [string]$RainmeterRoot,
+    [int]$WaitForProcessId
+)
+$ErrorActionPreference = 'Stop'
+$extractRoot = Join-Path $env:TEMP ('RainmeterDesktopWidgetsUpdate-' + [guid]::NewGuid().ToString('N'))
+New-Item -ItemType Directory -Path $extractRoot -Force | Out-Null
+Expand-Archive -LiteralPath $ZipPath -DestinationPath $extractRoot -Force
+$installer = Get-ChildItem -LiteralPath $extractRoot -Recurse -Filter 'Install-Skins.ps1' -File | Select-Object -First 1
+if ($null -eq $installer) { throw 'Install-Skins.ps1 not found in update package.' }
+if ($WaitForProcessId -gt 0) {
+    try { Wait-Process -Id $WaitForProcessId -Timeout 30 -ErrorAction SilentlyContinue } catch {}
+}
+& powershell -ExecutionPolicy Bypass -File $installer.FullName -RainmeterRoot $RainmeterRoot -Activate
+";
+        File.WriteAllText(script, content, new UTF8Encoding(false));
+        string arguments = "-NoProfile -ExecutionPolicy Bypass -File " + QuoteArg(script)
+            + " -ZipPath " + QuoteArg(zipPath)
+            + " -RainmeterRoot " + QuoteArg(rainmeterRoot)
+            + " -WaitForProcessId " + Process.GetCurrentProcess().Id.ToString(CultureInfo.InvariantCulture);
+        Process.Start(new ProcessStartInfo("powershell.exe", arguments) { UseShellExecute = false, CreateNoWindow = false });
+    }
+
+    private static string CurrentRainmeterRoot()
+    {
+        DirectoryInfo resources = new DirectoryInfo(ResourceDir);
+        DirectoryInfo todo = resources.Parent;
+        DirectoryInfo skins = todo == null ? null : todo.Parent;
+        DirectoryInfo root = skins == null ? null : skins.Parent;
+        if (root == null || !File.Exists(Path.Combine(root.FullName, "Rainmeter.exe"))) throw new Exception("无法定位当前 Rainmeter 安装目录");
+        return root.FullName;
+    }
+
+    private static string QuoteArg(string value)
+    {
+        return "\"" + (value ?? "").Replace("\"", "\\\"") + "\"";
+    }
+
+    private static string LatestTag(string raw)
+    {
+        string best = "";
+        foreach (object item in JsonUtil.Array(JsonUtil.Deserialize(raw)))
+        {
+            Dictionary<string, object> tag = JsonUtil.Object(item);
+            string name = S(tag, "name");
+            if (!Regex.IsMatch(NormalizeVersion(name), @"^\d")) continue;
+            if (best == "" || CompareVersions(name, best) > 0) best = name;
+        }
+        return best;
+    }
+
+    private static string GitHubGet(string url)
+    {
+        HttpWebRequest request = (HttpWebRequest)WebRequest.Create(url);
+        request.Method = "GET";
+        request.Timeout = 10000;
+        request.ReadWriteTimeout = 10000;
+        request.UserAgent = "RainmeterDesktopWidgets/" + AppVersion;
+        request.Accept = "application/vnd.github+json";
+        using (HttpWebResponse response = (HttpWebResponse)request.GetResponse())
+        using (StreamReader reader = new StreamReader(response.GetResponseStream(), Encoding.UTF8))
+            return reader.ReadToEnd();
+    }
+
+    private static string NormalizeVersion(string value)
+    {
+        value = (value ?? "").Trim();
+        if (value.StartsWith("v", StringComparison.OrdinalIgnoreCase)) value = value.Substring(1);
+        Match match = Regex.Match(value, @"\d+(?:\.\d+){0,3}");
+        return match.Success ? match.Value : value;
+    }
+
+    private static int CompareVersions(string left, string right)
+    {
+        int[] a = VersionParts(left), b = VersionParts(right);
+        for (int i = 0; i < Math.Max(a.Length, b.Length); i++)
+        {
+            int av = i < a.Length ? a[i] : 0, bv = i < b.Length ? b[i] : 0;
+            if (av != bv) return av.CompareTo(bv);
+        }
+        return 0;
+    }
+
+    private static int[] VersionParts(string value)
+    {
+        return NormalizeVersion(value).Split(new[] { '.' }, StringSplitOptions.RemoveEmptyEntries)
+            .Select(part => { int parsed; return Int32.TryParse(part, NumberStyles.Integer, CultureInfo.InvariantCulture, out parsed) ? parsed : 0; })
+            .ToArray();
     }
 
     private static IEnumerable<string> CommonLabels(Dictionary<string, object> task)
@@ -530,7 +846,7 @@ internal static class TodoApp
         button.FlatAppearance.BorderSize = 0;
     }
 
-    private static TextBox Field(Form f, string label, int x, int y, int width, string text)
+    private static TextBox Field(Control f, string label, int x, int y, int width, string text)
     {
         f.Controls.Add(DarkUi.Label(label, x, y, width));
         Panel surface = new Panel { Left = x, Top = y + 26, Width = width, Height = 50, BackColor = DarkUi.Panel };
@@ -541,7 +857,7 @@ internal static class TodoApp
         return box;
     }
 
-    private static TextBox PasswordField(Form f, string label, int x, int y, int width, string text)
+    private static TextBox PasswordField(Control f, string label, int x, int y, int width, string text)
     {
         f.Controls.Add(DarkUi.Label(label, x, y, width));
         Panel surface = new Panel { Left = x, Top = y + 26, Width = width, Height = 50, BackColor = DarkUi.Panel };
@@ -828,12 +1144,6 @@ internal static class TodoApp
         return true;
     }
 
-    private static string Yaml(string key)
-    {
-        if (!File.Exists(DailySetting)) return "";
-        foreach (string raw in File.ReadAllLines(DailySetting, Encoding.UTF8)) { string line = raw.Trim(); if (line.StartsWith(key + ":")) return line.Substring(line.IndexOf(':') + 1).Trim().Trim('\'', '"'); }
-        return "";
-    }
     private static string Http(string method, string url, string body, IDictionary<string,string> headers, int timeout)
     {
         HttpWebRequest request = (HttpWebRequest)WebRequest.Create(url); request.Method = method; request.Timeout = timeout; request.ReadWriteTimeout = timeout; request.KeepAlive = false; request.ContentType = "application/json; charset=utf-8";
@@ -841,10 +1151,43 @@ internal static class TodoApp
         if (body != null) { byte[] bytes = Encoding.UTF8.GetBytes(body); request.ContentLength = bytes.Length; using(Stream s=request.GetRequestStream()) s.Write(bytes,0,bytes.Length); }
         using (HttpWebResponse response=(HttpWebResponse)request.GetResponse()) using(StreamReader reader=new StreamReader(response.GetResponseStream(),Encoding.UTF8)) return reader.ReadToEnd();
     }
+    private static Dictionary<string, object> ReadPaperSyncSettings()
+    {
+        if (!File.Exists(PaperSyncSecret)) return new Dictionary<string, object>();
+        try { return JsonUtil.ReadDpapiJson(PaperSyncSecret); }
+        catch { return new Dictionary<string, object>(); }
+    }
+
+    private static void SavePaperSyncSettings(string baseUrl, string account, string password)
+    {
+        baseUrl = (baseUrl ?? "").Trim();
+        account = (account ?? "").Trim();
+        password = (password ?? "").Trim();
+        if (baseUrl == "" || account == "") throw new Exception("论文网页同步地址和账号不能为空");
+        if (!baseUrl.StartsWith("http://", StringComparison.OrdinalIgnoreCase) && !baseUrl.StartsWith("https://", StringComparison.OrdinalIgnoreCase)) baseUrl = "http://" + baseUrl;
+        JsonUtil.WriteDpapiJson(PaperSyncSecret, new Dictionary<string, object>{{"BaseUrl", baseUrl.TrimEnd('/')}, {"Account", account}, {"Password", password}});
+    }
+
+    private static string LoginPaperSync(string baseUrl, string account, string password)
+    {
+        string login = JsonUtil.Serialize(new Dictionary<string, object>{{"username", account}, {"password", password}});
+        return Http("POST", baseUrl.TrimEnd('/') + "/api/login", login, null, 5000).Trim().Trim('"');
+    }
+
+    private static void TestPaperSyncConnection(string baseUrl, string account, string password)
+    {
+        baseUrl = (baseUrl ?? "").Trim();
+        account = (account ?? "").Trim();
+        password = (password ?? "").Trim();
+        if (baseUrl == "" || account == "") throw new Exception("论文网页同步地址和账号不能为空");
+        if (!baseUrl.StartsWith("http://", StringComparison.OrdinalIgnoreCase) && !baseUrl.StartsWith("https://", StringComparison.OrdinalIgnoreCase)) baseUrl = "http://" + baseUrl;
+        LoginPaperSync(baseUrl, account, password);
+    }
+
     private static bool DownloadPaper(string path, out string error)
     {
-        error = ""; string baseUrl=Yaml("save_url"), user=Yaml("save_url_account"), password=Yaml("save_url_password"); if(baseUrl==""||user=="")return false; if(!baseUrl.StartsWith("http"))baseUrl="http://"+baseUrl;
-        try { string login=JsonUtil.Serialize(new Dictionary<string,object>{{"username",user},{"password",password}}); string token=Http("POST",baseUrl.TrimEnd('/')+"/api/login",login,null,5000).Trim().Trim('"'); string raw=Http("GET",baseUrl.TrimEnd('/')+"/api/resources/paper/"+Path.GetFileName(path),null,new Dictionary<string,string>{{"X-Auth",token}},5000); Dictionary<string,object> result=JsonUtil.Object(JsonUtil.Deserialize(raw)); object content=JsonUtil.Get(result,"content"); File.WriteAllText(path,content is string?(string)content:JsonUtil.Serialize(content??result),RuntimeUtil.Utf8NoBom); return true; }
+        error = ""; Dictionary<string, object> paperSync = ReadPaperSyncSettings(); string baseUrl = S(paperSync, "BaseUrl"), user = S(paperSync, "Account"), password = S(paperSync, "Password"); if(baseUrl==""||user==""){error="尚未配置论文网页同步";return false;} if(!baseUrl.StartsWith("http", StringComparison.OrdinalIgnoreCase))baseUrl="http://"+baseUrl;
+        try { string token=LoginPaperSync(baseUrl,user,password); string raw=Http("GET",baseUrl.TrimEnd('/')+"/api/resources/paper/"+Path.GetFileName(path),null,new Dictionary<string,string>{{"X-Auth",token}},5000); Dictionary<string,object> result=JsonUtil.Object(JsonUtil.Deserialize(raw)); object content=JsonUtil.Get(result,"content"); File.WriteAllText(path,content is string?(string)content:JsonUtil.Serialize(content??result),RuntimeUtil.Utf8NoBom); return true; }
         catch(WebException ex){HttpWebResponse response=ex.Response as HttpWebResponse;error=response!=null&&response.StatusCode==HttpStatusCode.NotFound?"远端暂无该日期的已评分论文数据":"论文数据服务连接失败";return false;} catch{error="论文数据服务连接失败";return false;}
     }
 
@@ -911,8 +1254,7 @@ internal static class TodoApp
         if(!manual&&(now.TimeOfDay<TimeSpan.FromHours(8)||now.TimeOfDay>TimeSpan.FromHours(20))){Meta(state)["status"]="arXiv 自动检查时段为 08:00-20:00";return;}
         if(Tasks(state).Any(t=>!B(t,"completed")&&S(t,"source")=="arxiv")){Meta(state)["status"]="待办中已有论文，未重复添加";return;}
         if(!manual&&JsonUtil.String(Meta(state),"last_arxiv_sync_date","")==today){Meta(state)["status"]="今日 arXiv 已检查";return;}
-        if(!File.Exists(DailySetting)){Meta(state)["status"]="未找到 daily_arxiv 工具";return;}
-        string saveDir=Yaml("save_dir");if(saveDir=="")saveDir="scripts";if(!Path.IsPathRooted(saveDir))saveDir=Path.Combine(DailyRoot,saveDir);string name=today+"_papers.json",source=Path.Combine(saveDir,name),cache=Path.Combine(PaperCache,name),path=File.Exists(source)?source:cache,error="";if(!File.Exists(path))DownloadPaper(cache,out error);if(!File.Exists(path)){Meta(state)["status"]=error!=""?error:"暂无 "+today+" 已评分论文数据";return;}
+        string name=today+"_papers.json",path=Path.Combine(PaperCache,name),error="";if(!File.Exists(path))DownloadPaper(path,out error);if(!File.Exists(path)){Meta(state)["status"]=error!=""?error:"暂无 "+today+" 已评分论文数据";return;}
         object parsed;try{string json=File.ReadAllText(path,Encoding.UTF8);while(json.StartsWith("[][") )json=json.Substring(2);parsed=JsonUtil.Deserialize(json);}catch{Meta(state)["status"]="今日论文 JSON 无法读取";return;}
         List<Dictionary<string,object>> ranked=JsonUtil.Array(parsed).Select(JsonUtil.Object).Where(p=>JsonUtil.Get(JsonUtil.Object(JsonUtil.Get(p,"score")),"abstract")!=null).OrderByDescending(p=>Convert.ToDouble(JsonUtil.Get(JsonUtil.Object(JsonUtil.Get(p,"score")),"abstract"),CultureInfo.InvariantCulture)).ThenByDescending(p=>Convert.ToDouble(JsonUtil.Get(JsonUtil.Object(JsonUtil.Get(p,"score")),"title")??0,CultureInfo.InvariantCulture)).Take(5).ToList();if(ranked.Count==0){Meta(state)["status"]="今日还没有完成摘要评分的论文";return;}
         int added=0,translated=0;foreach(Dictionary<string,object> p in ranked){string arxiv=S(p,"arxiv_id"),target="https://arxiv.org/html/"+arxiv;if(Tasks(state).Any(t=>S(t,"target")==target))continue;string original=S(p,"title"),translatedTitle=Translate(original);if(translatedTitle!=null){translated++;Thread.Sleep(220);}Dictionary<string,object> score=JsonUtil.Object(JsonUtil.Get(p,"score"));EditorResult e=new EditorResult{Title="("+Convert.ToString(JsonUtil.Get(score,"abstract"),CultureInfo.InvariantCulture)+") "+(translatedTitle??original),Target=target,Note="论文原标题："+original+"\r\narXiv ID："+arxiv,Labels=new List<string>{"论文"},Available="",Due=""};Tasks(state).Add(NewTask(e,"arxiv"));added++;}

@@ -2,7 +2,7 @@
 
 本项目发布两个 zip：
 
-- `rainmeter-desktop-widgets-full-*.zip`：完整功能版，包含待办、今日日程、CalDAV 同步、日程转待办、论文推送和论文标题翻译入口。发布包不会包含 `translation.secret`、`caldav.secret`、`tasks.json` 或任何缓存。
+- `rainmeter-desktop-widgets-full-*.zip`：完整功能版，包含待办、今日日程、CalDAV 同步、日程转待办、论文推送和论文标题翻译入口。发布包不会包含 `translation.secret`、`paper-sync.secret`、`caldav.secret`、`tasks.json` 或任何缓存。
 - `rainmeter-desktop-widgets-lite-*.zip`：精简版，包含待办和今日日程，关闭论文推送与论文翻译。CalDAV 日程功能仍可使用。
 
 ## 空白机器部署
@@ -18,14 +18,15 @@
    ```
 
 6. 脚本会询问 Rainmeter 安装目录。输入第 3 步选择的目录，例如包含 `Rainmeter.exe` 的那个文件夹。
-7. 启动或刷新 Rainmeter 后，应看到 `Todo` 和 `Calendar` 两个皮肤。
+7. 脚本部署皮肤后会自动重启 Rainmeter；启动后应看到 `Todo` 和 `Calendar` 两个皮肤。
 
 ## 凭据与数据
 
 - CalDAV 凭据通过 Calendar 设置窗口保存，密文位于目标 Rainmeter 目录的 `Skins\Todo\@Resources\caldav.secret`。
+- 完整功能版的论文同步凭据通过 Todo 设置窗口保存，密文位于 `Skins\Todo\@Resources\paper-sync.secret`。
 - 完整功能版的翻译凭据通过 Todo 设置窗口保存，密文位于 `Skins\Todo\@Resources\translation.secret`。
 - 这些 secret 使用 Windows DPAPI CurrentUser 加密，只能由创建它们的 Windows 用户解密。
-- 发布包不会覆盖已有的 `tasks.json`、`Generated.inc`、`calendar-cache.json` 或 `calendar-state.json`。
+- 发布包不会覆盖已有的 `tasks.json`、`Generated.inc`、`paper-sync.secret`、`calendar-cache.json` 或 `calendar-state.json`。
 
 ## 从源码重新打包
 
