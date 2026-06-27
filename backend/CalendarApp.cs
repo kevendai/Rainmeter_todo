@@ -307,13 +307,17 @@ internal static class CalendarApp
                 string currentKind = Convert.ToString(((Control)sender).Tag, CultureInfo.InvariantCulture);
                 if (currentKind == "calendar")
                 {
-                    DrawRound(e.Graphics, pen, 4, 7, w - 8, h - 11, 5);
-                    e.Graphics.DrawLine(pen, 10, 13, w - 10, 13);
-                    e.Graphics.FillRectangle(brush, 12, 3, 3, 8);
-                    e.Graphics.FillRectangle(brush, w - 15, 3, 3, 8);
-                    e.Graphics.FillRectangle(brush, 13, 20, 4, 4);
-                    e.Graphics.FillRectangle(brush, 22, 20, 4, 4);
-                    e.Graphics.FillRectangle(brush, 31, 20, 4, 4);
+                    DrawRound(e.Graphics, pen, 3, 5, w - 6, h - 8, 4);
+                    e.Graphics.DrawLine(pen, 6, 14, w - 6, 14);
+                    e.Graphics.FillRectangle(brush, 9, 1, 4, 10);
+                    e.Graphics.FillRectangle(brush, w - 13, 1, 4, 10);
+                    float cell = Math.Max(3F, size / 8F);
+                    e.Graphics.FillRectangle(brush, w * 0.25F, h * 0.53F, cell, cell);
+                    e.Graphics.FillRectangle(brush, w * 0.47F, h * 0.53F, cell, cell);
+                    e.Graphics.FillRectangle(brush, w * 0.69F, h * 0.53F, cell, cell);
+                    e.Graphics.FillRectangle(brush, w * 0.25F, h * 0.72F, cell, cell);
+                    e.Graphics.FillRectangle(brush, w * 0.47F, h * 0.72F, cell, cell);
+                    e.Graphics.FillRectangle(brush, w * 0.69F, h * 0.72F, cell, cell);
                 }
                 else if (currentKind == "globe")
                 {
@@ -521,10 +525,10 @@ internal static class CalendarApp
         DateTime selectedDate = DateTime.Now.Date;
         Action reload = null, renderCalendar = null;
         Form f = DarkUi.Form("日程管理", 1180, 760);
-        Panel headerIcon = RoundedPanel(30, 26, 42, 42, DarkUi.AccentFill, Color.FromArgb(92, 162, 246), 12);
-        headerIcon.Controls.Add(IconPanel("calendar", 7, 7, 28, Color.White));
-        Label title = new Label { Text = "日程管理", Left = 90, Top = 27, Width = 220, Height = 32, BackColor = Color.Transparent, ForeColor = DarkUi.Text, Font = new System.Drawing.Font("Microsoft YaHei UI", 18F, System.Drawing.FontStyle.Bold) };
-        Label subtitle = new Label { Text = "管理本地日历和 CalDAV 日历，删除入口在编辑窗口内。", Left = 92, Top = 62, Width = 520, Height = 22, BackColor = Color.Transparent, ForeColor = DarkUi.Muted, Font = new System.Drawing.Font("Microsoft YaHei UI", 9.5F) };
+        Panel headerIcon = RoundedPanel(30, 26, 42, 42, Color.FromArgb(238,245,252), Color.FromArgb(205,224,241), 12);
+        headerIcon.Controls.Add(IconPanel("calendar", 7, 7, 28, Color.FromArgb(18,150,219)));
+        Label title = new Label { Text = "日程管理", Left = 90, Top = 24, Width = 220, Height = 38, BackColor = Color.Transparent, ForeColor = DarkUi.Text, Font = new System.Drawing.Font("Microsoft YaHei UI", 18F, System.Drawing.FontStyle.Bold) };
+        Label subtitle = new Label { Text = "管理本地日历和 CalDAV 日历，删除入口在编辑窗口内。", Left = 92, Top = 70, Width = 520, Height = 22, BackColor = Color.Transparent, ForeColor = DarkUi.Muted, Font = new System.Drawing.Font("Microsoft YaHei UI", 9.5F) };
         Panel searchBox = RoundedPanel(760, 30, 300, 42, Color.FromArgb(252,254,255), Color.FromArgb(220,230,241), 13);
         Label searchIcon = new Label { Text = "\xE721", Left = 14, Top = 10, Width = 22, Height = 22, BackColor = Color.Transparent, ForeColor = DarkUi.Muted, Font = new System.Drawing.Font("Segoe Fluent Icons", 10F), TextAlign = ContentAlignment.MiddleCenter };
         TextBox search = new TextBox { Left = 44, Top = 10, Width = 238, Height = 22, BorderStyle = BorderStyle.None, BackColor = Color.FromArgb(252,254,255), ForeColor = DarkUi.Text, Font = new System.Drawing.Font("Microsoft YaHei UI", 10F) };
@@ -547,8 +551,7 @@ internal static class CalendarApp
         allFilter.Height = localFilter.Height = caldavFilter.Height = 28;
         allFilter.TextAlign = localFilter.TextAlign = caldavFilter.TextAlign = ContentAlignment.MiddleLeft;
         filters.Controls.AddRange(new Control[] { filterTitle, allFilter, localFilter, caldavFilter });
-        Button settingsLeft = DarkUi.Button("显示选项  ›", 20, 502, 288, DialogResult.None); settingsLeft.Height = 38;
-        left.Controls.Add(filters); left.Controls.Add(settingsLeft); f.Controls.Add(left);
+        left.Controls.Add(filters); f.Controls.Add(left);
 
         Panel main = RoundedPanel(382, 112, 760, 540, Color.FromArgb(248,252,255), Color.FromArgb(224,233,244), 18);
         Label dayHeader = new Label { Left = 22, Top = 24, Width = 430, Height = 30, BackColor = Color.Transparent, ForeColor = DarkUi.Text, Font = new System.Drawing.Font("Microsoft YaHei UI", 12F, System.Drawing.FontStyle.Bold) };
@@ -561,10 +564,18 @@ internal static class CalendarApp
 
         Panel footer = RoundedPanel(28, 674, 1114, 58, Color.FromArgb(248, 252, 255), Color.FromArgb(224, 233, 244), 16);
         Label footerSummary = DarkUi.Label("当前日期：" + selectedDate.ToString("yyyy/M/d") + " · 0 项日程", 22, 18, 460); footer.Controls.Add(footerSummary);
-        Button settings = DarkUi.Button(" 设置", 660, 10, 92, DialogResult.None);
-        Button sync = DarkUi.Button(" 刷新同步", 766, 10, 118, DialogResult.None);
-        Button add = DarkUi.PrimaryButton(" 新建日程", 978, 10, 112, DialogResult.None);
+        Button settings = DarkUi.Button(" 设置", 738, 10, 92, DialogResult.None);
+        Button sync = DarkUi.Button(" 刷新同步", 840, 10, 118, DialogResult.None);
+        Button add = DarkUi.PrimaryButton(" 新建日程", 968, 10, 122, DialogResult.None);
         settings.Font = sync.Font = add.Font = new System.Drawing.Font("Microsoft YaHei UI", 9F, System.Drawing.FontStyle.Bold);
+        Action<Button> paintFooterButton = delegate(Button b) {
+            b.BackColor = Color.FromArgb(235,245,253);
+            b.ForeColor = DarkUi.Accent;
+            b.FlatAppearance.MouseOverBackColor = Color.FromArgb(221,237,255);
+            b.FlatAppearance.MouseDownBackColor = Color.FromArgb(205,224,241);
+            b.FlatAppearance.BorderColor = Color.FromArgb(205,224,241);
+        };
+        paintFooterButton(settings); paintFooterButton(sync);
         footer.Controls.AddRange(new Control[] { settings, sync, add }); f.Controls.Add(footer);
 
         Func<Dictionary<string,object>,bool> isVisibleSource = delegate(Dictionary<string,object> e) { return (showLocal && S(e,"source")=="local") || (showCalDav && S(e,"source")=="caldav"); };
@@ -640,7 +651,7 @@ internal static class CalendarApp
                 Label time=new Label{Text=B(e,"all_day")?"全天":es.ToString("HH:mm")+" - "+ee.ToString("HH:mm"),Left=36,Top=30,Width=118,Height=24,BackColor=Color.Transparent,ForeColor=DarkUi.Text,Font=new System.Drawing.Font("Microsoft YaHei UI",10F,System.Drawing.FontStyle.Bold)};
                 Label name=new Label{Text=CleanTitle(S(e,"title")),Left=172,Top=16,Width=310,Height=24,BackColor=Color.Transparent,ForeColor=DarkUi.Text,Font=new System.Drawing.Font("Microsoft YaHei UI",11F,System.Drawing.FontStyle.Bold)};
                 Label loc=new Label{Text=S(e,"location")==""?"未设置地点":S(e,"location"),Left=172,Top=43,Width=310,Height=20,BackColor=Color.Transparent,ForeColor=DarkUi.Muted,Font=new System.Drawing.Font("Microsoft YaHei UI",9F)};
-                Label badge=new Label{Text=caldav?"CalDAV 日历":"本地日历",Left=172,Top=60,Width=96,Height=22,BackColor=caldav?Color.FromArgb(221,237,255):Color.FromArgb(218,246,231),ForeColor=caldav?DarkUi.Accent:Color.FromArgb(35,145,89),TextAlign=ContentAlignment.MiddleCenter,Font=new System.Drawing.Font("Microsoft YaHei UI",9F)};
+                Label badge=new Label{Text=caldav?"CalDAV 日历":"本地日历",Left=172,Top=60,Width=118,Height=22,BackColor=caldav?Color.FromArgb(221,237,255):Color.FromArgb(218,246,231),ForeColor=caldav?DarkUi.Accent:Color.FromArgb(35,145,89),TextAlign=ContentAlignment.MiddleCenter,Font=new System.Drawing.Font("Microsoft YaHei UI",9F)};
                 DarkUi.Round(badge,8);
                 Button editRow=DarkUi.Button("",610,24,42,DialogResult.None);editRow.Font=new System.Drawing.Font("Segoe Fluent Icons",10F);editRow.Tag=S(e,"id");
                 row.Controls.AddRange(new Control[]{time,name,loc,badge,editRow});
@@ -662,7 +673,6 @@ internal static class CalendarApp
         add.Click += delegate { if(EditInteractive(null,state,cache)){Save(StatePath,state);Save(CachePath,cache);reload();} };
         sync.Click += delegate { sync.Enabled=false;sync.Text=" 同步中";sync.Refresh();Sync(cache,state,ref managerRefreshTodo);Save(StatePath,state);Save(CachePath,cache);sync.Enabled=true;sync.Text=" 刷新同步";reload(); };
         settings.Click += delegate { Settings(state,cache,ref managerRefreshTodo); Save(StatePath,state); Save(CachePath,cache); reload(); };
-        settingsLeft.Click += delegate { settings.PerformClick(); };
         close.Click += delegate { f.Close(); }; f.CancelButton = close;
         reload();
         f.ShowDialog();
