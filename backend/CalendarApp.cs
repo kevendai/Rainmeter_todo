@@ -27,8 +27,9 @@ internal static class CalendarApp
     {
         Application.EnableVisualStyles(); Application.SetCompatibleTextRenderingDefault(false);
         string action=args.Length>0?args[0]:"Render",id=args.Length>1?args[1]:"";
+        bool softOpen=action=="Manage"||action=="Settings";
         using(Mutex mutex=new Mutex(false,@"Global\RainmeterCalendarState")){bool held=false;Dictionary<string,object> cache=null,state=null;try{
-            held=mutex.WaitOne(TimeSpan.FromSeconds(20));if(!held)return 4;cache=Load(CachePath,NewCache());state=Load(StatePath,NewState());Shape(cache,state);if(Reconcile(state))Save(StatePath,state);bool refresh=false,refreshTodo=false;
+            held=mutex.WaitOne(softOpen?TimeSpan.FromMilliseconds(300):TimeSpan.FromSeconds(20));if(!held&&!softOpen)return 4;cache=Load(CachePath,NewCache());state=Load(StatePath,NewState());Shape(cache,state);if(held&&Reconcile(state))Save(StatePath,state);bool refresh=false,refreshTodo=false;
             if(action=="Startup"||action=="Rollover"||action=="Sync"){
                 bool guarded=action=="Startup"&&ConsumeGuard();DateTimeOffset? last=RuntimeUtil.Date(cache,"fetched_at");bool need=action=="Sync"||!last.HasValue||(action=="Rollover"&&last.Value.Date!=DateTimeOffset.Now.Date)||(DateTimeOffset.Now-last.Value).TotalMinutes>=15;
                 if(need)Sync(cache,state,ref refreshTodo);refresh=Render(cache,state)&&(action!="Startup"||!guarded);if(action=="Sync")refresh=true;
@@ -37,8 +38,8 @@ internal static class CalendarApp
             else if(action=="New"){if(EditInteractive(null,state,cache)){Save(StatePath,state);Save(CachePath,cache);Render(cache,state);refresh=true;}}
             else if(action=="Edit"){Dictionary<string,object> ev=FindEvent(cache,state,id);if(ev!=null&&EditInteractive(ev,state,cache)){Save(StatePath,state);Save(CachePath,cache);Render(cache,state);refresh=true;}}
             else if(action=="Detail"||action=="Convert"){Dictionary<string,object> ev=FindEvent(cache,state,id);if(ev!=null){bool already=Conversions(state).Any(c=>S(c,"occurrence_key")==S(ev,"occurrence_key"));DialogResult detail=action=="Convert"?DialogResult.OK:ShowDetails(ev,already);if(detail==DialogResult.Yes){if(EditInteractive(ev,state,cache)){Save(StatePath,state);Save(CachePath,cache);Render(cache,state);refresh=true;}}else if(detail==DialogResult.OK){if(ConvertInteractive(ev,state,cache))refreshTodo=true;Save(StatePath,state);Save(CachePath,cache);Render(cache,state);refresh=true;}}}
-            else if(action=="Manage"){ManageEvents(state,cache,ref refreshTodo);Render(cache,state);refresh=true;}
-            else if(action=="Settings"){Settings(state,cache,ref refreshTodo);Render(cache,state);refresh=true;}
+            else if(action=="Manage"){if(held){mutex.ReleaseMutex();held=false;}if(ManageEvents(state,cache,ref refreshTodo)){Render(cache,state);refresh=true;}}
+            else if(action=="Settings"){if(held){mutex.ReleaseMutex();held=false;}Settings(state,cache,ref refreshTodo);Render(cache,state);refresh=true;}
             if(refreshTodo){string todoExe=Path.Combine(TodoDir,"TodoHost.exe");if(File.Exists(todoExe)){using(System.Diagnostics.Process p=System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(todoExe,"Render"){UseShellExecute=false,CreateNoWindow=true})){if(p!=null&&!p.WaitForExit(10000))try{p.Kill();}catch{}}}}
             if(refresh){MarkGuard();RuntimeUtil.Refresh("Calendar");if(refreshTodo)RuntimeUtil.Refresh("Todo");}else if(refreshTodo)RuntimeUtil.Refresh("Todo");return 0;
         }catch(Exception ex){if(cache!=null){cache["status"]="操作失败："+ex.Message;try{Save(CachePath,cache);Render(cache,state);RuntimeUtil.Refresh("Calendar");}catch{}}return 1;}finally{if(held)mutex.ReleaseMutex();}}
@@ -74,8 +75,9 @@ internal static class CalendarApp
     private static List<Dictionary<string,object>> ParseIcs(string text){string unfolded=Regex.Replace(text,"\r?\n[ \t]","");List<List<string>>blocks=new List<List<string>>();List<string>cur=null;foreach(string line in Regex.Split(unfolded,"\r?\n")){if(line=="BEGIN:VEVENT")cur=new List<string>();else if(line=="END:VEVENT"){if(cur!=null)blocks.Add(cur);cur=null;}else if(cur!=null)cur.Add(line);}List<Dictionary<string,object>>events=new List<Dictionary<string,object>>();foreach(List<string>b in blocks){IProp uid=Props(b,"UID").FirstOrDefault(),sp=Props(b,"DTSTART").FirstOrDefault();if(uid==null||sp==null)continue;IDate start=IcsDate(sp),end=IcsDate(Props(b,"DTEND").FirstOrDefault());DateTimeOffset evEnd=end!=null?end.Value:start.AllDay?start.Value.AddDays(1):start.Value.AddHours(1);if(!start.AllDay&&evEnd<=start.Value)evEnd=start.Value.AddHours(1);IProp rp=Props(b,"RECURRENCE-ID").FirstOrDefault();string recurrence=(rp==null?start.Value:IcsDate(rp).Value).ToUniversalTime().ToString("o"),key=IText(uid.Value)+"|"+recurrence;Func<string,string>one=n=>{IProp p=Props(b,n).FirstOrDefault();return p==null?"":IText(p.Value);};DateTimeOffset? reminder=Reminder(b,start.Value,evEnd);string link=one("X-RAINMETER-LINK");if(link=="")link=DisplayLink(one("URL"));Dictionary<string,object>e=new Dictionary<string,object>{{"id",RuntimeUtil.Sha256Hex(key).Substring(0,32)},{"occurrence_key",key},{"uid",IText(uid.Value)},{"recurrence_id",recurrence},{"title",one("SUMMARY")==""?"（无标题）":one("SUMMARY")},{"start_at",RuntimeUtil.Iso(start.Value)},{"end_at",RuntimeUtil.Iso(evEnd)},{"all_day",start.AllDay},{"url",link},{"location",one("LOCATION")},{"description",one("DESCRIPTION")},{"status",one("STATUS")},{"reminder_at",reminder.HasValue?RuntimeUtil.Iso(reminder.Value):""},{"reminder_count",Props(b,"TRIGGER").Count},{"recurring",rp!=null}};if(S(e,"status")!="CANCELLED")events.Add(e);}return events.GroupBy(e=>S(e,"occurrence_key")).Select(g=>g.First()).ToList();}
     private sealed class FetchResult{public CalendarInfo Calendar;public List<Dictionary<string,object>> Events;public int FailedWindows;}
     private static List<Dictionary<string,object>> FetchWindow(CalendarInfo cal,Dictionary<string,object>c,DateTimeOffset start,DateTimeOffset end){string a=start.ToUniversalTime().ToString("yyyyMMdd'T'HHmmss'Z'"),b=end.ToUniversalTime().ToString("yyyyMMdd'T'HHmmss'Z'");string body="<?xml version=\"1.0\" encoding=\"utf-8\"?><c:calendar-query xmlns:d=\"DAV:\" xmlns:c=\"urn:ietf:params:xml:ns:caldav\"><d:prop><d:getetag/><c:calendar-data><c:expand start=\""+a+"\" end=\""+b+"\"/></c:calendar-data></d:prop><c:filter><c:comp-filter name=\"VCALENDAR\"><c:comp-filter name=\"VEVENT\"><c:time-range start=\""+a+"\" end=\""+b+"\"/></c:comp-filter></c:comp-filter></c:filter></c:calendar-query>";DavResult report=Dav("REPORT",cal.Uri,c,body,1,6000);if(report.Status!=207)throw new Exception("日程查询失败：HTTP "+report.Status);XmlDocument d=Xml(report.Text);XmlNamespaceManager ns=Ns(d);List<Dictionary<string,object>>events=new List<Dictionary<string,object>>();foreach(XmlNode response in d.SelectNodes("//d:response",ns)){XmlNode data=response.SelectSingleNode(".//c:calendar-data",ns);if(data==null)continue;XmlNode href=response.SelectSingleNode("./d:href",ns),etag=response.SelectSingleNode(".//d:getetag",ns);foreach(Dictionary<string,object> e in ParseIcs(data.InnerText)){e["source"]="caldav";e["calendar"]="caldav";e["href"]=href==null?"":Resolve(S(c,"Server")==""?"https://davis.manao.dpdns.org":S(c,"Server"),href.InnerText);e["etag"]=etag==null?"":etag.InnerText;events.Add(e);}}return events;}
-    private static FetchResult Fetch(Dictionary<string,object>c,string cachedCalendarUrl){CalendarInfo cal;try{cal=Discover(c);}catch{if(cachedCalendarUrl=="")throw;cal=new CalendarInfo{Uri=cachedCalendarUrl,Name="Cached Calendar"};}DateTimeOffset now=DateTimeOffset.Now,start=new DateTimeOffset(now.Year,now.Month,now.Day,0,0,0,now.Offset);List<Dictionary<string,object>>events=new List<Dictionary<string,object>>();int failed=0;for(int day=0;day<21;day++){DateTimeOffset windowStart=start.AddDays(day);try{events.AddRange(FetchWindow(cal,c,windowStart,windowStart.AddDays(1)));}catch{failed++;}}if(events.Count==0&&failed>0)throw new Exception("日程查询超时");return new FetchResult{Calendar=cal,Events=events.GroupBy(e=>S(e,"occurrence_key")).Select(g=>g.First()).OrderBy(e=>RuntimeUtil.Date(e,"start_at")).ToList(),FailedWindows=failed};}
-    private static void Sync(Dictionary<string,object>cache,Dictionary<string,object>state,ref bool todo){try{if(!File.Exists(SecretPath)){cache["events"]=new List<object>();cache["calendar_url"]="";cache["fetched_at"]="";cache["status"]="CalDAV 未连接";Save(CachePath,cache);return;}Dictionary<string,object>c=JsonUtil.ReadDpapiJson(SecretPath);FetchResult r=Fetch(c,S(cache,"calendar_url"));cache["events"]=r.Events.Cast<object>().ToList();cache["calendar_url"]=r.Calendar.Uri;cache["fetched_at"]=RuntimeUtil.Iso(DateTimeOffset.Now);cache["status"]="已同步 "+r.Events.Count+" 项"+(r.FailedWindows>0?"（"+r.FailedWindows+" 天查询超时）":"");if(AutoConvert(cache,state))todo=true;Save(CachePath,cache);Save(StatePath,state);}catch(Exception ex){cache["status"]="同步失败："+ex.Message;Save(CachePath,cache);}}
+    private static FetchResult Fetch(Dictionary<string,object>c,string cachedCalendarUrl){DateTimeOffset now=DateTimeOffset.Now,start=new DateTimeOffset(now.Year,now.Month,now.Day,0,0,0,now.Offset),end=start.AddDays(21);CalendarInfo cal=String.IsNullOrEmpty(cachedCalendarUrl)?Discover(c):new CalendarInfo{Uri=cachedCalendarUrl,Name="Cached Calendar"};List<Dictionary<string,object>>events=new List<Dictionary<string,object>>();int failed=0;try{events.AddRange(FetchWindow(cal,c,start,end));}catch{failed++;if(!String.IsNullOrEmpty(cachedCalendarUrl)){cal=Discover(c);events.AddRange(FetchWindow(cal,c,start,end));failed=0;}else throw;}return new FetchResult{Calendar=cal,Events=events.GroupBy(e=>S(e,"occurrence_key")).Select(g=>g.First()).OrderBy(e=>RuntimeUtil.Date(e,"start_at")).ToList(),FailedWindows=failed};}
+    private static void Sync(Dictionary<string,object>cache,Dictionary<string,object>state,ref bool todo){try{if(!File.Exists(SecretPath)){cache["events"]=new List<object>();cache["calendar_url"]="";cache["fetched_at"]="";cache["status"]="CalDAV 未连接";Save(CachePath,cache);return;}Dictionary<string,object>c=JsonUtil.ReadDpapiJson(SecretPath);FetchResult r=Fetch(c,S(cache,"calendar_url"));cache["events"]=r.Events.Cast<object>().ToList();cache["calendar_url"]=r.Calendar.Uri;cache["fetched_at"]=RuntimeUtil.Iso(DateTimeOffset.Now);cache["status"]="已同步 "+r.Events.Count+" 项"+(r.FailedWindows>0?"（"+r.FailedWindows+" 次查询超时）":"");if(AutoConvert(cache,state))todo=true;Save(CachePath,cache);Save(StatePath,state);}catch(Exception ex){cache["status"]="同步失败："+ex.Message;Save(CachePath,cache);}}
+    private static void StartBackgroundSync(){try{System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(Application.ExecutablePath,"Sync"){UseShellExecute=false,CreateNoWindow=true});}catch{}}
 
     private static string CleanTitle(string t){return Regex.Replace(t??"",@"^\s*\[(?:待办|代办)\]\s*","").Trim();}
     private static bool IsLocalPath(string value){return Regex.IsMatch((value??"").Trim(),@"^(?:[A-Za-z]:[\\/]|\\\\)[^\r\n<>""|?*]+$");}
@@ -633,9 +635,9 @@ internal static class CalendarApp
         if (syncChangedTodo) refreshTodo = true;
     }
 
-    private static void ManageEvents(Dictionary<string,object> state, Dictionary<string,object> cache, ref bool refreshTodo)
+    private static bool ManageEvents(Dictionary<string,object> state, Dictionary<string,object> cache, ref bool refreshTodo)
     {
-        bool managerRefreshTodo = false;
+        bool managerRefreshTodo = false, changed = false;
         bool showLocal = true, showCalDav = true;
         DateTime selectedDate = DateTime.Now.Date;
         Action reload = null, renderCalendar = null;
@@ -790,7 +792,7 @@ internal static class CalendarApp
                 LightUi.Round(badge,8);
                 Button editRow=LightUi.Button("",610,24,42,DialogResult.None);editRow.Font=new System.Drawing.Font("Segoe Fluent Icons",10F);editRow.Tag=S(e,"id");
                 row.Controls.AddRange(new Control[]{time,name,loc,badge,editRow});
-                EventHandler editEvent=delegate(object sender,EventArgs args){Dictionary<string,object> ev=FindEvent(cache,state,Convert.ToString(((Control)editRow).Tag));if(ev!=null&&EditInteractive(ev,state,cache)){Save(StatePath,state);Save(CachePath,cache);reload();}};
+                EventHandler editEvent=delegate(object sender,EventArgs args){Dictionary<string,object> ev=FindEvent(cache,state,Convert.ToString(((Control)editRow).Tag));if(ev!=null&&EditInteractive(ev,state,cache)){Save(StatePath,state);Save(CachePath,cache);changed=true;reload();}};
                 row.DoubleClick+=editEvent;editRow.Click+=editEvent;
                 list.Controls.Add(row);
             }
@@ -805,13 +807,14 @@ internal static class CalendarApp
         todayTab.Click += delegate { timeMode=0;reload(); };
         weekTab.Click += delegate { timeMode=1;reload(); };
         allTimeTab.Click += delegate { timeMode=2;reload(); };
-        add.Click += delegate { if(EditInteractive(null,state,cache)){Save(StatePath,state);Save(CachePath,cache);reload();} };
-        sync.Click += delegate { sync.Enabled=false;sync.Text="同步中";sync.Refresh();Sync(cache,state,ref managerRefreshTodo);Save(StatePath,state);Save(CachePath,cache);sync.Enabled=true;sync.Text="刷新同步";reload(); };
-        settings.Click += delegate { Settings(state,cache,ref managerRefreshTodo); Save(StatePath,state); Save(CachePath,cache); reload(); };
+        add.Click += delegate { if(EditInteractive(null,state,cache)){Save(StatePath,state);Save(CachePath,cache);changed=true;reload();} };
+        sync.Click += delegate { StartBackgroundSync();sync.Text="后台同步中";cache["status"]="正在后台同步";Save(CachePath,cache);Render(cache,state);reload(); };
+        settings.Click += delegate { Settings(state,cache,ref managerRefreshTodo); Save(StatePath,state); Save(CachePath,cache); changed=true; reload(); };
         close.Click += delegate { f.Close(); }; f.CancelButton = close;
         reload();
         f.ShowDialog();
         if (managerRefreshTodo) refreshTodo = true;
+        return changed;
     }
 
     private static void Manage(Dictionary<string,object> state, Dictionary<string,object> cache)
