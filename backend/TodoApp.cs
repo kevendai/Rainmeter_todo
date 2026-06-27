@@ -14,7 +14,7 @@ using RainmeterBackend;
 
 internal static class TodoApp
 {
-    private const string AppVersion = "1.1.3";
+    private const string AppVersion = "1.1.4";
     private const string GitHubRepoApi = "https://api.github.com/repos/kevendai/Rainmeter_todo";
 #if NO_PAPER_FEATURES
     private static readonly bool PaperFeaturesEnabled = false;
@@ -66,6 +66,9 @@ internal static class TodoApp
                         refresh |= Render(state) && !guarded;
                         break;
                     case "Rollover": refresh |= Render(state); break;
+                    case "Refresh":
+                        if (PaperFeaturesEnabled) SyncArxiv(state, force, "");
+                        Save(state); Render(state); refresh = true; break;
                     case "Render": Render(state); break;
                     case "Delete": Delete(state, id, ref refresh); break;
                     case "Toggle": Toggle(state, id, ref refresh); break;
@@ -593,7 +596,6 @@ internal static class TodoApp
                     DownloadAndStartUpdate(info);
                     updateStatus.Text = "已下载并开始部署 " + info.Tag + "（" + AppFlavor + "）";
                     updateStatus.ForeColor = Color.FromArgb(63, 178, 119);
-                    MessageBox.Show("已下载最新安装包并开始自动部署。\r\n部署脚本会重启 Rainmeter。\r\n\r\n" + info.DownloadPath, "检查更新", MessageBoxButtons.OK, MessageBoxIcon.Information);
                     f.BeginInvoke(new Action(f.Close));
                 }
                 else
