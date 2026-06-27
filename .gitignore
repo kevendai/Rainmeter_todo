@@ -19,3 +19,4 @@ caldav.secret
 calendar-cache.json
 calendar-state.json
 tasks.json
+WeeklyPaperClipboard.ps1
