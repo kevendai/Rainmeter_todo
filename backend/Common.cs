@@ -185,7 +185,7 @@ namespace RainmeterBackend
         }
     }
 
-    internal static class DarkUi
+    internal static class LightUi
     {
         public static readonly Color Back = Color.FromArgb(230, 242, 252);
         public static readonly Color Panel = Color.FromArgb(246, 251, 255);
@@ -325,12 +325,42 @@ namespace RainmeterBackend
             return form;
         }
 
+        private static Control SvgIcon(string iconFile, int x, int y, int size)
+        {
+            Panel box = new Panel { Left = x, Top = y, Width = size, Height = size, BackColor = Color.FromArgb(238, 245, 252) };
+            Round(box, 10);
+            string path = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "icons", iconFile ?? "");
+            if (File.Exists(path))
+            {
+                WebBrowser browser = new WebBrowser { Left = 7, Top = 7, Width = size - 14, Height = size - 14, ScrollBarsEnabled = false, IsWebBrowserContextMenuEnabled = false, AllowWebBrowserDrop = false, WebBrowserShortcutsEnabled = false };
+                browser.TabStop = false;
+                browser.DocumentText = "<html><head><meta http-equiv='X-UA-Compatible' content='IE=edge'></head><body style='margin:0;overflow:hidden;background:#eef5fc;'><img src='file:///" + path.Replace("\\", "/") + "' style='width:100%;height:100%;display:block;'/></body></html>";
+                box.Controls.Add(browser);
+            }
+            else
+            {
+                Label fallback = new Label { Text = "□", Left = 0, Top = 0, Width = size, Height = size, BackColor = Color.Transparent, ForeColor = Accent, TextAlign = ContentAlignment.MiddleCenter, Font = new Font("Microsoft YaHei UI", 14F, FontStyle.Bold) };
+                box.Controls.Add(fallback);
+            }
+            return box;
+        }
+
         public static void Heading(Form form, string title, string subtitle)
         {
-            string glyph = HeadingGlyph(title, subtitle);
-            Font iconFont = glyph == "✓" ? new Font("Microsoft YaHei UI", 14F, FontStyle.Bold) : new Font("Segoe Fluent Icons", 12F);
-            Label icon = new Label { Text = glyph, Left = 24, Top = 22, Width = 34, Height = 34, ForeColor = Color.White, BackColor = AccentFill, Font = iconFont, TextAlign = ContentAlignment.MiddleCenter };
-            Round(icon, 9);
+            Heading(form, title, subtitle, null);
+        }
+
+        public static void Heading(Form form, string title, string subtitle, string iconFile)
+        {
+            Control icon;
+            if (!String.IsNullOrEmpty(iconFile)) icon = SvgIcon(iconFile, 24, 22, 34);
+            else
+            {
+                string glyph = HeadingGlyph(title, subtitle);
+                Font iconFont = glyph == "✓" ? new Font("Microsoft YaHei UI", 14F, FontStyle.Bold) : new Font("Segoe Fluent Icons", 12F);
+                icon = new Label { Text = glyph, Left = 24, Top = 22, Width = 34, Height = 34, ForeColor = Color.White, BackColor = AccentFill, Font = iconFont, TextAlign = ContentAlignment.MiddleCenter };
+                Round(icon, 9);
+            }
             Label heading = new Label { Text = title, Left = 68, Top = 22, Width = form.ClientSize.Width - 120, Height = 30, ForeColor = Text, BackColor = Color.Transparent, Font = new Font("Microsoft YaHei UI", 15F, FontStyle.Bold) };
             Label sub = new Label { Text = subtitle, Left = 25, Top = 62, Width = form.ClientSize.Width - 50, Height = 22, ForeColor = Muted, BackColor = Color.Transparent, Font = new Font("Microsoft YaHei UI", 9F) };
             icon.MouseDown += delegate(object sender, MouseEventArgs e) { if (e.Button == MouseButtons.Left) BeginDrag(form); };
