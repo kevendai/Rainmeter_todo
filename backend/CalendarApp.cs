@@ -78,7 +78,21 @@ internal static class CalendarApp
     private static List<Dictionary<string,object>> ParseIcs(string text){string unfolded=Regex.Replace(text,"\r?\n[ \t]","");List<List<string>>blocks=new List<List<string>>();List<string>cur=null;foreach(string line in Regex.Split(unfolded,"\r?\n")){if(line=="BEGIN:VEVENT")cur=new List<string>();else if(line=="END:VEVENT"){if(cur!=null)blocks.Add(cur);cur=null;}else if(cur!=null)cur.Add(line);}List<Dictionary<string,object>>events=new List<Dictionary<string,object>>();foreach(List<string>b in blocks){IProp uid=Props(b,"UID").FirstOrDefault(),sp=Props(b,"DTSTART").FirstOrDefault();if(uid==null||sp==null)continue;IDate start=IcsDate(sp),end=IcsDate(Props(b,"DTEND").FirstOrDefault());DateTimeOffset evEnd=end!=null?end.Value:start.AllDay?start.Value.AddDays(1):start.Value.AddHours(1);if(!start.AllDay&&evEnd<=start.Value)evEnd=start.Value.AddHours(1);IProp rp=Props(b,"RECURRENCE-ID").FirstOrDefault();string recurrence=(rp==null?start.Value:IcsDate(rp).Value).ToUniversalTime().ToString("o"),key=IText(uid.Value)+"|"+recurrence;Func<string,string>one=n=>{IProp p=Props(b,n).FirstOrDefault();return p==null?"":IText(p.Value);};DateTimeOffset? reminder=Reminder(b,start.Value,evEnd);List<int> reminderOffsets=ReminderOffsets(b,start.Value,evEnd);List<object> custom=RawAlarmBlocks(b).Where(x=>!AlarmIsStartOffset(x)).Cast<object>().ToList();string link=one("X-RAINMETER-LINK");if(link=="")link=DisplayLink(one("URL"));Dictionary<string,object>e=new Dictionary<string,object>{{"id",RuntimeUtil.Sha256Hex(key).Substring(0,32)},{"occurrence_key",key},{"uid",IText(uid.Value)},{"recurrence_id",recurrence},{"title",one("SUMMARY")==""?"（无标题）":one("SUMMARY")},{"start_at",RuntimeUtil.Iso(start.Value)},{"end_at",RuntimeUtil.Iso(evEnd)},{"all_day",start.AllDay},{"url",link},{"location",one("LOCATION")},{"description",one("DESCRIPTION")},{"status",one("STATUS")},{"reminder_at",reminder.HasValue?RuntimeUtil.Iso(reminder.Value):""},{"reminder_count",reminderOffsets.Count+custom.Count},{"reminders",reminderOffsets.Cast<object>().ToList()},{"custom_alarms",custom},{"recurring",rp!=null}};if(S(e,"status")!="CANCELLED")events.Add(e);}return events.GroupBy(e=>S(e,"occurrence_key")).Select(g=>g.First()).ToList();}
     private sealed class FetchResult{public CalendarInfo Calendar;public List<Dictionary<string,object>> Events;public int FailedWindows;}
     private static List<Dictionary<string,object>> FetchWindow(CalendarInfo cal,Dictionary<string,object>c,DateTimeOffset start,DateTimeOffset end){string a=start.ToUniversalTime().ToString("yyyyMMdd'T'HHmmss'Z'"),b=end.ToUniversalTime().ToString("yyyyMMdd'T'HHmmss'Z'");string body="<?xml version=\"1.0\" encoding=\"utf-8\"?><c:calendar-query xmlns:d=\"DAV:\" xmlns:c=\"urn:ietf:params:xml:ns:caldav\"><d:prop><d:getetag/><c:calendar-data><c:expand start=\""+a+"\" end=\""+b+"\"/></c:calendar-data></d:prop><c:filter><c:comp-filter name=\"VCALENDAR\"><c:comp-filter name=\"VEVENT\"><c:time-range start=\""+a+"\" end=\""+b+"\"/></c:comp-filter></c:comp-filter></c:filter></c:calendar-query>";DavResult report=Dav("REPORT",cal.Uri,c,body,1,6000);if(report.Status!=207)throw new Exception("日程查询失败：HTTP "+report.Status);XmlDocument d=Xml(report.Text);XmlNamespaceManager ns=Ns(d);List<Dictionary<string,object>>events=new List<Dictionary<string,object>>();foreach(XmlNode response in d.SelectNodes("//d:response",ns)){XmlNode data=response.SelectSingleNode(".//c:calendar-data",ns);if(data==null)continue;XmlNode href=response.SelectSingleNode("./d:href",ns),etag=response.SelectSingleNode(".//d:getetag",ns);foreach(Dictionary<string,object> e in ParseIcs(data.InnerText)){e["source"]="caldav";e["calendar"]="caldav";e["href"]=href==null?"":Resolve(cal.Uri,href.InnerText);e["etag"]=etag==null?"":etag.InnerText;events.Add(e);}}return events;}
-    private static FetchResult Fetch(Dictionary<string,object>c,string cachedCalendarUrl){DateTimeOffset now=DateTimeOffset.Now,start=new DateTimeOffset(now.Year,now.Month,now.Day,0,0,0,now.Offset),end=start.AddDays(21);CalendarInfo cal=String.IsNullOrEmpty(cachedCalendarUrl)?Discover(c):new CalendarInfo{Uri=cachedCalendarUrl,Name="Cached Calendar"};List<Dictionary<string,object>>events=new List<Dictionary<string,object>>();int failed=0;try{events.AddRange(FetchWindow(cal,c,start,end));}catch{failed++;if(!String.IsNullOrEmpty(cachedCalendarUrl)){cal=Discover(c);events.AddRange(FetchWindow(cal,c,start,end));failed=0;}else throw;}return new FetchResult{Calendar=cal,Events=events.GroupBy(e=>S(e,"occurrence_key")).Select(g=>g.First()).OrderBy(e=>RuntimeUtil.Date(e,"start_at")).ToList(),FailedWindows=failed};}
+    private static bool CachedCalendarMatchesServer(Dictionary<string,object>c,string cachedCalendarUrl)
+    {
+        string root=S(c,"Server").Trim().TrimEnd('/'), cached=(cachedCalendarUrl??"").Trim();
+        if(root==""||cached=="")return false;
+        return cached.StartsWith(root+"/",StringComparison.OrdinalIgnoreCase)||cached.Equals(root,StringComparison.OrdinalIgnoreCase);
+    }
+    private static FetchResult Fetch(Dictionary<string,object>c,string cachedCalendarUrl){if(!CachedCalendarMatchesServer(c,cachedCalendarUrl))cachedCalendarUrl="";DateTimeOffset now=DateTimeOffset.Now,start=new DateTimeOffset(now.Year,now.Month,now.Day,0,0,0,now.Offset),end=start.AddDays(21);CalendarInfo cal=String.IsNullOrEmpty(cachedCalendarUrl)?Discover(c):new CalendarInfo{Uri=cachedCalendarUrl,Name="Cached Calendar"};List<Dictionary<string,object>>events=new List<Dictionary<string,object>>();int failed=0;try{events.AddRange(FetchWindow(cal,c,start,end));}catch{failed++;if(!String.IsNullOrEmpty(cachedCalendarUrl)){cal=Discover(c);events.AddRange(FetchWindow(cal,c,start,end));failed=0;}else throw;}return new FetchResult{Calendar=cal,Events=events.GroupBy(e=>S(e,"occurrence_key")).Select(g=>g.First()).OrderBy(e=>RuntimeUtil.Date(e,"start_at")).ToList(),FailedWindows=failed};}
+    private static void RefreshCalDavCache(Dictionary<string,object> cache,Dictionary<string,object> credentials,string status)
+    {
+        FetchResult r=Fetch(credentials,S(cache,"calendar_url"));
+        cache["events"]=r.Events.Cast<object>().ToList();
+        cache["calendar_url"]=r.Calendar.Uri;
+        cache["fetched_at"]=RuntimeUtil.Iso(DateTimeOffset.Now);
+        cache["status"]=status+(r.FailedWindows>0?"（"+r.FailedWindows+" 次查询超时）":"");
+    }
     private static void Sync(Dictionary<string,object>cache,Dictionary<string,object>state,ref bool todo){try{if(!File.Exists(SecretPath)){cache["events"]=new List<object>();cache["calendar_url"]="";cache["fetched_at"]="";cache["status"]="CalDAV 未连接";Save(CachePath,cache);return;}Dictionary<string,object>c=JsonUtil.ReadDpapiJson(SecretPath);FetchResult r=Fetch(c,S(cache,"calendar_url"));cache["events"]=r.Events.Cast<object>().ToList();cache["calendar_url"]=r.Calendar.Uri;cache["fetched_at"]=RuntimeUtil.Iso(DateTimeOffset.Now);cache["status"]="已同步 "+r.Events.Count+" 项"+(r.FailedWindows>0?"（"+r.FailedWindows+" 次查询超时）":"");if(AutoConvert(cache,state))todo=true;Save(CachePath,cache);Save(StatePath,state);}catch(Exception ex){cache["status"]="同步失败："+ex.Message;Save(CachePath,cache);}}
     private static System.Diagnostics.Process StartBackgroundSync(){try{return System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(Application.ExecutablePath,"Sync"){UseShellExecute=false,CreateNoWindow=true});}catch{return null;}}
 
@@ -217,9 +231,8 @@ internal static class CalendarApp
         string href=S(e,"href");if(href==""){CalendarInfo cal=Discover(credentials);href=cal.Uri.TrimEnd('/')+"/"+S(e,"uid")+".ics";e["href"]=href;}
         DavResult put=DavText("PUT",href,credentials,EventIcs(e),"text/calendar; charset=utf-8",S(e,"etag"));
         if(put.Status<200||put.Status>=300)throw new Exception("CalDAV 保存失败：HTTP "+put.Status);
-        Events(cache).RemoveAll(x=>S(x,"id")==S(e,"id")||S(x,"uid")==S(e,"uid"));
-        Events(cache).Add(e);
-        cache["status"]="已保存到 CalDAV";
+        try{RefreshCalDavCache(cache,credentials,"已保存并同步 CalDAV");}
+        catch{Events(cache).RemoveAll(x=>S(x,"id")==S(e,"id")||S(x,"uid")==S(e,"uid"));Events(cache).Add(e);cache["status"]="已保存到 CalDAV，本地缓存将在下次同步校准";}
     }
 
     private static void SaveCalDavSeriesEvent(Dictionary<string,object> e,Dictionary<string,object> cache)
@@ -229,7 +242,8 @@ internal static class CalendarApp
         DavResult get=Dav("GET",S(e,"href"),credentials,"",-1);if(get.Status<200||get.Status>=300)throw new Exception("CalDAV 原始日程读取失败：HTTP "+get.Status);
         string ics=UpdateSeriesIcs(get.Text,e);DavResult put=DavText("PUT",S(e,"href"),credentials,ics,"text/calendar; charset=utf-8",S(e,"etag"));
         if(put.Status<200||put.Status>=300)throw new Exception("CalDAV 周期日程保存失败：HTTP "+put.Status);
-        Events(cache).RemoveAll(x=>S(x,"uid")==S(e,"uid"));cache["status"]="已改写 CalDAV 周期日程整组";
+        try{RefreshCalDavCache(cache,credentials,"已改写并同步 CalDAV 周期日程整组");}
+        catch{cache["status"]="已改写 CalDAV 周期日程整组，本地缓存将在下次同步校准";}
     }
 
     private static void DeleteCalDavEvent(Dictionary<string,object> e,Dictionary<string,object> cache,Dictionary<string,object> state,string mode)
@@ -283,7 +297,7 @@ internal static class CalendarApp
         TextBox location=addField("地点",26,548,588,38,isNew?"":S(original,"location"));location.Text=location.Text==""?"添加地点":location.Text;location.ForeColor=S(original,"location")==""?Color.FromArgb(150,165,185):LightUi.Text;location.GotFocus+=delegate{if(location.Text=="添加地点"){location.Text="";location.ForeColor=LightUi.Text;}};location.LostFocus+=delegate{if(location.Text.Trim()==""){location.Text="添加地点";location.ForeColor=Color.FromArgb(150,165,185);}};
         TextBox url=addField("链接",26,612,588,38,isNew?"":S(original,"url"));url.Text=url.Text==""?"添加会议链接、网页或本地路径":url.Text;url.ForeColor=S(original,"url")==""?Color.FromArgb(150,165,185):LightUi.Text;url.GotFocus+=delegate{if(url.Text=="添加会议链接、网页或本地路径"){url.Text="";url.ForeColor=LightUi.Text;}};url.LostFocus+=delegate{if(url.Text.Trim()==""){url.Text="添加会议链接、网页或本地路径";url.ForeColor=Color.FromArgb(150,165,185);}};
         f.Controls.Add(new Label{Text="提醒",Left=26,Top=404,Width=120,Height=22,BackColor=Color.Transparent,ForeColor=LightUi.Text,Font=new System.Drawing.Font("Microsoft YaHei UI",9.5F,System.Drawing.FontStyle.Bold)});
-        List<int> reminderMinutes=isNew?new List<int>{15}:Reminders(original);
+        List<int> reminderMinutes=isNew?new List<int>():Reminders(original);
         List<int> customStartReminders=new List<int>();
         HashSet<int> disabledCustomStartReminders=new HashSet<int>();
         List<string> customAlarms=isNew?new List<string>():CustomAlarms(original);
@@ -344,7 +358,11 @@ internal static class CalendarApp
         if (s == "") throw new Exception("CalDAV 地址不能为空");
         if (!s.StartsWith("http://", StringComparison.OrdinalIgnoreCase) && !s.StartsWith("https://", StringComparison.OrdinalIgnoreCase)) s = "https://" + s;
         if (u == "" || p == "") throw new Exception("账号和密码不能为空");
+        s = s.TrimEnd('/');
         JsonUtil.WriteDpapiJson(SecretPath, new Dictionary<string,object>{{"Server",s},{"Username",u},{"Password",p}});
+        cache["calendar_url"] = "";
+        cache["events"] = new List<object>();
+        cache["fetched_at"] = "";
         cache["status"] = "CalDAV 凭据已保存";
         Save(CachePath, cache);
     }
