@@ -1,5 +1,5 @@
 param(
-    [string]$Version = '1.1.6',
+    [string]$Version = '1.1.7',
     [string]$OutputRoot = (Join-Path (Split-Path $PSScriptRoot -Parent) 'release-build'),
     [string]$RainmeterInstallerUrl = 'https://github.com/rainmeter/rainmeter/releases/download/v4.5.26.3894/Rainmeter-4.5.26.exe'
 )
@@ -92,23 +92,39 @@ $ErrorActionPreference = 'Stop'
 $packageRoot = $PSScriptRoot
 $sourceSkins = Join-Path $packageRoot 'Skins'
 if ([string]::IsNullOrWhiteSpace($RainmeterRoot)) {
-    $RainmeterRoot = Read-Host 'Enter Rainmeter portable directory containing Rainmeter.exe'
+    $RainmeterRoot = Read-Host 'Enter Rainmeter skin library directory, for example Documents\Rainmeter'
 }
 $RainmeterRoot = $RainmeterRoot.Trim().Trim('"')
 if ([string]::IsNullOrWhiteSpace($RainmeterRoot)) {
     throw 'RainmeterRoot cannot be empty.'
 }
+$skinsTargetRoot = Join-Path $RainmeterRoot 'Skins'
+if ((Split-Path -Leaf $RainmeterRoot) -eq 'Skins') {
+    $skinsTargetRoot = $RainmeterRoot
+    $RainmeterRoot = Split-Path $RainmeterRoot -Parent
+}
+New-Item -ItemType Directory -Path $skinsTargetRoot -Force | Out-Null
+
 $rainmeterExe = Join-Path $RainmeterRoot 'Rainmeter.exe'
 if (-not (Test-Path -LiteralPath $rainmeterExe)) {
-    throw "Rainmeter.exe not found in '$RainmeterRoot'. Enter the portable install directory that contains Rainmeter.exe."
+    $runningRainmeter = Get-Process -Name Rainmeter -ErrorAction SilentlyContinue | Where-Object { $_.Path } | Select-Object -First 1
+    if ($null -ne $runningRainmeter) { $rainmeterExe = $runningRainmeter.Path }
+}
+if (-not (Test-Path -LiteralPath $rainmeterExe)) {
+    $appPath = Get-ItemProperty -Path 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\Rainmeter.exe' -ErrorAction SilentlyContinue
+    if ($null -ne $appPath -and -not [string]::IsNullOrWhiteSpace($appPath.'(default)')) { $rainmeterExe = $appPath.'(default)' }
+}
+if (-not (Test-Path -LiteralPath $rainmeterExe)) {
+    $appPath = Get-ItemProperty -Path 'HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\App Paths\Rainmeter.exe' -ErrorAction SilentlyContinue
+    if ($null -ne $appPath -and -not [string]::IsNullOrWhiteSpace($appPath.'(default)')) { $rainmeterExe = $appPath.'(default)' }
 }
 if ($WaitForProcessId -gt 0) {
     try { Wait-Process -Id $WaitForProcessId -Timeout 30 -ErrorAction SilentlyContinue } catch {}
 }
 
 $targetHostPaths = @(
-    (Join-Path $RainmeterRoot 'Skins\Todo\@Resources\TodoHost.exe'),
-    (Join-Path $RainmeterRoot 'Skins\Calendar\@Resources\CalendarHost.exe')
+    (Join-Path $skinsTargetRoot 'Todo\@Resources\TodoHost.exe'),
+    (Join-Path $skinsTargetRoot 'Calendar\@Resources\CalendarHost.exe')
 )
 foreach ($hostProcess in Get-Process -Name TodoHost,CalendarHost -ErrorAction SilentlyContinue) {
     if ($targetHostPaths -contains $hostProcess.Path) {
@@ -127,7 +143,7 @@ foreach ($hostProcess in Get-Process -Name TodoHost,CalendarHost -ErrorAction Si
 
 foreach ($skin in @('Todo', 'Calendar')) {
     $source = Join-Path $sourceSkins $skin
-    $target = Join-Path $RainmeterRoot ('Skins\' + $skin)
+    $target = Join-Path $skinsTargetRoot $skin
     New-Item -ItemType Directory -Path $target -Force | Out-Null
 
     $preserved = @{}
@@ -146,26 +162,30 @@ foreach ($skin in @('Todo', 'Calendar')) {
     }
 }
 
-$running = @(Get-Process -Name Rainmeter -ErrorAction SilentlyContinue | Where-Object { $_.Path -eq $rainmeterExe })
-if ($running.Count -gt 0) {
-    & $rainmeterExe '!Quit'
-    Start-Sleep -Milliseconds 1200
-    $remaining = @(Get-Process -Name Rainmeter -ErrorAction SilentlyContinue | Where-Object { $_.Path -eq $rainmeterExe })
-    foreach ($process in $remaining) {
-        try { $process.Kill(); $process.WaitForExit(3000) } catch {}
+if (Test-Path -LiteralPath $rainmeterExe) {
+    $running = @(Get-Process -Name Rainmeter -ErrorAction SilentlyContinue | Where-Object { $_.Path -eq $rainmeterExe })
+    if ($running.Count -gt 0) {
+        & $rainmeterExe '!Quit'
+        Start-Sleep -Milliseconds 1200
+        $remaining = @(Get-Process -Name Rainmeter -ErrorAction SilentlyContinue | Where-Object { $_.Path -eq $rainmeterExe })
+        foreach ($process in $remaining) {
+            try { $process.Kill(); $process.WaitForExit(3000) } catch {}
+        }
     }
+    Start-Process -FilePath $rainmeterExe | Out-Null
+    Start-Sleep -Milliseconds 1200
+    & $rainmeterExe '!RefreshApp'
+    if ($Activate) {
+        Start-Sleep -Milliseconds 800
+        & $rainmeterExe '!ActivateConfig' 'Todo' 'Todo.ini'
+        & $rainmeterExe '!ActivateConfig' 'Calendar' 'Calendar.ini'
+        Start-Sleep -Milliseconds 800
+        & $rainmeterExe '!SetWindowPosition' '100%' '0%' '100%' '0%' 'Todo'
+    }
+} else {
+    Write-Warning 'Rainmeter.exe was not found. Skins were copied, but Rainmeter was not restarted automatically.'
 }
-Start-Process -FilePath $rainmeterExe | Out-Null
-Start-Sleep -Milliseconds 1200
-& $rainmeterExe '!RefreshApp'
-if ($Activate) {
-    Start-Sleep -Milliseconds 800
-    & $rainmeterExe '!ActivateConfig' 'Todo' 'Todo.ini'
-    & $rainmeterExe '!ActivateConfig' 'Calendar' 'Calendar.ini'
-    Start-Sleep -Milliseconds 800
-    & $rainmeterExe '!SetWindowPosition' '100%' '0%' '100%' '0%' 'Todo'
-}
-Write-Host "Installed skins to $RainmeterRoot\Skins"
+Write-Host "Installed skins to $skinsTargetRoot"
 '@
     Set-Content -LiteralPath $Path -Value $content -Encoding UTF8
 }

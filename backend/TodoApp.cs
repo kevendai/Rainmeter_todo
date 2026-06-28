@@ -14,7 +14,7 @@ using RainmeterBackend;
 
 internal static class TodoApp
 {
-    private const string AppVersion = "1.1.6";
+    private const string AppVersion = "1.1.7";
     private const string GitHubRepoApi = "https://api.github.com/repos/kevendai/Rainmeter_todo";
 #if NO_PAPER_FEATURES
     private static readonly bool PaperFeaturesEnabled = false;
@@ -719,7 +719,8 @@ finally {
         DirectoryInfo todo = resources.Parent;
         DirectoryInfo skins = todo == null ? null : todo.Parent;
         DirectoryInfo root = skins == null ? null : skins.Parent;
-        if (root == null || !File.Exists(Path.Combine(root.FullName, "Rainmeter.exe"))) throw new Exception("无法定位当前 Rainmeter 安装目录");
+        if (root == null || skins == null || !skins.Name.Equals("Skins", StringComparison.OrdinalIgnoreCase)) throw new Exception("无法定位当前 Rainmeter 皮肤目录");
+        if (!Directory.Exists(Path.Combine(root.FullName, "Skins"))) throw new Exception("无法定位当前 Rainmeter 皮肤目录");
         return root.FullName;
     }
 

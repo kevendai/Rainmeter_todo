@@ -17,7 +17,7 @@
    powershell -ExecutionPolicy Bypass -File .\Install-Skins.ps1 -Activate
    ```
 
-6. 脚本会询问 Rainmeter 安装目录。输入第 3 步选择的目录，例如包含 `Rainmeter.exe` 的那个文件夹。
+6. 脚本会询问 Rainmeter 皮肤库目录。便携安装可输入第 3 步选择的目录；标准安装可输入 `Documents\Rainmeter`，也可以直接输入 `Documents\Rainmeter\Skins`。
 7. 脚本部署皮肤后会自动重启 Rainmeter；启动后应看到 `Todo` 和 `Calendar` 两个皮肤。
 
 ## 凭据与数据
