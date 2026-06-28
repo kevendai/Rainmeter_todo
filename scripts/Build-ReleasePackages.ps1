@@ -1,5 +1,5 @@
 param(
-    [string]$Version = '1.1.5',
+    [string]$Version = '1.1.6',
     [string]$OutputRoot = (Join-Path (Split-Path $PSScriptRoot -Parent) 'release-build'),
     [string]$RainmeterInstallerUrl = 'https://github.com/rainmeter/rainmeter/releases/download/v4.5.26.3894/Rainmeter-4.5.26.exe'
 )
@@ -118,6 +118,7 @@ foreach ($skin in @('Todo', 'Calendar')) {
     }
 
     Copy-Item -Path (Join-Path $source '*') -Destination $target -Recurse -Force
+    Get-ChildItem -LiteralPath $target -Recurse -File | Unblock-File -ErrorAction SilentlyContinue
 
     foreach ($name in $preserved.Keys) {
         $destination = Join-Path $target ('@Resources\' + $name)

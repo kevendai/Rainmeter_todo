@@ -14,7 +14,7 @@ using RainmeterBackend;
 
 internal static class TodoApp
 {
-    private const string AppVersion = "1.1.5";
+    private const string AppVersion = "1.1.6";
     private const string GitHubRepoApi = "https://api.github.com/repos/kevendai/Rainmeter_todo";
 #if NO_PAPER_FEATURES
     private static readonly bool PaperFeaturesEnabled = false;
@@ -687,13 +687,23 @@ internal static class TodoApp
 $ErrorActionPreference = 'Stop'
 $extractRoot = Join-Path $env:TEMP ('RainmeterDesktopWidgetsUpdate-' + [guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Path $extractRoot -Force | Out-Null
+Unblock-File -LiteralPath $ZipPath -ErrorAction SilentlyContinue
 Expand-Archive -LiteralPath $ZipPath -DestinationPath $extractRoot -Force
+Get-ChildItem -LiteralPath $extractRoot -Recurse -File | Unblock-File -ErrorAction SilentlyContinue
 $installer = Get-ChildItem -LiteralPath $extractRoot -Recurse -Filter 'Install-Skins.ps1' -File | Select-Object -First 1
 if ($null -eq $installer) { throw 'Install-Skins.ps1 not found in update package.' }
 if ($WaitForProcessId -gt 0) {
     try { Wait-Process -Id $WaitForProcessId -Timeout 30 -ErrorAction SilentlyContinue } catch {}
 }
-& powershell -ExecutionPolicy Bypass -File $installer.FullName -RainmeterRoot $RainmeterRoot -Activate
+try {
+    & powershell -ExecutionPolicy Bypass -File $installer.FullName -RainmeterRoot $RainmeterRoot -Activate
+}
+finally {
+    Remove-Item -LiteralPath $extractRoot -Recurse -Force -ErrorAction SilentlyContinue
+    if ((Split-Path -Leaf $ZipPath) -like 'rainmeter-desktop-widgets-*.zip') {
+        Remove-Item -LiteralPath $ZipPath -Force -ErrorAction SilentlyContinue
+    }
+}
 ";
         File.WriteAllText(script, content, new UTF8Encoding(false));
         string arguments = "-NoProfile -ExecutionPolicy Bypass -File " + QuoteArg(script)
