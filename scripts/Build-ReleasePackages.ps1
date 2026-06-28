@@ -1,5 +1,5 @@
 param(
-    [string]$Version = '1.1.7',
+    [string]$Version = '1.2.0',
     [string]$OutputRoot = (Join-Path (Split-Path $PSScriptRoot -Parent) 'release-build'),
     [string]$RainmeterInstallerUrl = 'https://github.com/rainmeter/rainmeter/releases/download/v4.5.26.3894/Rainmeter-4.5.26.exe'
 )
