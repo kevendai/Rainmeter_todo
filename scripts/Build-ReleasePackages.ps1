@@ -106,6 +106,25 @@ if ($WaitForProcessId -gt 0) {
     try { Wait-Process -Id $WaitForProcessId -Timeout 30 -ErrorAction SilentlyContinue } catch {}
 }
 
+$targetHostPaths = @(
+    (Join-Path $RainmeterRoot 'Skins\Todo\@Resources\TodoHost.exe'),
+    (Join-Path $RainmeterRoot 'Skins\Calendar\@Resources\CalendarHost.exe')
+)
+foreach ($hostProcess in Get-Process -Name TodoHost,CalendarHost -ErrorAction SilentlyContinue) {
+    if ($targetHostPaths -contains $hostProcess.Path) {
+        try { $hostProcess.CloseMainWindow() | Out-Null } catch {}
+    }
+}
+Start-Sleep -Milliseconds 800
+foreach ($hostProcess in Get-Process -Name TodoHost,CalendarHost -ErrorAction SilentlyContinue) {
+    if ($targetHostPaths -contains $hostProcess.Path) {
+        try {
+            if (-not $hostProcess.HasExited) { $hostProcess.Kill() }
+            $hostProcess.WaitForExit(3000)
+        } catch {}
+    }
+}
+
 foreach ($skin in @('Todo', 'Calendar')) {
     $source = Join-Path $sourceSkins $skin
     $target = Join-Path $RainmeterRoot ('Skins\' + $skin)
