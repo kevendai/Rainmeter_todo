@@ -14,7 +14,7 @@ using RainmeterBackend;
 
 internal static partial class TodoApp
 {
-    private const string AppVersion = "1.3.2";
+    private const string AppVersion = "1.3.3";
     private const string GitHubRepository = "kevendai/Rainmeter_todo";
 #if NO_PAPER_FEATURES
     private static readonly bool PaperFeaturesEnabled = false;

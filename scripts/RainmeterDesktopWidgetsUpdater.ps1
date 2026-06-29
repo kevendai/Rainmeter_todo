@@ -8,6 +8,7 @@ param(
     [string]$PackageRoot,
     [string]$RainmeterRoot,
     [switch]$Activate,
+    [switch]$AssumeYes,
     [int]$WaitForProcessId = 0
 )
 
@@ -187,6 +188,27 @@ function Get-LatestTag {
     return $best
 }
 
+function Invoke-WebRequestCompat {
+    param(
+        [string]$Uri,
+        [string]$Method = 'GET',
+        [string]$OutFile = '',
+        [hashtable]$Headers = @{},
+        [int]$TimeoutSec = 20
+    )
+    $parameters = @{
+        Uri = $Uri
+        Method = $Method
+        Headers = $Headers
+        TimeoutSec = $TimeoutSec
+    }
+    if (-not [string]::IsNullOrWhiteSpace($OutFile)) { $parameters.OutFile = $OutFile }
+    if ((Get-Command Invoke-WebRequest).Parameters.ContainsKey('UseBasicParsing')) {
+        $parameters.UseBasicParsing = $true
+    }
+    Invoke-WebRequest @parameters
+}
+
 function Find-PackageRoot {
     param([string]$ExtractRoot)
     $installer = Get-ChildItem -LiteralPath $ExtractRoot -Recurse -Filter 'Install-Skins.ps1' -File | Select-Object -First 1
@@ -229,21 +251,21 @@ function Check-And-Install {
 
     $displayFlavor = if ([string]::IsNullOrWhiteSpace($FlavorName)) { $Flavor } else { $FlavorName }
     $prompt = "New version $latestTag ($displayFlavor) is available.`r`n`r`nDownload and install now? Rainmeter will restart."
-    if (-not (Confirm-Update $prompt)) {
+    if (-not $AssumeYes -and -not (Confirm-Update $prompt)) {
         Show-Message "Update canceled: $latestTag"
         return
     }
 
     $assetName = "rainmeter-desktop-widgets-$Flavor-$latestVersion.zip"
     $assetUrl = "https://raw.githubusercontent.com/$Repository/$([Uri]::EscapeDataString($latestTag))/releases/$([Uri]::EscapeDataString($latestTag))/$([Uri]::EscapeDataString($assetName))"
-    Invoke-WebRequest -Uri $assetUrl -Method Head -Headers @{ 'User-Agent' = $UserAgent } -TimeoutSec 20 | Out-Null
+    Invoke-WebRequestCompat -Uri $assetUrl -Method Head -Headers @{ 'User-Agent' = $UserAgent } -TimeoutSec 20 | Out-Null
 
     $downloads = Join-Path ([Environment]::GetFolderPath([Environment+SpecialFolder]::UserProfile)) 'Downloads'
     New-Item -ItemType Directory -Path $downloads -Force | Out-Null
     $zipPath = Join-Path $downloads $assetName
     $extractRoot = Join-Path $env:TEMP ('RainmeterDesktopWidgetsUpdate-' + [guid]::NewGuid().ToString('N'))
     try {
-        Invoke-WebRequest -Uri $assetUrl -OutFile $zipPath -Headers @{ 'User-Agent' = $UserAgent } -TimeoutSec 120
+        Invoke-WebRequestCompat -Uri $assetUrl -OutFile $zipPath -Headers @{ 'User-Agent' = $UserAgent } -TimeoutSec 120
         New-Item -ItemType Directory -Path $extractRoot -Force | Out-Null
         Unblock-File -LiteralPath $zipPath -ErrorAction SilentlyContinue
         Expand-Archive -LiteralPath $zipPath -DestinationPath $extractRoot -Force

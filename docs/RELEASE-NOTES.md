@@ -1,5 +1,11 @@
 # Release Notes
 
+## 1.3.3 - 2026-06-29
+
+- 优化设置页“检查更新”流程：设置页已经确认更新后，独立升级器会直接下载并部署，不再额外弹出第二个确认框。
+- 升级器下载更新包时改用兼容的 BasicParsing 网络请求路径，避免 Windows PowerShell 走旧网页解析组件时出现额外安全/脚本提示。
+- 保持旧升级器兼容：`Install-Skins.ps1` 根入口、包内 `Updater/RainmeterDesktopWidgetsUpdater.ps1`、raw tag 包路径和 GitHub Release 资产布局不变。
+
 ## 1.3.2 - 2026-06-29
 
 - 新增轻量服务层拆分：`TodoService.cs` 承接待办交互式命令和锁定状态执行器，`CalendarService.cs` 承接日历同步、CalDAV 保存/删除和日程转待办相关的编排逻辑。

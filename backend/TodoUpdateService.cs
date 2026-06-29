@@ -25,6 +25,7 @@ internal static partial class TodoApp
             + " -FlavorName " + QuoteArg(AppFlavorName)
             + " -RainmeterRoot " + QuoteArg(CurrentRainmeterRoot())
             + " -Activate"
+            + " -AssumeYes"
             + " -WaitForProcessId " + Process.GetCurrentProcess().Id.ToString(CultureInfo.InvariantCulture);
         Process.Start(new ProcessStartInfo("powershell.exe", arguments) { UseShellExecute = false, CreateNoWindow = false });
     }

@@ -42,18 +42,18 @@
 
 ## 发布包
 
-当前发布版本：`1.3.2`。
+当前发布版本：`1.3.3`。
 
 生成发布包：
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File scripts/Build-ReleasePackages.ps1 -Version 1.3.2
+powershell -ExecutionPolicy Bypass -File scripts/Build-ReleasePackages.ps1 -Version 1.3.3
 ```
 
 发布到 GitHub 的两个 zip 分工如下：
 
-- [`rainmeter-desktop-widgets-full-1.3.2.zip`](releases/v1.3.2/rainmeter-desktop-widgets-full-1.3.2.zip)：完整功能版，包含待办、今日日程、CalDAV 同步、日程转待办、论文推送和论文标题翻译入口。不要把 `translation.secret`、`paper-sync.secret`、`caldav.secret`、`tasks.json` 或缓存放进包里。
-- [`rainmeter-desktop-widgets-lite-1.3.2.zip`](releases/v1.3.2/rainmeter-desktop-widgets-lite-1.3.2.zip)：精简版，包含待办和今日日程，但编译时关闭论文推送与论文标题翻译，并隐藏对应界面入口。CalDAV 功能保留。
+- [`rainmeter-desktop-widgets-full-1.3.3.zip`](releases/v1.3.3/rainmeter-desktop-widgets-full-1.3.3.zip)：完整功能版，包含待办、今日日程、CalDAV 同步、日程转待办、论文推送和论文标题翻译入口。不要把 `translation.secret`、`paper-sync.secret`、`caldav.secret`、`tasks.json` 或缓存放进包里。
+- [`rainmeter-desktop-widgets-lite-1.3.3.zip`](releases/v1.3.3/rainmeter-desktop-widgets-lite-1.3.3.zip)：精简版，包含待办和今日日程，但编译时关闭论文推送与论文标题翻译，并隐藏对应界面入口。CalDAV 功能保留。
 
 两个 zip 内都包含 Rainmeter 4.5.26 官方安装器、已编译后端、皮肤文件、`Install-Skins.ps1` 和 `DEPLOY.md`。空白机器部署时可以选择 Rainmeter 便携目录，也可以使用标准安装的 `Documents\Rainmeter` 皮肤库目录；详细说明见 `docs/RELEASE-DEPLOY.md`。
 
