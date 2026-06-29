@@ -60,12 +60,24 @@ If the tag already exists, do not move it casually. Prefer a new patch version u
 Older installed versions may require an actual GitHub Release with zip assets. If `gh` is available:
 
 ```powershell
-gh release create vX.Y.Z `
-  .\releases\vX.Y.Z\rainmeter-desktop-widgets-full-X.Y.Z.zip `
-  .\releases\vX.Y.Z\rainmeter-desktop-widgets-lite-X.Y.Z.zip `
+$version = 'X.Y.Z'
+$notesPath = ".\release-build\release-notes-v$version.md"
+$lines = Get-Content .\docs\RELEASE-NOTES.md -Encoding UTF8
+$start = [Array]::FindIndex($lines, [Predicate[string]]{ param($line) $line -eq "## $version - 2026-06-29" })
+if ($start -lt 0) { $start = [Array]::FindIndex($lines, [Predicate[string]]{ param($line) $line -like "## $version -*" }) }
+if ($start -lt 0) { throw "Release notes section not found for $version" }
+$end = $lines.Count
+for ($i = $start + 1; $i -lt $lines.Count; $i++) {
+  if ($lines[$i] -like '## *') { $end = $i; break }
+}
+[IO.File]::WriteAllText((Resolve-Path .\release-build).Path + "\release-notes-v$version.md", (($lines[($start + 1)..($end - 1)] -join "`r`n").Trim() + "`r`n"), [Text.UTF8Encoding]::new($false))
+
+gh release create "v$version" `
+  ".\releases\v$version\rainmeter-desktop-widgets-full-$version.zip" `
+  ".\releases\v$version\rainmeter-desktop-widgets-lite-$version.zip" `
   --repo kevendai/Rainmeter_todo `
-  --title "Rainmeter Desktop Widgets X.Y.Z" `
-  --notes-file .\docs\RELEASE-NOTES.md
+  --title "Rainmeter Desktop Widgets $version" `
+  --notes-file $notesPath
 ```
 
 If `gh` is not installed, use the GitHub REST API with explicit user approval before reading Git Credential Manager credentials. Never print the token. Upload assets to:

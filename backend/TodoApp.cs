@@ -14,7 +14,7 @@ using RainmeterBackend;
 
 internal static class TodoApp
 {
-    private const string AppVersion = "1.2.3";
+    private const string AppVersion = "1.2.4";
     private const string GitHubRepository = "kevendai/Rainmeter_todo";
 #if NO_PAPER_FEATURES
     private static readonly bool PaperFeaturesEnabled = false;
@@ -570,6 +570,30 @@ internal static class TodoApp
             try
             {
                 checkUpdate.Enabled = false;
+                updateStatus.Text = "正在检查 GitHub...";
+                updateStatus.ForeColor = LightUi.Muted;
+                updateStatus.Refresh();
+                Application.DoEvents();
+                UpdateCheckResult info = CheckLatestUpdate();
+                if (!info.IsNewer)
+                {
+                    updateStatus.Text = info.CompareResult == 0 ? "已是最新版本：" + info.Tag : "当前版本高于最新标签：" + info.Tag;
+                    updateStatus.ForeColor = Color.FromArgb(63, 178, 119);
+                    return;
+                }
+                updateStatus.Text = "检测到新版本：" + info.Tag;
+                updateStatus.ForeColor = LightUi.Accent;
+                DialogResult update = MessageBox.Show(
+                    "检测到新版本 " + info.Tag + "（" + AppFlavorName + "）。\r\n\r\n是否现在下载并自动部署？部署脚本会重启 Rainmeter。",
+                    "检查更新",
+                    MessageBoxButtons.YesNo,
+                    MessageBoxIcon.Question);
+                if (update != DialogResult.Yes)
+                {
+                    updateStatus.Text = "已取消更新：" + info.Tag;
+                    updateStatus.ForeColor = LightUi.Muted;
+                    return;
+                }
                 updateStatus.Text = "正在启动独立升级器...";
                 updateStatus.ForeColor = LightUi.Muted;
                 updateStatus.Refresh();
@@ -581,9 +605,9 @@ internal static class TodoApp
             }
             catch (Exception ex)
             {
-                updateStatus.Text = "启动升级器失败";
+                updateStatus.Text = "检查更新失败";
                 updateStatus.ForeColor = LightUi.Danger;
-                LightUi.Error("启动升级器失败：" + ex.Message);
+                LightUi.Error("检查更新失败：" + ex.Message);
             }
             finally { checkUpdate.Enabled = true; }
         };
@@ -607,6 +631,49 @@ internal static class TodoApp
         Process.Start(new ProcessStartInfo("powershell.exe", arguments) { UseShellExecute = false, CreateNoWindow = false });
     }
 
+    private sealed class UpdateCheckResult
+    {
+        public string Tag;
+        public bool IsNewer;
+        public int CompareResult;
+    }
+
+    private static UpdateCheckResult CheckLatestUpdate()
+    {
+        ServicePointManager.SecurityProtocol |= (SecurityProtocolType)3072;
+        string raw = GitHubGet("https://api.github.com/repos/" + GitHubRepository + "/tags");
+        string tag = LatestTag(raw);
+        if (tag == "") throw new Exception("GitHub 上没有可用版本标签");
+        int compare = CompareVersions(NormalizeVersion(tag), AppVersion);
+        return new UpdateCheckResult { Tag = tag, CompareResult = compare, IsNewer = compare > 0 };
+    }
+
+    private static string GitHubGet(string url)
+    {
+        HttpWebRequest request = (HttpWebRequest)WebRequest.Create(url);
+        request.Method = "GET";
+        request.Timeout = 10000;
+        request.ReadWriteTimeout = 10000;
+        request.UserAgent = "RainmeterDesktopWidgets/" + AppVersion;
+        request.Accept = "application/vnd.github+json";
+        using (HttpWebResponse response = (HttpWebResponse)request.GetResponse())
+        using (StreamReader reader = new StreamReader(response.GetResponseStream(), Encoding.UTF8))
+            return reader.ReadToEnd();
+    }
+
+    private static string LatestTag(string raw)
+    {
+        string best = "";
+        foreach (object item in JsonUtil.Array(JsonUtil.Deserialize(raw)))
+        {
+            Dictionary<string, object> tag = JsonUtil.Object(item);
+            string name = S(tag, "name");
+            if (!Regex.IsMatch(NormalizeVersion(name), @"^\d")) continue;
+            if (best == "" || CompareVersions(name, best) > 0) best = name;
+        }
+        return best;
+    }
+
     private static string CurrentRainmeterRoot()
     {
         DirectoryInfo resources = new DirectoryInfo(ResourceDir);
@@ -621,6 +688,32 @@ internal static class TodoApp
     private static string QuoteArg(string value)
     {
         return "\"" + (value ?? "").Replace("\"", "\\\"") + "\"";
+    }
+
+    private static string NormalizeVersion(string value)
+    {
+        value = (value ?? "").Trim();
+        if (value.StartsWith("v", StringComparison.OrdinalIgnoreCase)) value = value.Substring(1);
+        Match match = Regex.Match(value, @"\d+(?:\.\d+){0,3}");
+        return match.Success ? match.Value : value;
+    }
+
+    private static int CompareVersions(string left, string right)
+    {
+        int[] a = VersionParts(left), b = VersionParts(right);
+        for (int i = 0; i < Math.Max(a.Length, b.Length); i++)
+        {
+            int av = i < a.Length ? a[i] : 0, bv = i < b.Length ? b[i] : 0;
+            if (av != bv) return av.CompareTo(bv);
+        }
+        return 0;
+    }
+
+    private static int[] VersionParts(string value)
+    {
+        return NormalizeVersion(value).Split(new[] { '.' }, StringSplitOptions.RemoveEmptyEntries)
+            .Select(part => { int parsed; return Int32.TryParse(part, NumberStyles.Integer, CultureInfo.InvariantCulture, out parsed) ? parsed : 0; })
+            .ToArray();
     }
 
     private static IEnumerable<string> CommonLabels(Dictionary<string, object> task)

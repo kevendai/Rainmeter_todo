@@ -1,5 +1,9 @@
 # Release Notes
 
+## 1.2.4 - 2026-06-29
+
+- 调整“检查更新”交互：按钮先在设置窗口内轻量检查 GitHub 最新 tag，只有检测到新版本时才弹出更新确认并启动独立升级器；已是最新版本时只更新设置页状态，不再额外打开 PowerShell 窗口或弹出“Already on latest version”对话框。
+
 ## 1.2.3 - 2026-06-29
 
 - 修复 1.2.2 更新器在安装包入口和升级器自升级后部署本体时传递 `-Activate` 开关参数的方式，避免 Windows PowerShell 将 `System.String` 转换为 `SwitchParameter` 失败。
