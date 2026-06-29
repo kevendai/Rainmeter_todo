@@ -12,7 +12,8 @@ try {
     $todo = Join-Path $build 'TodoHost.exe'
     $calendar = Join-Path $build 'CalendarHost.exe'
     $smoke = Join-Path $build 'SmokeTests.exe'
-    & $csc /nologo /target:winexe /optimize+ @refs "/out:$todo" (Join-Path $backend 'Common.cs') (Join-Path $backend 'TodoApp.cs')
+    $todoSources = @(Get-ChildItem -LiteralPath $backend -Filter 'Todo*.cs' | Sort-Object Name | ForEach-Object { $_.FullName })
+    & $csc /nologo /target:winexe /optimize+ @refs "/out:$todo" (Join-Path $backend 'Common.cs') @todoSources
     if ($LASTEXITCODE -ne 0) { throw 'Todo backend compilation failed' }
     & $csc /nologo /target:winexe /optimize+ @refs "/out:$calendar" (Join-Path $backend 'Common.cs') (Join-Path $backend 'CalendarApp.cs')
     if ($LASTEXITCODE -ne 0) { throw 'Calendar backend compilation failed' }

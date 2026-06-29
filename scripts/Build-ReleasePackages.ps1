@@ -1,5 +1,5 @@
 param(
-    [string]$Version = '1.2.4',
+    [string]$Version = '1.3.0',
     [string]$OutputRoot = (Join-Path (Split-Path $PSScriptRoot -Parent) 'release-build'),
     [string]$RainmeterInstallerUrl = 'https://github.com/rainmeter/rainmeter/releases/download/v4.5.26.3894/Rainmeter-4.5.26.exe'
 )
@@ -140,11 +140,11 @@ function New-Package {
 
     $backendRoot = Join-Path $projectRoot 'backend'
     $common = Join-Path $backendRoot 'Common.cs'
-    $todoSource = Join-Path $backendRoot 'TodoApp.cs'
+    $todoSources = @(Get-ChildItem -LiteralPath $backendRoot -Filter 'Todo*.cs' | Sort-Object Name | ForEach-Object { $_.FullName })
     $calendarSource = Join-Path $backendRoot 'CalendarApp.cs'
     $todoExe = Join-Path $todoRoot '@Resources\TodoHost.exe'
     $calendarExe = Join-Path $calendarRoot '@Resources\CalendarHost.exe'
-    $todoCompileArgs = @('/nologo','/target:winexe','/optimize+','/r:System.Web.Extensions.dll','/r:System.Windows.Forms.dll','/r:System.Drawing.dll','/r:System.Security.dll',"/out:$todoExe",$common,$todoSource)
+    $todoCompileArgs = @('/nologo','/target:winexe','/optimize+','/r:System.Web.Extensions.dll','/r:System.Windows.Forms.dll','/r:System.Drawing.dll','/r:System.Security.dll',"/out:$todoExe",$common) + $todoSources
     if ($NoPaperFeatures) { $todoCompileArgs = @('/define:NO_PAPER_FEATURES') + $todoCompileArgs }
     & $csc @todoCompileArgs
     if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $todoExe)) { throw "Failed to build TodoHost.exe for $DisplayName" }
