@@ -1,5 +1,11 @@
 # Release Notes
 
+## 1.3.2 - 2026-06-29
+
+- 新增轻量服务层拆分：`TodoService.cs` 承接待办交互式命令和锁定状态执行器，`CalendarService.cs` 承接日历同步、CalDAV 保存/删除和日程转待办相关的编排逻辑。
+- 保持 `TodoApp.cs` / `CalendarApp.cs` 更接近命令入口，协议解析、ICS 读写、窗口绘制和 Rainmeter 渲染继续由各自模块负责，为后续脱离 Rainmeter 宿主预留边界。
+- 继续保留 1.2.x/1.3.x 升级器兼容：发布包根目录仍提供 `Install-Skins.ps1`，包内仍包含 `Updater/RainmeterDesktopWidgetsUpdater.ps1`，raw tag 包路径和 `manifest.json` 结构不变。
+
 ## 1.3.1 - 2026-06-29
 
 - 拆分 Calendar 后端结构：`CalendarApp.cs` 保留命令入口，日历状态存储、CalDAV 同步、日程转待办规则、ICS 读写、WinForms 管理窗口和 Rainmeter 渲染分别移动到独立的 `Calendar*.cs` 模块。

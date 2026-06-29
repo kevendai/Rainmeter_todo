@@ -42,15 +42,5 @@ internal static partial class CalendarApp
         return cached.StartsWith(root+"/",StringComparison.OrdinalIgnoreCase)||cached.Equals(root,StringComparison.OrdinalIgnoreCase);
     }
     private static FetchResult Fetch(Dictionary<string,object>c,string cachedCalendarUrl){if(!CachedCalendarMatchesServer(c,cachedCalendarUrl))cachedCalendarUrl="";DateTimeOffset now=DateTimeOffset.Now,start=new DateTimeOffset(now.Year,now.Month,now.Day,0,0,0,now.Offset),end=start.AddDays(21);CalendarInfo cal=String.IsNullOrEmpty(cachedCalendarUrl)?Discover(c):new CalendarInfo{Uri=cachedCalendarUrl,Name="Cached Calendar"};List<Dictionary<string,object>>events=new List<Dictionary<string,object>>();int failed=0;try{events.AddRange(FetchWindow(cal,c,start,end));}catch{failed++;if(!String.IsNullOrEmpty(cachedCalendarUrl)){cal=Discover(c);events.AddRange(FetchWindow(cal,c,start,end));failed=0;}else throw;}return new FetchResult{Calendar=cal,Events=events.GroupBy(e=>S(e,"occurrence_key")).Select(g=>g.First()).OrderBy(e=>RuntimeUtil.Date(e,"start_at")).ToList(),FailedWindows=failed};}
-    private static void RefreshCalDavCache(Dictionary<string,object> cache,Dictionary<string,object> credentials,string status)
-    {
-        FetchResult r=Fetch(credentials,S(cache,"calendar_url"));
-        cache["events"]=r.Events.Cast<object>().ToList();
-        cache["calendar_url"]=r.Calendar.Uri;
-        cache["fetched_at"]=RuntimeUtil.Iso(DateTimeOffset.Now);
-        cache["status"]=status+(r.FailedWindows>0?"（"+r.FailedWindows+" 次查询超时）":"");
-    }
-    private static void Sync(Dictionary<string,object>cache,Dictionary<string,object>state,ref bool todo){try{if(!File.Exists(SecretPath)){cache["events"]=new List<object>();cache["calendar_url"]="";cache["fetched_at"]="";cache["status"]="CalDAV 未连接";Save(CachePath,cache);return;}Dictionary<string,object>c=JsonUtil.ReadDpapiJson(SecretPath);FetchResult r=Fetch(c,S(cache,"calendar_url"));cache["events"]=r.Events.Cast<object>().ToList();cache["calendar_url"]=r.Calendar.Uri;cache["fetched_at"]=RuntimeUtil.Iso(DateTimeOffset.Now);cache["status"]="已同步 "+r.Events.Count+" 项"+(r.FailedWindows>0?"（"+r.FailedWindows+" 次查询超时）":"");if(AutoConvert(cache,state))todo=true;Save(CachePath,cache);Save(StatePath,state);}catch(Exception ex){cache["status"]="同步失败："+ex.Message;Save(CachePath,cache);}}
-    private static System.Diagnostics.Process StartBackgroundSync(){try{return System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(Application.ExecutablePath,"Sync"){UseShellExecute=false,CreateNoWindow=true});}catch{return null;}}
 
 }
