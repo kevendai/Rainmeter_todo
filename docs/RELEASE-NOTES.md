@@ -1,5 +1,9 @@
 # Release Notes
 
+## 1.2.3 - 2026-06-29
+
+- 修复 1.2.2 更新器在安装包入口和升级器自升级后部署本体时传递 `-Activate` 开关参数的方式，避免 Windows PowerShell 将 `System.String` 转换为 `SwitchParameter` 失败。
+
 ## 1.2.2 - 2026-06-29
 
 - 新增独立升级器脚本 `Updater/RainmeterDesktopWidgetsUpdater.ps1`。`TodoHost.exe` 的“检查更新”按钮现在只负责启动升级器，版本检查、下载、解压、部署都由升级器脚本处理，后续升级策略可以不重编主程序。

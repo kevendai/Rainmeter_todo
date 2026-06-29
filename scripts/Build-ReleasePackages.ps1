@@ -1,5 +1,5 @@
 param(
-    [string]$Version = '1.2.2',
+    [string]$Version = '1.2.3',
     [string]$OutputRoot = (Join-Path (Split-Path $PSScriptRoot -Parent) 'release-build'),
     [string]$RainmeterInstallerUrl = 'https://github.com/rainmeter/rainmeter/releases/download/v4.5.26.3894/Rainmeter-4.5.26.exe'
 )
@@ -97,7 +97,9 @@ $ErrorActionPreference = 'Stop'
 $packageRoot = $PSScriptRoot
 $updater = Join-Path $packageRoot 'Updater\RainmeterDesktopWidgetsUpdater.ps1'
 if (-not (Test-Path -LiteralPath $updater)) { throw 'Updater script not found in package.' }
-& powershell -NoProfile -ExecutionPolicy Bypass -File $updater -Mode InstallPackage -PackageRoot $packageRoot -RainmeterRoot $RainmeterRoot -Activate:$Activate -WaitForProcessId $WaitForProcessId
+$args = @('-NoProfile','-ExecutionPolicy','Bypass','-File',$updater,'-Mode','InstallPackage','-PackageRoot',$packageRoot,'-RainmeterRoot',$RainmeterRoot,'-WaitForProcessId',$WaitForProcessId)
+if ($Activate) { $args += '-Activate' }
+& powershell @args
 '@
     Set-Content -LiteralPath $Path -Value $content -Encoding UTF8
 }

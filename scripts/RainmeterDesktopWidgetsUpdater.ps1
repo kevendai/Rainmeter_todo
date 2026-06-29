@@ -257,7 +257,9 @@ function Check-And-Install {
 
         $installedUpdater = Join-Path $roots.SkinsRoot 'Todo\@Resources\Updater\RainmeterDesktopWidgetsUpdater.ps1'
         if (-not (Test-Path -LiteralPath $installedUpdater)) { throw 'Installed updater script was not found after self-update.' }
-        & powershell -NoProfile -ExecutionPolicy Bypass -File $installedUpdater -Mode InstallPackage -PackageRoot $newPackageRoot -RainmeterRoot $roots.RainmeterRoot -Activate:$Activate -WaitForProcessId $WaitForProcessId
+        $installArgs = @('-NoProfile','-ExecutionPolicy','Bypass','-File',$installedUpdater,'-Mode','InstallPackage','-PackageRoot',$newPackageRoot,'-RainmeterRoot',$roots.RainmeterRoot,'-WaitForProcessId',$WaitForProcessId)
+        if ($Activate) { $installArgs += '-Activate' }
+        & powershell @installArgs
     }
     finally {
         Remove-Item -LiteralPath $extractRoot -Recurse -Force -ErrorAction SilentlyContinue
