@@ -11,15 +11,17 @@ Run from the repository root:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\scripts\Test-Backends.ps1
-powershell -ExecutionPolicy Bypass -File .\scripts\Build-ReleasePackages.ps1 -Version X.Y.Z
+powershell -ExecutionPolicy Bypass -File .\scripts\Build-ReleasePackages.ps1
 ```
 
-Copy the two generated zip files into the versioned release folder:
+Copy the generated release files into the versioned release folder:
 
 ```powershell
 New-Item -ItemType Directory -Path .\releases\vX.Y.Z -Force | Out-Null
 Copy-Item .\release-build\rainmeter-desktop-widgets-full-X.Y.Z.zip .\releases\vX.Y.Z\ -Force
 Copy-Item .\release-build\rainmeter-desktop-widgets-lite-X.Y.Z.zip .\releases\vX.Y.Z\ -Force
+Copy-Item .\release-build\rainmeter-desktop-widgets-full-X.Y.Z.rmskin .\releases\vX.Y.Z\ -Force
+Copy-Item .\release-build\rainmeter-desktop-widgets-lite-X.Y.Z.rmskin .\releases\vX.Y.Z\ -Force
 ```
 
 Before committing, inspect the zip contents:
@@ -46,7 +48,7 @@ Select-String -Path .\release-build\rainmeter-desktop-widgets-full-X.Y.Z\Install
 ## Commit And Tag
 
 ```powershell
-git add README.md docs\RELEASE-NOTES.md scripts\Build-ReleasePackages.ps1 releases\vX.Y.Z
+git add VERSION README.md docs\RELEASE-NOTES.md docs\RELEASE-DEPLOY.md docs\GITHUB-RELEASE.md scripts\Build-ReleasePackages.ps1 releases\vX.Y.Z
 git commit -m "Release vX.Y.Z"
 git tag vX.Y.Z
 git push origin master
@@ -75,6 +77,8 @@ for ($i = $start + 1; $i -lt $lines.Count; $i++) {
 gh release create "v$version" `
   ".\releases\v$version\rainmeter-desktop-widgets-full-$version.zip" `
   ".\releases\v$version\rainmeter-desktop-widgets-lite-$version.zip" `
+  ".\releases\v$version\rainmeter-desktop-widgets-full-$version.rmskin" `
+  ".\releases\v$version\rainmeter-desktop-widgets-lite-$version.rmskin" `
   --repo kevendai/Rainmeter_todo `
   --title "Rainmeter Desktop Widgets $version" `
   --notes-file $notesPath
@@ -102,6 +106,8 @@ Check the direct release asset redirects:
 ```powershell
 curl.exe -I https://github.com/kevendai/Rainmeter_todo/releases/download/vX.Y.Z/rainmeter-desktop-widgets-full-X.Y.Z.zip
 curl.exe -I https://github.com/kevendai/Rainmeter_todo/releases/download/vX.Y.Z/rainmeter-desktop-widgets-lite-X.Y.Z.zip
+curl.exe -I https://github.com/kevendai/Rainmeter_todo/releases/download/vX.Y.Z/rainmeter-desktop-widgets-full-X.Y.Z.rmskin
+curl.exe -I https://github.com/kevendai/Rainmeter_todo/releases/download/vX.Y.Z/rainmeter-desktop-widgets-lite-X.Y.Z.rmskin
 ```
 
 Check the newer raw updater path:
@@ -109,6 +115,8 @@ Check the newer raw updater path:
 ```powershell
 curl.exe -I https://raw.githubusercontent.com/kevendai/Rainmeter_todo/vX.Y.Z/releases/vX.Y.Z/rainmeter-desktop-widgets-full-X.Y.Z.zip
 curl.exe -I https://raw.githubusercontent.com/kevendai/Rainmeter_todo/vX.Y.Z/releases/vX.Y.Z/rainmeter-desktop-widgets-lite-X.Y.Z.zip
+curl.exe -I https://raw.githubusercontent.com/kevendai/Rainmeter_todo/vX.Y.Z/releases/vX.Y.Z/rainmeter-desktop-widgets-full-X.Y.Z.rmskin
+curl.exe -I https://raw.githubusercontent.com/kevendai/Rainmeter_todo/vX.Y.Z/releases/vX.Y.Z/rainmeter-desktop-widgets-lite-X.Y.Z.rmskin
 ```
 
 If verifying a live install, inspect the compiled host for the version string:

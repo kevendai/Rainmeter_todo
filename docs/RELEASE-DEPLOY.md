@@ -1,9 +1,18 @@
 # 发布包部署说明
 
-本项目发布两个 zip：
+本项目发布两个 `.rmskin` 和两个 zip：
 
+- `rainmeter-desktop-widgets-full-*.rmskin`：已有 Rainmeter 的初始安装包，双击后由 Rainmeter `SkinInstaller.exe` 安装完整功能版。
+- `rainmeter-desktop-widgets-lite-*.rmskin`：已有 Rainmeter 的初始安装包，双击后由 Rainmeter `SkinInstaller.exe` 安装精简版。
 - `rainmeter-desktop-widgets-full-*.zip`：完整功能版，包含待办、今日日程、CalDAV 同步、日程转待办、论文推送和论文标题翻译入口。发布包不会包含 `translation.secret`、`paper-sync.secret`、`caldav.secret`、`tasks.json` 或任何缓存。
 - `rainmeter-desktop-widgets-lite-*.zip`：精简版，包含待办和今日日程，关闭论文推送与论文翻译。CalDAV 日程功能仍可使用。
+
+## 已有 Rainmeter 的初始安装
+
+1. 下载对应的 `.rmskin`。
+2. 双击 `.rmskin`，确认 Rainmeter Skin Installer 窗口中的安装内容。
+3. 点击 Install。安装完成后应看到 `Todo` 和 `Calendar` 两个皮肤。
+4. 初始安装不会迁移旧数据；已有数据或从旧版本更新时，请使用应用内“检查更新”或 zip 部署方式。
 
 ## 空白机器部署
 

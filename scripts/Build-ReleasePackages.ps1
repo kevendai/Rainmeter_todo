@@ -1,5 +1,5 @@
 param(
-    [string]$Version = '1.3.3',
+    [string]$Version = '',
     [string]$OutputRoot = (Join-Path (Split-Path $PSScriptRoot -Parent) 'release-build'),
     [string]$RainmeterInstallerUrl = 'https://github.com/rainmeter/rainmeter/releases/download/v4.5.26.3894/Rainmeter-4.5.26.exe'
 )
@@ -7,6 +7,9 @@ param(
 $ErrorActionPreference = 'Stop'
 
 $projectRoot = Split-Path $PSScriptRoot -Parent
+if ([string]::IsNullOrWhiteSpace($Version)) {
+    $Version = [IO.File]::ReadAllText((Join-Path $projectRoot 'VERSION'), [Text.UTF8Encoding]::new($false)).Trim()
+}
 $cacheRoot = Join-Path $projectRoot '.release-cache'
 $installer = Join-Path $cacheRoot 'Rainmeter-4.5.26.exe'
 $csc = Join-Path ([Environment]::GetFolderPath('Windows')) 'Microsoft.NET\Framework64\v4.0.30319\csc.exe'
@@ -79,6 +82,21 @@ function Convert-IniToUtf16 {
     [IO.File]::WriteAllText($Path, $text, [Text.UnicodeEncoding]::new($false, $true))
 }
 
+function Set-SkinVersion {
+    param([string]$SkinRoot, [string]$IniName)
+    $iniPath = Join-Path $SkinRoot $IniName
+    $text = [IO.File]::ReadAllText($iniPath, [Text.UTF8Encoding]::new($false))
+    if ($text -match '(?m)^Version=') {
+        $text = $text -replace '(?m)^Version=.*$', "Version=$Version"
+    } else {
+        $text = $text -replace '(?m)^Information=.*$', "`$0`r`nVersion=$Version"
+    }
+    [IO.File]::WriteAllText($iniPath, $text, [Text.UTF8Encoding]::new($false))
+    $resources = Join-Path $SkinRoot '@Resources'
+    New-Item -ItemType Directory -Path $resources -Force | Out-Null
+    [IO.File]::WriteAllText((Join-Path $resources 'app-version.txt'), $Version, [Text.UTF8Encoding]::new($false))
+}
+
 function New-UpdaterScript {
     param([string]$Path)
     Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'RainmeterDesktopWidgetsUpdater.ps1') -Destination $Path -Force
@@ -103,6 +121,43 @@ if ($Activate) { $args += '-Activate' }
 '@
     Set-Content -LiteralPath $Path -Value $content -Encoding UTF8
 }
+
+function New-RmskinPackage {
+    param(
+        [string]$Flavor,
+        [string]$DisplayName,
+        [string]$PackageRoot
+    )
+
+    $rmskinRoot = Join-Path $OutputRoot ("rmskin-$Flavor-$Version")
+    if (Test-Path -LiteralPath $rmskinRoot) { Remove-Item -LiteralPath $rmskinRoot -Recurse -Force }
+    New-Item -ItemType Directory -Path $rmskinRoot -Force | Out-Null
+    Copy-Item -Path (Join-Path $PackageRoot 'Skins') -Destination (Join-Path $rmskinRoot 'Skins') -Recurse -Force
+
+    $targetUpdater = Join-Path $rmskinRoot 'Skins\Todo\@Resources\Updater'
+    New-Item -ItemType Directory -Path $targetUpdater -Force | Out-Null
+    Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'RainmeterDesktopWidgetsUpdater.ps1') -Destination (Join-Path $targetUpdater 'RainmeterDesktopWidgetsUpdater.ps1') -Force
+
+    $rmskinIni = @"
+[rmskin]
+Name=$DisplayName
+Author=Codex
+Version=$Version
+LoadType=Skin
+Load=Todo\Todo.ini|Calendar\Calendar.ini
+MinimumRainmeter=4.5.26
+MinimumWindows=10.0
+"@
+    [IO.File]::WriteAllText((Join-Path $rmskinRoot 'RMSKIN.ini'), ($rmskinIni.Trim() + "`r`n"), [Text.UTF8Encoding]::new($false))
+
+    $rmskin = Join-Path $OutputRoot ("rainmeter-desktop-widgets-$Flavor-$Version.rmskin")
+    $rmskinZip = Join-Path $OutputRoot ("rainmeter-desktop-widgets-$Flavor-$Version.rmskin.zip")
+    Compress-Archive -Path (Join-Path $rmskinRoot '*') -DestinationPath $rmskinZip -Force
+    if (Test-Path -LiteralPath $rmskin) { Remove-Item -LiteralPath $rmskin -Force }
+    Move-Item -LiteralPath $rmskinZip -Destination $rmskin -Force
+    Write-Host "Created $rmskin"
+}
+
 function New-Package {
     param(
         [string]$Flavor,
@@ -135,6 +190,8 @@ function New-Package {
         [IO.File]::WriteAllText($todoIni, $ini, [Text.UTF8Encoding]::new($false))
     }
 
+    Set-SkinVersion $todoRoot 'Todo.ini'
+    Set-SkinVersion $calendarRoot 'Calendar.ini'
     Convert-IniToUtf16 (Join-Path $todoRoot 'Todo.ini')
     Convert-IniToUtf16 (Join-Path $calendarRoot 'Calendar.ini')
 
@@ -171,6 +228,7 @@ function New-Package {
     $zip = Join-Path $OutputRoot ($packageName + '.zip')
     Compress-Archive -Path (Join-Path $packageRoot '*') -DestinationPath $zip -Force
     Write-Host "Created $zip"
+    New-RmskinPackage -Flavor $Flavor -DisplayName $DisplayName -PackageRoot $packageRoot
 }
 
 New-Package -Flavor 'full' -DisplayName 'Rainmeter Desktop Widgets Full'

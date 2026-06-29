@@ -1,5 +1,11 @@
 # Release Notes
 
+## 1.3.4 - 2026-06-29
+
+- 统一版本来源：根目录 `VERSION` 现在驱动 Rainmeter 皮肤管理器元数据、后端 About/更新检查版本、发布包 `manifest.json` 和包文件名，减少发版时版本号漂移。
+- 发布包新增 `full` / `lite` 两个 `.rmskin` 初始安装包，已安装 Rainmeter 的用户可以直接用 `SkinInstaller.exe` 安装；自动更新仍使用原有 zip + updater 路径以保留旧数据。
+- 修复本机部署脚本漏编译拆分后的 `Todo*.cs` / `Calendar*.cs` 文件风险，并在部署时同步写入 `app-version.txt` 和皮肤 `Version=`。
+
 ## 1.3.3 - 2026-06-29
 
 - 优化设置页“检查更新”流程：设置页已经确认更新后，独立升级器会直接下载并部署，不再额外弹出第二个确认框。

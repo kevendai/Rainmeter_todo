@@ -1,6 +1,8 @@
 ﻿param([switch]$Activate)
 $ErrorActionPreference = 'Stop'
-$source = Join-Path (Split-Path $PSScriptRoot -Parent) 'skins\Todo'
+$projectRoot = Split-Path $PSScriptRoot -Parent
+$source = Join-Path $projectRoot 'skins\Todo'
+$version = [IO.File]::ReadAllText((Join-Path $projectRoot 'VERSION'), [Text.UTF8Encoding]::new($false)).Trim()
 $rainmeterRoot = 'D:\Program Files (x86)\Rainmeter'
 $target = Join-Path $rainmeterRoot 'Skins\Todo'
 $exe = Join-Path $rainmeterRoot 'Rainmeter.exe'
@@ -27,19 +29,35 @@ $iniText = if ($iniBytes.Length -ge 2 -and $iniBytes[0] -eq 0xFF -and $iniBytes[
 } else {
     [IO.File]::ReadAllText($liveIni, [Text.UTF8Encoding]::new($false))
 }
+$iniText = $iniText -replace '(?m)^Version=.*$', "Version=$version"
 [IO.File]::WriteAllText($liveIni, $iniText, [Text.UnicodeEncoding]::new($false, $true))
+[IO.File]::WriteAllText((Join-Path $target '@Resources\app-version.txt'), $version, [Text.UTF8Encoding]::new($false))
 
-$backendRoot = Join-Path (Split-Path $PSScriptRoot -Parent) 'backend'
+$backendRoot = Join-Path $projectRoot 'backend'
 $commonSource = Join-Path $backendRoot 'Common.cs'
-$hostSource = Join-Path $backendRoot 'TodoApp.cs'
+$hostSources = @(Get-ChildItem -LiteralPath $backendRoot -Filter 'Todo*.cs' | Sort-Object Name | ForEach-Object { $_.FullName })
 $hostExe = Join-Path $target '@Resources\TodoHost.exe'
 $hostBuildExe = Join-Path $target '@Resources\TodoHost.build.exe'
+foreach ($hostProcess in Get-Process -Name TodoHost -ErrorAction SilentlyContinue) {
+    if ($hostProcess.Path -eq $hostExe) {
+        try { $hostProcess.CloseMainWindow() | Out-Null } catch {}
+    }
+}
+Start-Sleep -Milliseconds 500
+foreach ($hostProcess in Get-Process -Name TodoHost -ErrorAction SilentlyContinue) {
+    if ($hostProcess.Path -eq $hostExe) {
+        try {
+            if (-not $hostProcess.HasExited) { $hostProcess.Kill() }
+            $hostProcess.WaitForExit(3000)
+        } catch {}
+    }
+}
 $csc = Join-Path ([Environment]::GetFolderPath('Windows')) 'Microsoft.NET\Framework64\v4.0.30319\csc.exe'
 if (-not (Test-Path -LiteralPath $csc)) {
     $csc = Join-Path ([Environment]::GetFolderPath('Windows')) 'Microsoft.NET\Framework\v4.0.30319\csc.exe'
 }
 if (-not (Test-Path -LiteralPath $csc)) { throw "C# compiler not found; cannot build TodoHost.exe" }
-& $csc /nologo /target:winexe /optimize+ /r:System.Web.Extensions.dll /r:System.Windows.Forms.dll /r:System.Drawing.dll /r:System.Security.dll "/out:$hostBuildExe" $commonSource $hostSource
+& $csc /nologo /target:winexe /optimize+ /r:System.Web.Extensions.dll /r:System.Windows.Forms.dll /r:System.Drawing.dll /r:System.Security.dll "/out:$hostBuildExe" $commonSource $hostSources
 if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $hostBuildExe)) { throw 'Failed to build TodoHost.exe' }
 $moved = $false
 foreach ($attempt in 1..20) {

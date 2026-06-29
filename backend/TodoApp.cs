@@ -14,8 +14,9 @@ using RainmeterBackend;
 
 internal static partial class TodoApp
 {
-    private const string AppVersion = "1.3.3";
     private const string GitHubRepository = "kevendai/Rainmeter_todo";
+    private static string ResourceDir = AppDomain.CurrentDomain.BaseDirectory.TrimEnd(Path.DirectorySeparatorChar);
+    private static readonly string AppVersion = LoadAppVersion();
 #if NO_PAPER_FEATURES
     private static readonly bool PaperFeaturesEnabled = false;
     private const string AppFlavor = "lite";
@@ -25,7 +26,6 @@ internal static partial class TodoApp
     private const string AppFlavor = "full";
     private const string AppFlavorName = "Full 完整版";
 #endif
-    private static string ResourceDir = AppDomain.CurrentDomain.BaseDirectory.TrimEnd(Path.DirectorySeparatorChar);
     private static string StatePath { get { return Path.Combine(ResourceDir, "tasks.json"); } }
     private static string IncludePath { get { return Path.Combine(ResourceDir, "Generated.inc"); } }
     private static string GuardPath { get { return Path.Combine(ResourceDir, ".refresh-guard"); } }
@@ -33,6 +33,17 @@ internal static partial class TodoApp
     private static string PaperCache { get { return Path.Combine(ResourceDir, "PaperCache"); } }
     private static string PaperSyncSecret { get { return Path.Combine(ResourceDir, "paper-sync.secret"); } }
     private static string TranslationSecret { get { return Path.Combine(ResourceDir, "translation.secret"); } }
+
+    private static string LoadAppVersion()
+    {
+        string versionPath = Path.Combine(ResourceDir, "app-version.txt");
+        if (File.Exists(versionPath))
+        {
+            string value = File.ReadAllText(versionPath, Encoding.UTF8).Trim();
+            if (value != "") return value;
+        }
+        return "0.0.0";
+    }
 
     [STAThread]
     private static int Main(string[] args)
