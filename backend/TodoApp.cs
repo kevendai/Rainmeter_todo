@@ -14,8 +14,8 @@ using RainmeterBackend;
 
 internal static class TodoApp
 {
-    private const string AppVersion = "1.2.1";
-    private const string GitHubRepoApi = "https://api.github.com/repos/kevendai/Rainmeter_todo";
+    private const string AppVersion = "1.2.2";
+    private const string GitHubRepository = "kevendai/Rainmeter_todo";
 #if NO_PAPER_FEATURES
     private static readonly bool PaperFeaturesEnabled = false;
     private const string AppFlavor = "lite";
@@ -29,6 +29,7 @@ internal static class TodoApp
     private static string StatePath { get { return Path.Combine(ResourceDir, "tasks.json"); } }
     private static string IncludePath { get { return Path.Combine(ResourceDir, "Generated.inc"); } }
     private static string GuardPath { get { return Path.Combine(ResourceDir, ".refresh-guard"); } }
+    private static string UpdaterScript { get { return Path.Combine(ResourceDir, "Updater", "RainmeterDesktopWidgetsUpdater.ps1"); } }
     private static string PaperCache { get { return Path.Combine(ResourceDir, "PaperCache"); } }
     private static string PaperSyncSecret { get { return Path.Combine(ResourceDir, "paper-sync.secret"); } }
     private static string TranslationSecret { get { return Path.Combine(ResourceDir, "translation.secret"); } }
@@ -451,7 +452,7 @@ internal static class TodoApp
         Label aboutTitle = new Label { Text = "Rainmeter Desktop Widgets", Left = 0, Top = 4, Width = w, Height = 32, ForeColor = LightUi.Text, BackColor = Color.Transparent, Font = new Font("Microsoft YaHei UI", 14F, FontStyle.Bold) };
         Label aboutVersion = new Label { Text = "当前版本：" + AppVersion + "（" + AppFlavorName + "）", Left = 0, Top = 54, Width = w, Height = 24, ForeColor = LightUi.Text, BackColor = Color.Transparent, Font = new Font("Microsoft YaHei UI", 10F, FontStyle.Bold) };
         Label aboutRepo = LightUi.Label("更新源：github.com/kevendai/Rainmeter_todo", 0, 88, w);
-        Label aboutHint = LightUi.Label("检查更新会下载与当前版本类型相同的 zip 包。", 0, 120, w);
+        Label aboutHint = LightUi.Label("检查更新会启动独立升级器，并优先更新升级器本身。", 0, 120, w);
         aboutPage.Controls.AddRange(new Control[] { aboutTitle, aboutVersion, aboutRepo, aboutHint });
 
         Label updateStatus = LightUi.Label("尚未检查更新", x, 476, 300);
@@ -569,46 +570,20 @@ internal static class TodoApp
             try
             {
                 checkUpdate.Enabled = false;
-                updateStatus.Text = "正在检查 GitHub...";
+                updateStatus.Text = "正在启动独立升级器...";
                 updateStatus.ForeColor = LightUi.Muted;
                 updateStatus.Refresh();
                 Application.DoEvents();
-                UpdateInfo info = CheckUpdate();
-                if (info.IsNewer)
-                {
-                    updateStatus.Text = "检测到新版本：" + info.Tag;
-                    updateStatus.ForeColor = LightUi.Accent;
-                    DialogResult update = MessageBox.Show(
-                        "检测到新版本 " + info.Tag + "（" + AppFlavorName + "）。\r\n\r\n是否现在下载并自动部署？部署脚本会重启 Rainmeter。",
-                        "检查更新",
-                        MessageBoxButtons.YesNo,
-                        MessageBoxIcon.Question);
-                    if (update != DialogResult.Yes)
-                    {
-                        updateStatus.Text = "已取消更新：" + info.Tag;
-                        updateStatus.ForeColor = LightUi.Muted;
-                        return;
-                    }
-                    updateStatus.Text = "正在下载 " + info.Tag + "...";
-                    updateStatus.ForeColor = LightUi.Muted;
-                    updateStatus.Refresh();
-                    Application.DoEvents();
-                    DownloadAndStartUpdate(info);
-                    updateStatus.Text = "已下载并开始部署 " + info.Tag + "（" + AppFlavor + "）";
-                    updateStatus.ForeColor = Color.FromArgb(63, 178, 119);
-                    f.BeginInvoke(new Action(f.Close));
-                }
-                else
-                {
-                    updateStatus.Text = CompareVersions(NormalizeVersion(info.Tag), AppVersion) == 0 ? "已是最新版本：" + info.Tag : "当前版本高于最新标签：" + info.Tag;
-                    updateStatus.ForeColor = Color.FromArgb(63, 178, 119);
-                }
+                StartExternalUpdater();
+                updateStatus.Text = "已启动独立升级器";
+                updateStatus.ForeColor = Color.FromArgb(63, 178, 119);
+                f.BeginInvoke(new Action(f.Close));
             }
             catch (Exception ex)
             {
-                updateStatus.Text = "检查更新失败";
+                updateStatus.Text = "启动升级器失败";
                 updateStatus.ForeColor = LightUi.Danger;
-                LightUi.Error("检查更新失败：" + ex.Message);
+                LightUi.Error("启动升级器失败：" + ex.Message);
             }
             finally { checkUpdate.Enabled = true; }
         };
@@ -617,98 +592,17 @@ internal static class TodoApp
         f.ShowDialog();
     }
 
-    private sealed class UpdateInfo
+    private static void StartExternalUpdater()
     {
-        public string Tag;
-        public string AssetName;
-        public string AssetUrl;
-        public string DownloadPath;
-        public bool IsNewer;
-    }
-
-    private static UpdateInfo CheckUpdate()
-    {
-        ServicePointManager.SecurityProtocol |= (SecurityProtocolType)3072;
-        string tagsRaw = GitHubGet(GitHubRepoApi + "/tags");
-        string tag = LatestTag(tagsRaw);
-        if (tag == "") throw new Exception("GitHub 上没有可用版本标签");
-        string latestVersion = NormalizeVersion(tag);
-        bool newer = CompareVersions(latestVersion, AppVersion) > 0;
-        UpdateInfo info = new UpdateInfo { Tag = tag, IsNewer = newer };
-        if (!newer) return info;
-
-        info.AssetName = "rainmeter-desktop-widgets-" + AppFlavor + "-" + latestVersion + ".zip";
-        info.AssetUrl = "https://raw.githubusercontent.com/kevendai/Rainmeter_todo/" + Uri.EscapeDataString(tag) + "/releases/" + Uri.EscapeDataString(tag) + "/" + Uri.EscapeDataString(info.AssetName);
-        EnsureRemotePackageExists(info.AssetUrl);
-        return info;
-    }
-
-    private static void EnsureRemotePackageExists(string url)
-    {
-        HttpWebRequest request = (HttpWebRequest)WebRequest.Create(url);
-        request.Method = "HEAD";
-        request.Timeout = 10000;
-        request.ReadWriteTimeout = 10000;
-        request.UserAgent = "RainmeterDesktopWidgets/" + AppVersion;
-        try { using (request.GetResponse()) { } }
-        catch (WebException ex)
-        {
-            HttpWebResponse response = ex.Response as HttpWebResponse;
-            if (response != null && response.StatusCode == HttpStatusCode.NotFound) throw new Exception("最新标签下没有对应的 " + AppFlavor + " 版本 zip 包");
-            throw;
-        }
-    }
-
-    private static void DownloadAndStartUpdate(UpdateInfo info)
-    {
-        if (info == null || String.IsNullOrEmpty(info.AssetUrl) || String.IsNullOrEmpty(info.AssetName)) throw new Exception("更新包信息不完整");
-        string downloads = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "Downloads");
-        Directory.CreateDirectory(downloads);
-        string target = Path.Combine(downloads, info.AssetName);
-        using (WebClient client = new WebClient())
-        {
-            client.Headers[HttpRequestHeader.UserAgent] = "RainmeterDesktopWidgets/" + AppVersion;
-            client.DownloadFile(info.AssetUrl, target);
-        }
-        info.DownloadPath = target;
-        StartUpdateInstaller(target);
-    }
-
-    private static void StartUpdateInstaller(string zipPath)
-    {
-        string rainmeterRoot = CurrentRainmeterRoot();
-        string script = Path.Combine(Path.GetTempPath(), "RainmeterDesktopWidgetsUpdate-" + Guid.NewGuid().ToString("N") + ".ps1");
-        string content =
-@"param(
-    [string]$ZipPath,
-    [string]$RainmeterRoot,
-    [int]$WaitForProcessId
-)
-$ErrorActionPreference = 'Stop'
-$extractRoot = Join-Path $env:TEMP ('RainmeterDesktopWidgetsUpdate-' + [guid]::NewGuid().ToString('N'))
-New-Item -ItemType Directory -Path $extractRoot -Force | Out-Null
-Unblock-File -LiteralPath $ZipPath -ErrorAction SilentlyContinue
-Expand-Archive -LiteralPath $ZipPath -DestinationPath $extractRoot -Force
-Get-ChildItem -LiteralPath $extractRoot -Recurse -File | Unblock-File -ErrorAction SilentlyContinue
-$installer = Get-ChildItem -LiteralPath $extractRoot -Recurse -Filter 'Install-Skins.ps1' -File | Select-Object -First 1
-if ($null -eq $installer) { throw 'Install-Skins.ps1 not found in update package.' }
-if ($WaitForProcessId -gt 0) {
-    try { Wait-Process -Id $WaitForProcessId -Timeout 30 -ErrorAction SilentlyContinue } catch {}
-}
-try {
-    & powershell -ExecutionPolicy Bypass -File $installer.FullName -RainmeterRoot $RainmeterRoot -Activate
-}
-finally {
-    Remove-Item -LiteralPath $extractRoot -Recurse -Force -ErrorAction SilentlyContinue
-    if ((Split-Path -Leaf $ZipPath) -like 'rainmeter-desktop-widgets-*.zip') {
-        Remove-Item -LiteralPath $ZipPath -Force -ErrorAction SilentlyContinue
-    }
-}
-";
-        File.WriteAllText(script, content, new UTF8Encoding(false));
-        string arguments = "-NoProfile -ExecutionPolicy Bypass -File " + QuoteArg(script)
-            + " -ZipPath " + QuoteArg(zipPath)
-            + " -RainmeterRoot " + QuoteArg(rainmeterRoot)
+        if (!File.Exists(UpdaterScript)) throw new Exception("未找到独立升级器：" + UpdaterScript);
+        string arguments = "-NoProfile -ExecutionPolicy Bypass -File " + QuoteArg(UpdaterScript)
+            + " -Mode CheckAndInstall"
+            + " -Repository " + QuoteArg(GitHubRepository)
+            + " -CurrentVersion " + QuoteArg(AppVersion)
+            + " -Flavor " + QuoteArg(AppFlavor)
+            + " -FlavorName " + QuoteArg(AppFlavorName)
+            + " -RainmeterRoot " + QuoteArg(CurrentRainmeterRoot())
+            + " -Activate"
             + " -WaitForProcessId " + Process.GetCurrentProcess().Id.ToString(CultureInfo.InvariantCulture);
         Process.Start(new ProcessStartInfo("powershell.exe", arguments) { UseShellExecute = false, CreateNoWindow = false });
     }
@@ -727,58 +621,6 @@ finally {
     private static string QuoteArg(string value)
     {
         return "\"" + (value ?? "").Replace("\"", "\\\"") + "\"";
-    }
-
-    private static string LatestTag(string raw)
-    {
-        string best = "";
-        foreach (object item in JsonUtil.Array(JsonUtil.Deserialize(raw)))
-        {
-            Dictionary<string, object> tag = JsonUtil.Object(item);
-            string name = S(tag, "name");
-            if (!Regex.IsMatch(NormalizeVersion(name), @"^\d")) continue;
-            if (best == "" || CompareVersions(name, best) > 0) best = name;
-        }
-        return best;
-    }
-
-    private static string GitHubGet(string url)
-    {
-        HttpWebRequest request = (HttpWebRequest)WebRequest.Create(url);
-        request.Method = "GET";
-        request.Timeout = 10000;
-        request.ReadWriteTimeout = 10000;
-        request.UserAgent = "RainmeterDesktopWidgets/" + AppVersion;
-        request.Accept = "application/vnd.github+json";
-        using (HttpWebResponse response = (HttpWebResponse)request.GetResponse())
-        using (StreamReader reader = new StreamReader(response.GetResponseStream(), Encoding.UTF8))
-            return reader.ReadToEnd();
-    }
-
-    private static string NormalizeVersion(string value)
-    {
-        value = (value ?? "").Trim();
-        if (value.StartsWith("v", StringComparison.OrdinalIgnoreCase)) value = value.Substring(1);
-        Match match = Regex.Match(value, @"\d+(?:\.\d+){0,3}");
-        return match.Success ? match.Value : value;
-    }
-
-    private static int CompareVersions(string left, string right)
-    {
-        int[] a = VersionParts(left), b = VersionParts(right);
-        for (int i = 0; i < Math.Max(a.Length, b.Length); i++)
-        {
-            int av = i < a.Length ? a[i] : 0, bv = i < b.Length ? b[i] : 0;
-            if (av != bv) return av.CompareTo(bv);
-        }
-        return 0;
-    }
-
-    private static int[] VersionParts(string value)
-    {
-        return NormalizeVersion(value).Split(new[] { '.' }, StringSplitOptions.RemoveEmptyEntries)
-            .Select(part => { int parsed; return Int32.TryParse(part, NumberStyles.Integer, CultureInfo.InvariantCulture, out parsed) ? parsed : 0; })
-            .ToArray();
     }
 
     private static IEnumerable<string> CommonLabels(Dictionary<string, object> task)

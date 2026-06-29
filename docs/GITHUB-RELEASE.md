@@ -31,7 +31,7 @@ $archive = [IO.Compression.ZipFile]::OpenRead($zip)
 try {
     $manifest = $archive.GetEntry('manifest.json')
     $reader = [IO.StreamReader]::new($manifest.Open())
-    try { $reader.ReadToEnd() | ConvertFrom-Json | Select-Object version,paper_features }
+    try { $reader.ReadToEnd() | ConvertFrom-Json | Select-Object version,updater_version,paper_features }
     finally { $reader.Dispose() }
 }
 finally { $archive.Dispose() }
