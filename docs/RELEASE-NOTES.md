@@ -1,5 +1,11 @@
 # Release Notes
 
+## 1.3.1 - 2026-06-29
+
+- 拆分 Calendar 后端结构：`CalendarApp.cs` 保留命令入口，日历状态存储、CalDAV 同步、日程转待办规则、ICS 读写、WinForms 管理窗口和 Rainmeter 渲染分别移动到独立的 `Calendar*.cs` 模块。
+- 打包和后端测试脚本改为自动编译所有 `Calendar*.cs`，与 1.3.0 的 Todo 模块化方式一致，降低后续继续拆分时漏编译新文件的风险。
+- 保持现有日程 UI、CalDAV 数据格式、Rainmeter 皮肤入口和旧升级器包路径兼容；本版本只调整代码组织，不迁移用户数据。
+
 ## 1.3.0 - 2026-06-29
 
 - 拆分 Todo 后端结构：`TodoApp.cs` 现在保留命令入口，待办数据存储、业务规则、Rainmeter 渲染、设置/管理窗口和更新/论文同步逻辑分别移动到独立 `Todo*.cs` 模块，为后续从 Rainmeter 宿主中脱离做准备。

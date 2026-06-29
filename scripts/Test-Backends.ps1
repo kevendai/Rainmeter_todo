@@ -13,9 +13,10 @@ try {
     $calendar = Join-Path $build 'CalendarHost.exe'
     $smoke = Join-Path $build 'SmokeTests.exe'
     $todoSources = @(Get-ChildItem -LiteralPath $backend -Filter 'Todo*.cs' | Sort-Object Name | ForEach-Object { $_.FullName })
+    $calendarSources = @(Get-ChildItem -LiteralPath $backend -Filter 'Calendar*.cs' | Sort-Object Name | ForEach-Object { $_.FullName })
     & $csc /nologo /target:winexe /optimize+ @refs "/out:$todo" (Join-Path $backend 'Common.cs') @todoSources
     if ($LASTEXITCODE -ne 0) { throw 'Todo backend compilation failed' }
-    & $csc /nologo /target:winexe /optimize+ @refs "/out:$calendar" (Join-Path $backend 'Common.cs') (Join-Path $backend 'CalendarApp.cs')
+    & $csc /nologo /target:winexe /optimize+ @refs "/out:$calendar" (Join-Path $backend 'Common.cs') @calendarSources
     if ($LASTEXITCODE -ne 0) { throw 'Calendar backend compilation failed' }
     & $csc /nologo /target:exe /optimize+ /r:System.Web.Extensions.dll "/out:$smoke" (Join-Path $backend 'SmokeTests.cs')
     if ($LASTEXITCODE -ne 0) { throw 'Smoke test compilation failed' }
