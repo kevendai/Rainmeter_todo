@@ -65,13 +65,6 @@ try {
 Remove-Item -LiteralPath (Join-Path $target '@Resources\Calendar.ps1') -Force -ErrorAction SilentlyContinue
 Remove-Item -LiteralPath (Join-Path $target '@Resources\CalendarHost.cs') -Force -ErrorAction SilentlyContinue
 
-$liveSecret = Join-Path $rainmeterRoot 'Skins\Todo\@Resources\caldav.secret'
-$sourceSecret = Join-Path $projectRoot 'skins\Todo\@Resources\caldav.secret'
-if (-not (Test-Path -LiteralPath $liveSecret) -and (Test-Path -LiteralPath $sourceSecret)) {
-    New-Item -ItemType Directory -Path (Split-Path $liveSecret -Parent) -Force | Out-Null
-    Copy-Item -LiteralPath $sourceSecret -Destination $liveSecret -Force
-}
-
 & $hostExe Render
 if ($LASTEXITCODE -ne 0) { throw 'CalendarHost Render failed' }
 & $exe '!RefreshApp'

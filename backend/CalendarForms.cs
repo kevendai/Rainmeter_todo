@@ -32,8 +32,9 @@ internal static partial class CalendarApp
         };
         f.Controls.Add(new Label{Text="日历",Left=26,Top=92,Width=120,Height=22,BackColor=Color.Transparent,ForeColor=LightUi.Text,Font=new System.Drawing.Font("Microsoft YaHei UI",9.5F,System.Drawing.FontStyle.Bold)});
         string selectedSource=isNew&&hasCalDav?"caldav":originalCalDav&&hasCalDav?"caldav":"local";
+        bool allowSourceChange=isNew||(!originalCalDav&&hasCalDav);
         Button localSource=LightUi.Button("本地日历",26,118,110,DialogResult.None),caldavSource=LightUi.Button("CalDAV 日历",144,118,124,DialogResult.None);
-        localSource.Height=caldavSource.Height=36;localSource.TextAlign=caldavSource.TextAlign=ContentAlignment.MiddleCenter;caldavSource.Visible=hasCalDav;localSource.Enabled=caldavSource.Enabled=isNew;
+        localSource.Height=caldavSource.Height=36;localSource.TextAlign=caldavSource.TextAlign=ContentAlignment.MiddleCenter;caldavSource.Visible=hasCalDav;localSource.Enabled=caldavSource.Enabled=allowSourceChange;
         Action paintSource=delegate{Button[] sourceButtons=new[]{localSource,caldavSource};foreach(Button b in sourceButtons){bool active=(b==localSource&&selectedSource=="local")||(b==caldavSource&&selectedSource=="caldav");b.BackColor=active?LightUi.AccentFill:Color.FromArgb(246,251,255);b.ForeColor=active?Color.White:LightUi.Text;b.FlatAppearance.BorderSize=0;b.FlatAppearance.BorderColor=b.BackColor;b.FlatAppearance.MouseOverBackColor=active?Color.FromArgb(38,118,222):Color.White;b.FlatAppearance.MouseDownBackColor=active?Color.FromArgb(25,94,185):Color.FromArgb(235,245,253);b.Font=new System.Drawing.Font("Microsoft YaHei UI",9F,active?System.Drawing.FontStyle.Bold:System.Drawing.FontStyle.Regular);}};localSource.MouseEnter+=delegate{paintSource();};caldavSource.MouseEnter+=delegate{paintSource();};localSource.MouseLeave+=delegate{paintSource();};caldavSource.MouseLeave+=delegate{paintSource();};localSource.Click+=delegate{selectedSource="local";paintSource();};caldavSource.Click+=delegate{selectedSource="caldav";paintSource();};paintSource();f.Controls.AddRange(new Control[]{localSource,caldavSource});
         TextBox title=addField("标题 *",26,178,588,38,isNew?"":CleanTitle(S(original,"title")));
         f.Controls.Add(new Label{Text="日期与时间",Left=26,Top=240,Width=160,Height=22,BackColor=Color.Transparent,ForeColor=LightUi.Text,Font=new System.Drawing.Font("Microsoft YaHei UI",9.5F,System.Drawing.FontStyle.Bold)});
@@ -90,18 +91,39 @@ internal static partial class CalendarApp
         Button delete=LightUi.DangerButton("删除日程",18,5,96,DialogResult.None);delete.Visible=!isNew;Button cancel=LightUi.Button("取消",416,5,74,DialogResult.Cancel);Button save=LightUi.PrimaryButton("保存",500,5,74,DialogResult.None);footer.Controls.AddRange(new Control[]{delete,cancel,save});f.Controls.Add(footer);f.CancelButton=cancel;
         delete.BringToFront();cancel.BringToFront();save.BringToFront();
         bool deleted=false;
+        bool saved=false;
+        Func<bool> saveDraft=delegate{
+            string cleanTitle=title.Text.Trim();if(cleanTitle==""){LightUi.Error("标题不能为空");return false;}
+            DateTime day=selectedDate.Date;DateTimeOffset start=allDaySelected?new DateTimeOffset(day,TimeZoneInfo.Local.GetUtcOffset(day)):new DateTimeOffset(day.Year,day.Month,day.Day,selectedStart.Hours,selectedStart.Minutes,0,TimeZoneInfo.Local.GetUtcOffset(day));
+            DateTimeOffset end=allDaySelected?start.AddDays(1):new DateTimeOffset(day.Year,day.Month,day.Day,selectedEnd.Hours,selectedEnd.Minutes,0,TimeZoneInfo.Local.GetUtcOffset(day));if(end<=start){LightUi.Error("结束时间不能早于开始时间");return false;}
+            if(recurringCalDav){DialogResult confirm=MessageBox.Show("这会修改整个周期日程，所有后续重复项都会一起更新。确定继续吗？","改写周期日程",MessageBoxButtons.YesNo,MessageBoxIcon.Warning);if(confirm!=DialogResult.Yes)return false;}
+            if(originalCustomAlarmCount>customAlarms.Count){DialogResult confirmCustom=MessageBox.Show("你删除了 CalDAV 额外提醒。保存后这些提醒会从远端日程删除，之后本界面也不支持重新创建这种格式的提醒。确定继续吗？","删除 CalDAV 额外提醒",MessageBoxButtons.YesNo,MessageBoxIcon.Warning);if(confirmCustom!=DialogResult.Yes)return false;}
+            string locationText=location.Text.Trim()=="添加地点"?"":location.Text.Trim(),urlText=url.Text.Trim()=="添加会议链接、网页或本地路径"?"":url.Text.Trim(),descriptionText=description.Text.Trim()=="添加备注"?"":description.Text.Trim();
+            List<int> editableReminders=reminderMinutes.Concat(customStartReminders.Where(x=>!disabledCustomStartReminders.Contains(x))).Distinct().OrderBy(x=>x).ToList();
+            string selected=selectedSource=="caldav"?"caldav":"local";Dictionary<string,object> draft=DraftEvent(original,selected,cleanTitle,start,end,allDaySelected,locationText,urlText,descriptionText,editableReminders,customAlarms);
+            try{
+                if(selected=="caldav"){
+                    if(recurringCalDav)SaveCalDavSeriesEvent(draft,cache);else SaveCalDavEvent(draft,cache);
+                    if(!isNew&&!originalCalDav)DeleteLocalEvent(original,state);
+                }else{
+                    SaveLocalEvent(draft,state);cache["status"]="已保存到本地日历";
+                }
+                return true;
+            }catch(Exception ex){
+                if(selected=="caldav"&&isNew){
+                    Dictionary<string,object> localDraft=DraftEvent(original,"local",cleanTitle,start,end,allDaySelected,locationText,urlText,descriptionText,editableReminders,customAlarms);
+                    SaveLocalEvent(localDraft,state);
+                    selectedSource="local";caldavSource.Enabled=false;hint.Text="CalDAV 连接失败，已保存到本地日历。";paintSource();
+                    cache["status"]="CalDAV 保存失败，已改为本地日历："+ex.Message;
+                    LightUi.Error("CalDAV 连接超时或保存失败，内容已先保存为本地日程。之后可以在日程管理中编辑它并切换到 CalDAV。");
+                    return true;
+                }
+                LightUi.Error(ex.Message);return false;
+            }
+        };
         delete.Click+=delegate{string mode="series";if(B(original,"recurring")){DialogResult choice=MessageBox.Show("这是周期日程。选择“是”删除整组，选择“否”只在本机隐藏本次。","删除周期日程",MessageBoxButtons.YesNoCancel,MessageBoxIcon.Warning);if(choice==DialogResult.Cancel)return;mode=choice==DialogResult.Yes?"series":"once";}else if(!LightUi.Confirm("确定删除这个日程吗？","删除日程"))return;try{if(originalCalDav)DeleteCalDavEvent(original,cache,state,mode);else DeleteLocalEvent(original,state);deleted=true;f.DialogResult=DialogResult.OK;f.Close();}catch(Exception ex){LightUi.Error(ex.Message);}};
-        save.Click+=delegate{f.DialogResult=DialogResult.OK;f.Close();};
-        if(f.ShowDialog()!=DialogResult.OK)return false;if(deleted)return true;
-        string cleanTitle=title.Text.Trim();if(cleanTitle==""){LightUi.Error("标题不能为空");return false;}
-        DateTime day=selectedDate.Date;DateTimeOffset start=allDaySelected?new DateTimeOffset(day,TimeZoneInfo.Local.GetUtcOffset(day)):new DateTimeOffset(day.Year,day.Month,day.Day,selectedStart.Hours,selectedStart.Minutes,0,TimeZoneInfo.Local.GetUtcOffset(day));
-        DateTimeOffset end=allDaySelected?start.AddDays(1):new DateTimeOffset(day.Year,day.Month,day.Day,selectedEnd.Hours,selectedEnd.Minutes,0,TimeZoneInfo.Local.GetUtcOffset(day));if(end<=start){LightUi.Error("结束时间不能早于开始时间");return false;}
-        if(recurringCalDav){DialogResult confirm=MessageBox.Show("这会修改整个周期日程，所有后续重复项都会一起更新。确定继续吗？","改写周期日程",MessageBoxButtons.YesNo,MessageBoxIcon.Warning);if(confirm!=DialogResult.Yes)return false;}
-        if(originalCustomAlarmCount>customAlarms.Count){DialogResult confirmCustom=MessageBox.Show("你删除了 CalDAV 额外提醒。保存后这些提醒会从远端日程删除，之后本界面也不支持重新创建这种格式的提醒。确定继续吗？","删除 CalDAV 额外提醒",MessageBoxButtons.YesNo,MessageBoxIcon.Warning);if(confirmCustom!=DialogResult.Yes)return false;}
-        string locationText=location.Text.Trim()=="添加地点"?"":location.Text.Trim(),urlText=url.Text.Trim()=="添加会议链接、网页或本地路径"?"":url.Text.Trim(),descriptionText=description.Text.Trim()=="添加备注"?"":description.Text.Trim();
-        List<int> editableReminders=reminderMinutes.Concat(customStartReminders.Where(x=>!disabledCustomStartReminders.Contains(x))).Distinct().OrderBy(x=>x).ToList();
-        string selected=selectedSource=="caldav"?"caldav":"local";Dictionary<string,object> draft=DraftEvent(original,selected,cleanTitle,start,end,allDaySelected,locationText,urlText,descriptionText,editableReminders,customAlarms);
-        try{if(selected=="caldav"){if(recurringCalDav)SaveCalDavSeriesEvent(draft,cache);else SaveCalDavEvent(draft,cache);}else{SaveLocalEvent(draft,state);cache["status"]="已保存到本地日历";}return true;}catch(Exception ex){LightUi.Error(ex.Message);return false;}
+        save.Click+=delegate{if(saveDraft()){saved=true;f.DialogResult=DialogResult.OK;f.Close();}};
+        if(f.ShowDialog()!=DialogResult.OK)return false;if(deleted||saved)return true;return false;
     }
 
     private static Dictionary<string,object> ReadCredentials()
