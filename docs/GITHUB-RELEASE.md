@@ -10,6 +10,14 @@ This project has two release surfaces that must stay aligned:
 Run from the repository root:
 
 ```powershell
+$version = 'X.Y.Z'
+
+# VERSION is the single source of truth for host binaries, skin metadata,
+# manifests, and package file names.
+[IO.File]::WriteAllText((Resolve-Path .\VERSION).Path, "$version`r`n", [Text.UTF8Encoding]::new($false))
+
+# Add a matching "## X.Y.Z - YYYY-MM-DD" section to docs\RELEASE-NOTES.md
+# before building. The GitHub Release step extracts notes from that section.
 powershell -ExecutionPolicy Bypass -File .\scripts\Test-Backends.ps1
 powershell -ExecutionPolicy Bypass -File .\scripts\Build-ReleasePackages.ps1
 ```
@@ -24,20 +32,49 @@ Copy-Item .\release-build\rainmeter-desktop-widgets-full-X.Y.Z.rmskin .\releases
 Copy-Item .\release-build\rainmeter-desktop-widgets-lite-X.Y.Z.rmskin .\releases\vX.Y.Z\ -Force
 ```
 
-Before committing, inspect the zip contents:
+Before committing, inspect both zip manifests, app versions, feature flags, and user-data exclusions:
 
 ```powershell
+$version = 'X.Y.Z'
 Add-Type -AssemblyName System.IO.Compression.FileSystem
-$zip = Resolve-Path .\release-build\rainmeter-desktop-widgets-full-X.Y.Z.zip
-$archive = [IO.Compression.ZipFile]::OpenRead($zip)
-try {
-    $manifest = $archive.GetEntry('manifest.json')
-    $reader = [IO.StreamReader]::new($manifest.Open())
-    try { $reader.ReadToEnd() | ConvertFrom-Json | Select-Object version,updater_version,paper_features }
+
+foreach ($flavor in 'full','lite') {
+  $zip = Resolve-Path ".\release-build\rainmeter-desktop-widgets-$flavor-$version.zip"
+  $archive = [IO.Compression.ZipFile]::OpenRead($zip)
+  try {
+    $manifestEntry = $archive.Entries | Where-Object FullName -eq 'manifest.json' | Select-Object -First 1
+    $reader = [IO.StreamReader]::new($manifestEntry.Open())
+    try { $manifest = $reader.ReadToEnd() | ConvertFrom-Json }
     finally { $reader.Dispose() }
+
+    $appEntry = $archive.Entries | Where-Object { $_.FullName -eq 'Skins\Todo\@Resources\app-version.txt' } | Select-Object -First 1
+    $reader = [IO.StreamReader]::new($appEntry.Open())
+    try { $appVersion = $reader.ReadToEnd().Trim() }
+    finally { $reader.Dispose() }
+
+    $bad = $archive.Entries |
+      Where-Object { $_.FullName -match '(translation\.secret|paper-sync\.secret|caldav\.secret|tasks\.json|calendar-cache\.json|calendar-state\.json)$' } |
+      Select-Object -ExpandProperty FullName
+
+    [pscustomobject]@{
+      Flavor = $flavor
+      Version = $manifest.version
+      Updater = $manifest.updater_version
+      PaperFeatures = $manifest.paper_features
+      AppVersion = $appVersion
+      BadEntries = ($bad -join ', ')
+    }
+  }
+  finally { $archive.Dispose() }
 }
-finally { $archive.Dispose() }
 ```
+
+Expected values:
+
+- `full`: `Version = X.Y.Z`, `AppVersion = X.Y.Z`, `PaperFeatures = True`, `BadEntries` empty.
+- `lite`: `Version = X.Y.Z`, `AppVersion = X.Y.Z`, `PaperFeatures = False`, `BadEntries` empty.
+
+Zip entries use Windows-style `\` separators because `Compress-Archive` preserves the PowerShell source path style; use `Skins\Todo\@Resources\app-version.txt`, not `Skins/Todo/@Resources/app-version.txt`, when reading entries.
 
 Also verify that `Install-Skins.ps1` uses the package directory as its root:
 
@@ -48,7 +85,13 @@ Select-String -Path .\release-build\rainmeter-desktop-widgets-full-X.Y.Z\Install
 ## Commit And Tag
 
 ```powershell
-git add VERSION README.md docs\RELEASE-NOTES.md docs\RELEASE-DEPLOY.md docs\GITHUB-RELEASE.md scripts\Build-ReleasePackages.ps1 releases\vX.Y.Z
+git status --short
+git tag --list vX.Y.Z
+git add VERSION docs\RELEASE-NOTES.md releases\vX.Y.Z
+# Add the actual source/script/docs files changed for this release, for example:
+# git add backend\CalendarForms.cs scripts\Deploy-Calendar.ps1 docs\GITHUB-RELEASE.md
+git diff --cached --name-only
+git diff --cached --stat
 git commit -m "Release vX.Y.Z"
 git tag vX.Y.Z
 git push origin master
@@ -56,6 +99,8 @@ git push origin vX.Y.Z
 ```
 
 If the tag already exists, do not move it casually. Prefer a new patch version unless the user explicitly wants to replace the same tag for a test.
+
+In the Codex desktop sandbox, writing `.git/index.lock` may require an escalated `git add` / `commit` / `tag` / `push`. That is expected; do not work around it by copying `.git` files manually.
 
 ## GitHub Release Assets
 
@@ -65,8 +110,7 @@ Older installed versions may require an actual GitHub Release with zip assets. I
 $version = 'X.Y.Z'
 $notesPath = ".\release-build\release-notes-v$version.md"
 $lines = Get-Content .\docs\RELEASE-NOTES.md -Encoding UTF8
-$start = [Array]::FindIndex($lines, [Predicate[string]]{ param($line) $line -eq "## $version - 2026-06-29" })
-if ($start -lt 0) { $start = [Array]::FindIndex($lines, [Predicate[string]]{ param($line) $line -like "## $version -*" }) }
+$start = [Array]::FindIndex($lines, [Predicate[string]]{ param($line) $line -like "## $version -*" })
 if ($start -lt 0) { throw "Release notes section not found for $version" }
 $end = $lines.Count
 for ($i = $start + 1; $i -lt $lines.Count; $i++) {
@@ -83,6 +127,8 @@ gh release create "v$version" `
   --title "Rainmeter Desktop Widgets $version" `
   --notes-file $notesPath
 ```
+
+If `gh` is not on `PATH`, check `C:\Program Files\GitHub CLI\gh.exe` before falling back to the REST API.
 
 If `gh` is not installed, use the GitHub REST API with explicit user approval before reading Git Credential Manager credentials. Never print the token. Upload assets to:
 
@@ -117,6 +163,13 @@ curl.exe -I https://raw.githubusercontent.com/kevendai/Rainmeter_todo/vX.Y.Z/rel
 curl.exe -I https://raw.githubusercontent.com/kevendai/Rainmeter_todo/vX.Y.Z/releases/vX.Y.Z/rainmeter-desktop-widgets-lite-X.Y.Z.zip
 curl.exe -I https://raw.githubusercontent.com/kevendai/Rainmeter_todo/vX.Y.Z/releases/vX.Y.Z/rainmeter-desktop-widgets-full-X.Y.Z.rmskin
 curl.exe -I https://raw.githubusercontent.com/kevendai/Rainmeter_todo/vX.Y.Z/releases/vX.Y.Z/rainmeter-desktop-widgets-lite-X.Y.Z.rmskin
+```
+
+The raw domain can occasionally return `429 Too Many Requests` during repeated checks. If that happens, verify the same asset through GitHub Release assets and the tag tree before treating it as missing:
+
+```powershell
+gh release view vX.Y.Z --repo kevendai/Rainmeter_todo --json tagName,name,url,assets
+git ls-tree -r --name-only vX.Y.Z releases/vX.Y.Z
 ```
 
 If verifying a live install, inspect the compiled host for the version string:
