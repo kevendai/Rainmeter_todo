@@ -9,15 +9,15 @@ $exe = Join-Path $rainmeterRoot 'Rainmeter.exe'
 
 if (-not (Test-Path -LiteralPath $exe)) { throw "Rainmeter not found: $exe" }
 New-Item -ItemType Directory -Path $target -Force | Out-Null
-$liveData = Join-Path $target '@Resources\tasks.json'
-$liveGenerated = Join-Path $target '@Resources\Generated.inc'
-$savedData = $null
-$savedGenerated = $null
-if (Test-Path -LiteralPath $liveData) { $savedData = [IO.File]::ReadAllBytes($liveData) }
-if (Test-Path -LiteralPath $liveGenerated) { $savedGenerated = [IO.File]::ReadAllBytes($liveGenerated) }
+$preserved = @{}
+foreach ($name in @('tasks.json','Generated.inc','caldav.secret','translation.secret','paper-sync.secret')) {
+    $path = Join-Path $target ('@Resources\' + $name)
+    if (Test-Path -LiteralPath $path) { $preserved[$name] = [IO.File]::ReadAllBytes($path) }
+}
 Copy-Item -Path (Join-Path $source '*') -Destination $target -Recurse -Force
-if ($null -ne $savedData) { [IO.File]::WriteAllBytes($liveData, $savedData) }
-if ($null -ne $savedGenerated) { [IO.File]::WriteAllBytes($liveGenerated, $savedGenerated) }
+foreach ($name in $preserved.Keys) {
+    [IO.File]::WriteAllBytes((Join-Path $target ('@Resources\' + $name)), $preserved[$name])
+}
 & (Join-Path $PSScriptRoot 'New-RefreshArrow.ps1') -OutputDirectory (Join-Path $target '@Resources\RefreshFrames')
 
 # Rainmeter reliably reads Chinese skin literals from UTF-16 LE with BOM.
