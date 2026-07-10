@@ -503,6 +503,10 @@ internal static partial class TodoApp
         Action<bool> reload = null;
         reload = delegate(bool preserveScroll) {
             int previousScrollY = preserveScroll ? Math.Max(0, -table.AutoScrollPosition.Y) : 0;
+            // Clearing rows while the panel is still scrolled leaves its negative display
+            // offset in the next layout pass. Reset first, then restore the clamped offset
+            // after the rebuilt controls have established the new scroll range.
+            table.AutoScrollPosition = Point.Empty;
             List<Dictionary<string, object>> all = Tasks(state);
             DateTimeOffset now = DateTimeOffset.Now;
             allTab.Text = "全部  " + all.Count;
