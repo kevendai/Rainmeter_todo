@@ -35,7 +35,7 @@
 - 论文开关、DeepSeek API、文件服务器及评分规则通过 Todo 设置窗口保存，密文位于 `Skins\Todo\@Resources\paper-sync.secret`。
 - 翻译凭据通过 Todo 设置窗口保存，密文位于 `Skins\Todo\@Resources\translation.secret`。
 - 这些 secret 使用 Windows DPAPI CurrentUser 加密，只能由创建它们的 Windows 用户解密。
-- 发布包不会覆盖已有的 `tasks.json`、`Generated.inc`、`paper-sync.secret`、`calendar-cache.json` 或 `calendar-state.json`。
+- 发布包不会覆盖已有的 `tasks.json`、`paper-sync.secret`、`calendar-cache.json` 或 `calendar-state.json`；`Generated.inc` 是可再生界面文件，会由当前版本后端按界面缩放设置重新生成。
 
 ## 从源码重新打包
 

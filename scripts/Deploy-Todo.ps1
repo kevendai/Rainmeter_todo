@@ -13,7 +13,7 @@ $exe = Join-Path $rainmeterRoot 'Rainmeter.exe'
 if (-not (Test-Path -LiteralPath $exe)) { throw "Rainmeter not found: $exe" }
 New-Item -ItemType Directory -Path $target -Force | Out-Null
 $preserved = @{}
-foreach ($name in @('tasks.json','Generated.inc','caldav.secret','translation.secret','paper-sync.secret')) {
+foreach ($name in @('tasks.json','ui-scale.txt','caldav.secret','translation.secret','paper-sync.secret')) {
     $path = Join-Path $target ('@Resources\' + $name)
     if (Test-Path -LiteralPath $path) { $preserved[$name] = [IO.File]::ReadAllBytes($path) }
 }
@@ -21,6 +21,7 @@ Copy-Item -Path (Join-Path $source '*') -Destination $target -Recurse -Force
 foreach ($name in $preserved.Keys) {
     [IO.File]::WriteAllBytes((Join-Path $target ('@Resources\' + $name)), $preserved[$name])
 }
+Remove-Item -LiteralPath (Join-Path $target '@Resources\UiScale.inc') -Force -ErrorAction SilentlyContinue
 & (Join-Path $PSScriptRoot 'New-RefreshArrow.ps1') -OutputDirectory (Join-Path $target '@Resources\RefreshFrames')
 
 # Rainmeter reliably reads Chinese skin literals from UTF-16 LE with BOM.

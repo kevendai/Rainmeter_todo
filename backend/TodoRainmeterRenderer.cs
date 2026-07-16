@@ -14,8 +14,11 @@ using RainmeterBackend;
 
 internal static partial class TodoApp
 {
+    private static float RainmeterRenderScale = 1F;
+
     private static bool Render(Dictionary<string, object> state)
     {
+        RainmeterRenderScale = UiScale.Current;
         DateTimeOffset now = DateTimeOffset.Now;
         List<Dictionary<string, object>> tasks = Tasks(state);
         List<Dictionary<string, object>> pending = tasks.Where(t => !B(t, "completed") && (!RuntimeUtil.Date(t, "available_from").HasValue || now >= RuntimeUtil.Date(t, "available_from").Value))
@@ -72,13 +75,29 @@ internal static partial class TodoApp
         Meter(lines, "BottomSpacer", "Meter=Shape", "X=0", "Y=" + y, "Shape=Rectangle 0,0,520,1 | Fill Color 0,0,0,0 | StrokeWidth 0");
 
         List<string> output = new List<string>();
+        Meter(output, "StyleText", "Meter=String", "FontFace=#FontFace#", "FontSize=11", "FontColor=#TextColor#", "AntiAlias=1", "ClipString=1", "DynamicVariables=1");
         Meter(output, "Panel", "Meter=Shape", "X=0", "Y=0", "Shape=Rectangle 1,1,518," + (y - 1) + ",18 | Fill Color 239,248,255,248 | Stroke Color 198,216,232,210 | StrokeWidth 1");
         Meter(output, "PanelHighlight", "Meter=Shape", "X=18", "Y=1", "Shape=Rectangle 0,0,482,1 | Fill Color 255,255,255,180 | StrokeWidth 0");
         output.AddRange(lines);
+        AppendChrome(output);
         return RuntimeUtil.WriteUtf16IfChanged(IncludePath, String.Join("\r\n", output) + "\r\n");
     }
 
-    private static void Meter(List<string> lines, string name, params string[] body) { lines.Add("[" + name + "]"); lines.AddRange(body); lines.Add(""); }
+    private static void AppendChrome(List<string> output)
+    {
+        Meter(output, "Header", "Meter=String", "MeterStyle=StyleText", "X=22", "Y=18", "W=300", "H=32", "FontSize=18", "FontWeight=600", "Text=待办事项");
+        Meter(output, "HeaderRule", "Meter=Shape", "X=22", "Y=69", "Shape=Rectangle 0,0,476,1 | Fill Color #BorderColor# | StrokeWidth 0");
+        Meter(output, "SettingsBackground", "Meter=Shape", "X=341", "Y=22", "Shape=Rectangle 0,0,36,36,10 | Fill Color 50,136,236,245 | Stroke Color 68,153,244,255 | StrokeWidth 1", "LeftMouseUpAction=[\"#@#TodoHost.exe\" \"Settings\"]");
+        Meter(output, "ManageBackground", "Meter=Shape", "X=382", "Y=22", "Shape=Rectangle 0,0,36,36,10 | Fill Color 247,251,255,235 | Stroke Color #BorderColor# | StrokeWidth 1", "LeftMouseUpAction=[\"#@#TodoHost.exe\" \"Manage\"]");
+        Meter(output, "AddBackground", "Meter=Shape", "X=423", "Y=22", "Shape=Rectangle 0,0,36,36,10 | Fill Color 50,136,236,245 | Stroke Color 68,153,244,255 | StrokeWidth 1", "LeftMouseUpAction=[\"#@#TodoHost.exe\" \"Add\"]");
+        Meter(output, "SyncBackground", "Meter=Shape", "X=464", "Y=22", "Shape=Rectangle 0,0,36,36,10 | Fill Color 247,251,255,235 | Stroke Color #BorderColor# | StrokeWidth 1", "LeftMouseUpAction=[\"#@#TodoHost.exe\" \"Refresh\"]");
+        Meter(output, "Settings", "Meter=String", "X=359", "Y=40", "W=36", "H=36", "FontFace=Segoe Fluent Icons", "FontSize=12", "FontColor=225,242,255,255", "StringAlign=CenterCenter", "AntiAlias=1", "Text=\xE713", "ToolTipText=待办设置", "MouseOverAction=[!SetOption Settings FontColor \"255,255,255,255\"][!UpdateMeter Settings][!Redraw]", "MouseLeaveAction=[!SetOption Settings FontColor \"225,242,255,255\"][!UpdateMeter Settings][!Redraw]", "LeftMouseUpAction=[\"#@#TodoHost.exe\" \"Settings\"]");
+        Meter(output, "Manage", "Meter=String", "X=400", "Y=40", "W=36", "H=36", "FontFace=Segoe Fluent Icons", "FontSize=12", "FontColor=#MutedColor#", "StringAlign=CenterCenter", "AntiAlias=1", "Text=\xE700", "ToolTipText=管理全部任务", "MouseOverAction=[!SetOption Manage FontColor \"#TextColor#\"][!UpdateMeter Manage][!Redraw]", "MouseLeaveAction=[!SetOption Manage FontColor \"#MutedColor#\"][!UpdateMeter Manage][!Redraw]", "LeftMouseUpAction=[\"#@#TodoHost.exe\" \"Manage\"]");
+        Meter(output, "Add", "Meter=String", "X=441", "Y=40", "W=36", "H=36", "FontFace=Segoe Fluent Icons", "FontSize=12", "FontColor=225,242,255,255", "StringAlign=CenterCenter", "AntiAlias=1", "Text=\xE710", "ToolTipText=新增待办", "MouseOverAction=[!SetOption Add FontColor \"255,255,255,255\"][!UpdateMeter Add][!Redraw]", "MouseLeaveAction=[!SetOption Add FontColor \"225,242,255,255\"][!UpdateMeter Add][!Redraw]", "LeftMouseUpAction=[\"#@#TodoHost.exe\" \"Add\"]");
+        Meter(output, "Sync", "Meter=String", "X=482", "Y=40", "W=36", "H=36", "FontFace=Segoe Fluent Icons", "FontSize=12", "FontColor=#MutedColor#", "StringAlign=CenterCenter", "AntiAlias=1", "Text=\xE72C", "DynamicVariables=1", "ToolTipText=刷新待办", "MouseOverAction=[!SetOption Sync FontColor \"#TextColor#\"][!UpdateMeter Sync][!Redraw]", "MouseLeaveAction=[!SetOption Sync FontColor \"#MutedColor#\"][!UpdateMeter Sync][!Redraw]", "LeftMouseUpAction=[!SetOption Sync FontColor \"#AccentColor#\"][!SetOption Status Text \"正在刷新…\"][!SetOption Status FontColor \"#AccentColor#\"][!UpdateMeter Sync][!UpdateMeter Status][!Redraw][\"#@#TodoHost.exe\" \"Refresh\"]");
+    }
+
+    private static void Meter(List<string> lines, string name, params string[] body) { lines.Add("[" + name + "]"); lines.AddRange(body.Select(option => UiScale.RainmeterOption(option, RainmeterRenderScale))); lines.Add(""); }
     private static string Action(string action, string id) { return "LeftMouseUpAction=[\"#@#TodoHost.exe\" \"" + action + "\" \"" + id + "\"]"; }
 
 }

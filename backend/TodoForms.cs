@@ -146,7 +146,18 @@ internal static partial class TodoApp
         Label aboutRepo = LightUi.Label("更新源：github.com/kevendai/Rainmeter_todo", 12, 112, 636);
         Label updateStatus = LightUi.Label("尚未检查更新", 12, 158, 420);
         Button checkUpdate = LightUi.PrimaryButton("检查更新", 502, 146, 146, DialogResult.None);
-        pages[5].Controls.AddRange(new Control[] { aboutTitle, aboutVersion, aboutRepo, updateStatus, checkUpdate });
+        Label uiScaleLabel = LightUi.Label("界面缩放（磁贴和窗口共用）", 12, 214, 300);
+        string[] uiScaleLabels = { "自动（当前 " + UiScale.Percent + "%）", "75%", "80%", "90%", "100%", "110%", "125%" };
+        string[] uiScaleValues = { "auto", "0.75", "0.80", "0.90", "1.00", "1.10", "1.25" };
+        ComboBox uiScale = new ComboBox { Left = 12, Top = 244, Width = 260, Height = 36, DropDownStyle = ComboBoxStyle.DropDownList, Font = new Font("Microsoft YaHei UI", 10F) };
+        uiScale.Items.AddRange(uiScaleLabels.Cast<object>().ToArray());
+        string currentUiScaleMode = UiScale.Mode;
+        int currentUiScaleIndex = Array.FindIndex(uiScaleValues, value => String.Equals(value, currentUiScaleMode, StringComparison.OrdinalIgnoreCase));
+        uiScale.SelectedIndex = currentUiScaleIndex < 0 ? 0 : currentUiScaleIndex;
+        Button applyUiScale = LightUi.PrimaryButton("应用缩放", 292, 242, 128, DialogResult.None);
+        Label uiScaleHint = LightUi.Label("自动模式以 2560×1440 为 100%，1920×1080 会使用约 75%。应用后磁贴立即刷新，新打开的窗口使用新比例。", 12, 296, 620);
+        uiScaleHint.Height = 48;
+        pages[5].Controls.AddRange(new Control[] { aboutTitle, aboutVersion, aboutRepo, updateStatus, checkUpdate, uiScaleLabel, uiScale, applyUiScale, uiScaleHint });
 
         Label saveStatus = LightUi.Label(File.Exists(PaperSyncSecret) ? "已保存设置" : "尚未保存设置", 194, 666, 580);
         saveStatus.Font = new Font("Microsoft YaHei UI", 10F, FontStyle.Bold);
@@ -158,6 +169,26 @@ internal static partial class TodoApp
         };
         for (int i = 0; i < tabs.Count; i++) { int selected = i; tabs[i].Click += delegate { showPage(selected); }; }
         showPage(0);
+
+        applyUiScale.Click += delegate {
+            try
+            {
+                applyUiScale.Enabled = false;
+                UiScale.SaveMode(uiScaleValues[Math.Max(0, uiScale.SelectedIndex)]);
+                RenderUiScaleSkins();
+                uiScaleLabels[0] = "自动（当前 " + UiScale.Percent + "%）";
+                uiScale.Items[0] = uiScaleLabels[0];
+                saveStatus.Text = "界面缩放已应用；请重新打开窗口查看";
+                saveStatus.ForeColor = Color.FromArgb(63, 178, 119);
+            }
+            catch (Exception ex)
+            {
+                saveStatus.Text = "界面缩放应用失败";
+                saveStatus.ForeColor = LightUi.Danger;
+                LightUi.Error(ex.Message);
+            }
+            finally { applyUiScale.Enabled = true; }
+        };
 
         Action refreshPaperProgress = delegate {
             string message = "暂无后台评分任务";
@@ -332,6 +363,27 @@ internal static partial class TodoApp
         paperProgressTimer.Dispose();
     }
 
+    private static void RenderUiScaleSkins()
+    {
+        string todoExe = Application.ExecutablePath;
+        using (Process todo = Process.Start(new ProcessStartInfo(todoExe, "Render") { UseShellExecute = false, CreateNoWindow = true }))
+        {
+            if (todo != null && !todo.WaitForExit(15000)) throw new Exception("待办磁贴刷新超时");
+            if (todo != null && todo.ExitCode != 0) throw new Exception("待办磁贴刷新失败");
+        }
+        string calendarExe = Path.GetFullPath(Path.Combine(ResourceDir, "..", "..", "Calendar", "@Resources", "CalendarHost.exe"));
+        if (File.Exists(calendarExe))
+        {
+            using (Process calendar = Process.Start(new ProcessStartInfo(calendarExe, "Render") { UseShellExecute = false, CreateNoWindow = true }))
+            {
+                if (calendar != null && !calendar.WaitForExit(15000)) throw new Exception("日程磁贴刷新超时");
+                if (calendar != null && calendar.ExitCode != 0) throw new Exception("日程磁贴刷新失败");
+            }
+        }
+        RuntimeUtil.Refresh("Todo");
+        RuntimeUtil.Refresh("Calendar");
+    }
+
     private static string ShowPaperScoringConsent(string message)
     {
         Form form = LightUi.Form("本地论文评分", 560, 300);
@@ -477,8 +529,8 @@ internal static partial class TodoApp
         Panel surface = new Panel { Left = 0, Top = 28, Width = width, Height = 56, BackColor = LightUi.Panel };
         LightUi.Round(surface, 10);
         panel.Controls.Add(surface);
-        Button expand = LightUi.Button("展开", width - 66, 12, 52, DialogResult.None);
-        expand.Height = 30;
+        Button expand = LightUi.Button("展开", width - 74, 12, 60, DialogResult.None);
+        expand.Height = 32;
         expand.Font = new Font("Microsoft YaHei UI", 9F, FontStyle.Bold);
         expand.UseVisualStyleBackColor = false;
         expand.BackColor = LightUi.AccentFill;
@@ -489,6 +541,7 @@ internal static partial class TodoApp
         expand.MouseEnter += delegate { if (expand.Enabled) expand.BackColor = Color.FromArgb(31, 116, 224); };
         expand.MouseLeave += delegate { expand.BackColor = LightUi.AccentFill; };
         surface.Controls.Add(expand);
+        HashSet<Button> firstRowChips = new HashSet<Button>();
         int left = 12, top = 13;
         foreach (string label in options)
         {
@@ -498,6 +551,7 @@ internal static partial class TodoApp
             button.Height = 28;
             button.Tag = label;
             button.Visible = top == 13;
+            if (top == 13) firstRowChips.Add(button);
             PaintLabelChoice(button, selected.Contains(label));
             button.Click += delegate(object sender, EventArgs e) {
                 Button current = (Button)sender;
@@ -516,11 +570,13 @@ internal static partial class TodoApp
             surface.Controls.Add(button);
             left += buttonWidth + 8;
         }
+        int expandedSurfaceLogicalHeight = Math.Max(94, surface.Controls.Cast<Control>().Where(control => control != expand).Select(control => control.Bottom).DefaultIfEmpty(42).Max() + 12);
+        int expandedPanelLogicalHeight = expandedSurfaceLogicalHeight + 32;
         bool expanded = false;
         expand.Click += delegate {
             expanded = !expanded;
-            surface.Height = expanded ? 94 : 56;
-            panel.Height = expanded ? 126 : 86;
+            surface.Height = UiScale.Logical(surface, expanded ? expandedSurfaceLogicalHeight : 56);
+            panel.Height = UiScale.Logical(panel, expanded ? expandedPanelLogicalHeight : 86);
             expand.Text = expanded ? "收起" : "展开";
             expand.BackColor = LightUi.AccentFill;
             expand.ForeColor = Color.White;
@@ -528,7 +584,7 @@ internal static partial class TodoApp
             foreach (Control control in surface.Controls)
             {
                 Button chip = control as Button;
-                if (chip != null && chip != expand) chip.Visible = expanded || chip.Top == 13;
+                if (chip != null && chip != expand) chip.Visible = expanded || firstRowChips.Contains(chip);
             }
         };
         return panel;

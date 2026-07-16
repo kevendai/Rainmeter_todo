@@ -33,6 +33,7 @@ function Copy-Tree {
         'translation.secret',
         'paper-sync.secret',
         'caldav.secret',
+        'ui-scale.txt',
         'tasks.json',
         'calendar-cache.json',
         'calendar-state.json',
@@ -60,6 +61,7 @@ function Remove-ReleaseSecrets {
         'translation.secret',
         'paper-sync.secret',
         'caldav.secret',
+        'ui-scale.txt',
         'tasks.json',
         'calendar-cache.json',
         'calendar-state.json',
@@ -247,7 +249,7 @@ function New-Package {
         rainmeter = '4.5.26.3894'
         paper_features = $true
         paper_features_runtime_switch = $true
-        excludes = @('translation.secret','paper-sync.secret','caldav.secret','tasks.json','calendar-cache.json','calendar-state.json','PaperCache')
+        excludes = @('translation.secret','paper-sync.secret','caldav.secret','ui-scale.txt','tasks.json','calendar-cache.json','calendar-state.json','PaperCache')
     } | ConvertTo-Json -Depth 4
     Set-Content -LiteralPath (Join-Path $packageRoot 'manifest.json') -Value $manifest -Encoding UTF8
 

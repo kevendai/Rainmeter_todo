@@ -35,7 +35,7 @@ internal static partial class CalendarApp
         bool allowSourceChange=isNew||(!originalCalDav&&hasCalDav);
         Button localSource=LightUi.Button("本地日历",26,118,110,DialogResult.None),caldavSource=LightUi.Button("CalDAV 日历",144,118,124,DialogResult.None);
         localSource.Height=caldavSource.Height=36;localSource.TextAlign=caldavSource.TextAlign=ContentAlignment.MiddleCenter;caldavSource.Visible=hasCalDav;localSource.Enabled=caldavSource.Enabled=allowSourceChange;
-        Action paintSource=delegate{Button[] sourceButtons=new[]{localSource,caldavSource};foreach(Button b in sourceButtons){bool active=(b==localSource&&selectedSource=="local")||(b==caldavSource&&selectedSource=="caldav");b.BackColor=active?LightUi.AccentFill:Color.FromArgb(246,251,255);b.ForeColor=active?Color.White:LightUi.Text;b.FlatAppearance.BorderSize=0;b.FlatAppearance.BorderColor=b.BackColor;b.FlatAppearance.MouseOverBackColor=active?Color.FromArgb(38,118,222):Color.White;b.FlatAppearance.MouseDownBackColor=active?Color.FromArgb(25,94,185):Color.FromArgb(235,245,253);b.Font=new System.Drawing.Font("Microsoft YaHei UI",9F,active?System.Drawing.FontStyle.Bold:System.Drawing.FontStyle.Regular);}};localSource.MouseEnter+=delegate{paintSource();};caldavSource.MouseEnter+=delegate{paintSource();};localSource.MouseLeave+=delegate{paintSource();};caldavSource.MouseLeave+=delegate{paintSource();};localSource.Click+=delegate{selectedSource="local";paintSource();};caldavSource.Click+=delegate{selectedSource="caldav";paintSource();};paintSource();f.Controls.AddRange(new Control[]{localSource,caldavSource});
+        Action paintSource=delegate{Button[] sourceButtons=new[]{localSource,caldavSource};foreach(Button b in sourceButtons){bool active=(b==localSource&&selectedSource=="local")||(b==caldavSource&&selectedSource=="caldav");b.BackColor=active?LightUi.AccentFill:Color.FromArgb(246,251,255);b.ForeColor=active?Color.White:LightUi.Text;b.FlatAppearance.BorderSize=0;b.FlatAppearance.BorderColor=b.BackColor;b.FlatAppearance.MouseOverBackColor=active?Color.FromArgb(38,118,222):Color.White;b.FlatAppearance.MouseDownBackColor=active?Color.FromArgb(25,94,185):Color.FromArgb(235,245,253);b.Font=new System.Drawing.Font(b.Font,active?System.Drawing.FontStyle.Bold:System.Drawing.FontStyle.Regular);}};localSource.MouseEnter+=delegate{paintSource();};caldavSource.MouseEnter+=delegate{paintSource();};localSource.MouseLeave+=delegate{paintSource();};caldavSource.MouseLeave+=delegate{paintSource();};localSource.Click+=delegate{selectedSource="local";paintSource();};caldavSource.Click+=delegate{selectedSource="caldav";paintSource();};paintSource();f.Controls.AddRange(new Control[]{localSource,caldavSource});
         TextBox title=addField("标题 *",26,178,588,38,isNew?"":CleanTitle(S(original,"title")));
         f.Controls.Add(new Label{Text="日期与时间",Left=26,Top=240,Width=160,Height=22,BackColor=Color.Transparent,ForeColor=LightUi.Text,Font=new System.Drawing.Font("Microsoft YaHei UI",9.5F,System.Drawing.FontStyle.Bold)});
         DateTimeOffset s=isNew?DateTimeOffset.Now:RuntimeUtil.Date(original,"start_at")??DateTimeOffset.Now, en=isNew?s.AddHours(1):RuntimeUtil.Date(original,"end_at")??s.AddHours(1);
@@ -69,7 +69,7 @@ internal static partial class CalendarApp
         Button expandReminder=LightUi.Button("展开",500,10,66,DialogResult.None);expandReminder.Height=34;expandReminder.TextAlign=ContentAlignment.MiddleCenter;expandReminder.ForeColor=LightUi.Muted;expandReminder.BackColor=Color.FromArgb(235,245,253);
         expandReminder.UseVisualStyleBackColor=false;
         reminderPanel.Controls.AddRange(new Control[]{bell,reminderText,addReminder,expandReminder});
-        FlowLayoutPanel reminderChips=new FlowLayoutPanel{Left=16,Top=50,Width=550,Height=34,BackColor=Color.Transparent,FlowDirection=FlowDirection.LeftToRight,WrapContents=false};
+        FlowLayoutPanel reminderChips=new FlowLayoutPanel{Left=16,Top=50,Width=556,Height=34,BackColor=Color.Transparent,FlowDirection=FlowDirection.LeftToRight,WrapContents=false};
         reminderPanel.Controls.Add(reminderChips);f.Controls.Add(reminderPanel);
         Panel reminderDrop=RoundedPanel(26,521,588,48,Color.FromArgb(248,252,255),Color.FromArgb(213,229,244),12);
         FlowLayoutPanel extraReminderChips=new FlowLayoutPanel{Left=14,Top=10,Width=560,Height=30,BackColor=Color.Transparent,FlowDirection=FlowDirection.LeftToRight,WrapContents=true,Visible=true};
@@ -79,6 +79,14 @@ internal static partial class CalendarApp
         Action showAddReminderDialog=delegate{Form rf=LightUi.Form("添加提醒",360,210);LightUi.Heading(rf,"添加提醒","只能添加日程开始前的提醒。");TextBox num=new TextBox{Left=36,Top=94,Width=110,Height=30,Text="15",Font=new System.Drawing.Font("Microsoft YaHei UI",11F)};ComboBox unit=new ComboBox{Left=158,Top=92,Width=100,Height=34,DropDownStyle=ComboBoxStyle.DropDownList,Font=new System.Drawing.Font("Microsoft YaHei UI",10F)};unit.Items.AddRange(new object[]{"分钟","小时","天"});unit.SelectedIndex=0;Button ok=LightUi.PrimaryButton("添加",204,150,72,DialogResult.OK);Button dialogCancel=LightUi.Button("取消",282,150,56,DialogResult.Cancel);rf.Controls.AddRange(new Control[]{num,unit,ok,dialogCancel});rf.AcceptButton=ok;rf.CancelButton=dialogCancel;if(rf.ShowDialog()==DialogResult.OK){int value;if(Int32.TryParse(num.Text.Trim(),out value)&&value>0){int minutes=value*(unit.SelectedIndex==2?1440:unit.SelectedIndex==1?60:1);if(!reminderMinutes.Contains(minutes))reminderMinutes.Add(minutes);renderReminders();}else LightUi.Error("请输入有效数字");}};
         Action<Button,Color,Color,Color> stabilizeChip=delegate(Button chip,Color back,Color fore,Color hover){chip.UseVisualStyleBackColor=false;chip.BackColor=back;chip.ForeColor=fore;chip.FlatAppearance.BorderSize=1;chip.FlatAppearance.BorderColor=Color.FromArgb(220,230,241);chip.FlatAppearance.MouseOverBackColor=hover;chip.FlatAppearance.MouseDownBackColor=hover;chip.MouseEnter+=delegate{chip.BackColor=hover;};chip.MouseLeave+=delegate{chip.BackColor=back;chip.ForeColor=fore;};};
         renderReminders=delegate{reminderChips.Controls.Clear();extraReminderChips.Controls.Clear();foreach(int m in quickReminders){Button chip=LightUi.Button(reminderLabel(m),0,0,m>=1440?72:86,DialogResult.None);chip.Height=30;chip.Margin=new Padding(0,0,8,0);chip.Tag=m;bool active=reminderMinutes.Contains(m);Color back=active?LightUi.AccentFill:Color.FromArgb(252,254,255),fore=active?Color.White:LightUi.Accent,hover=active?Color.FromArgb(38,118,222):Color.FromArgb(235,245,253);stabilizeChip(chip,back,fore,hover);chip.Click+=delegate(object sender,EventArgs args){int value=(int)((Control)sender).Tag;if(reminderMinutes.Contains(value))reminderMinutes.Remove(value);else reminderMinutes.Add(value);renderReminders();};reminderChips.Controls.Add(chip);}int extraCount=0;foreach(int m in reminderMinutes.Where(x=>!quickReminders.Contains(x)).OrderBy(x=>x).ToList()){int labelWidth=Math.Max(78,Math.Min(118,TextRenderer.MeasureText(reminderLabel(m),new System.Drawing.Font("Microsoft YaHei UI",9F)).Width+24));Panel customWrap=new Panel{Width=labelWidth+30,Height=30,Margin=new Padding(0,0,8,8),BackColor=Color.Transparent,Tag=m};Button customStart=LightUi.Button(reminderLabel(m),0,0,labelWidth,DialogResult.None);customStart.Height=30;customStart.Tag=m;stabilizeChip(customStart,Color.FromArgb(252,254,255),LightUi.Text,Color.FromArgb(252,254,255));Button removeCustom=LightUi.Button("×",labelWidth+2,0,26,DialogResult.None);removeCustom.Height=30;removeCustom.Tag=m;stabilizeChip(removeCustom,Color.FromArgb(255,246,246),Color.FromArgb(205,70,70),Color.FromArgb(255,238,238));removeCustom.Click+=delegate(object sender,EventArgs args){int value=(int)((Control)sender).Tag;reminderMinutes.Remove(value);renderReminders();};customWrap.Controls.Add(customStart);customWrap.Controls.Add(removeCustom);extraReminderChips.Controls.Add(customWrap);extraCount++;}foreach(string raw in customAlarms.ToList()){Button custom=LightUi.Button("CalDAV提醒 ×",0,0,106,DialogResult.None);custom.Height=30;custom.Margin=new Padding(0,0,8,8);custom.Tag=raw;stabilizeChip(custom,Color.FromArgb(255,246,246),Color.FromArgb(205,70,70),Color.FromArgb(255,238,238));custom.Click+=delegate(object sender,EventArgs args){customAlarms.Remove(Convert.ToString(((Control)sender).Tag));renderReminders();};extraReminderChips.Controls.Add(custom);extraCount++;}int rows=Math.Max(1,(int)Math.Ceiling(extraCount/4.0));reminderDrop.Height=18+rows*38;extraReminderChips.Height=reminderDrop.Height-16;reminderDrop.Visible=reminderExpanded;reminderDrop.BringToFront();expandReminder.Text=reminderExpanded?"收起":"展开";};
+        Action renderReminderBase=renderReminders;
+        renderReminders=delegate{
+            renderReminderBase();
+            extraReminderChips.PerformLayout();
+            int contentHeight=extraReminderChips.Controls.Count==0?UiScale.Logical(extraReminderChips,30):extraReminderChips.Controls.Cast<Control>().Max(control=>control.Bottom+control.Margin.Bottom);
+            extraReminderChips.Height=Math.Max(UiScale.Logical(extraReminderChips,30),contentHeight);
+            reminderDrop.Height=extraReminderChips.Top+extraReminderChips.Height+UiScale.Logical(reminderDrop,8);
+        };
         addReminder.Click+=delegate{showAddReminderDialog();};
         expandReminder.Click+=delegate{reminderExpanded=!reminderExpanded;renderReminders();};
         renderReminders();
@@ -192,7 +200,8 @@ internal static partial class CalendarApp
             Color fore = selected ? Color.White : source.ForeColor;
             using (SolidBrush background = new SolidBrush(back)) e.Graphics.FillRectangle(background, e.Bounds);
             string text = source.GetItemText(source.Items[e.Index]);
-            Rectangle textBounds = new Rectangle(e.Bounds.Left + 4, e.Bounds.Top, e.Bounds.Width - 8, e.Bounds.Height);
+            int inset = Math.Max(2, UiScale.Logical(source, 4));
+            Rectangle textBounds = new Rectangle(e.Bounds.Left + inset, e.Bounds.Top, Math.Max(1, e.Bounds.Width - inset * 2), e.Bounds.Height);
             TextRenderer.DrawText(e.Graphics, text, source.Font, textBounds, fore, TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis | TextFormatFlags.NoPrefix);
             e.DrawFocusRectangle();
         };
@@ -208,6 +217,8 @@ internal static partial class CalendarApp
 
     private static void DrawRound(Graphics graphics, Pen pen, float x, float y, float width, float height, float radius)
     {
+        if (width <= 1F || height <= 1F) return;
+        radius = Math.Max(1F, Math.Min(radius, Math.Min(width, height) / 2F));
         using (System.Drawing.Drawing2D.GraphicsPath path = new System.Drawing.Drawing2D.GraphicsPath())
         {
             float d = radius * 2F;
@@ -225,11 +236,16 @@ internal static partial class CalendarApp
         Panel icon = new Panel { Left = x, Top = y, Width = size, Height = size, BackColor = Color.Transparent, Tag = kind };
         icon.Paint += delegate(object sender, PaintEventArgs e) {
             e.Graphics.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
+            Control current = (Control)sender;
+            float scaleX = current.ClientSize.Width / (float)Math.Max(1, size);
+            float scaleY = current.ClientSize.Height / (float)Math.Max(1, size);
+            System.Drawing.Drawing2D.GraphicsState graphicsState = e.Graphics.Save();
+            e.Graphics.ScaleTransform(scaleX, scaleY);
             using (Pen pen = new Pen(color, Math.Max(2F, size / 15F)))
             using (SolidBrush brush = new SolidBrush(color))
             {
                 float w = size, h = size;
-                string currentKind = Convert.ToString(((Control)sender).Tag, CultureInfo.InvariantCulture);
+                string currentKind = Convert.ToString(current.Tag, CultureInfo.InvariantCulture);
                 if (currentKind == "calendar")
                 {
                     DrawRound(e.Graphics, pen, 3, 5, w - 6, h - 8, 4);
@@ -312,6 +328,7 @@ internal static partial class CalendarApp
                     e.Graphics.DrawRectangle(pen, 15, h - 17, w - 30, 10);
                 }
             }
+            e.Graphics.Restore(graphicsState);
         };
         return icon;
     }
@@ -336,8 +353,9 @@ internal static partial class CalendarApp
         LightUi.Round(panel, radius);
         panel.Paint += delegate(object sender, PaintEventArgs e) {
             e.Graphics.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
+            float scaledRadius = radius * UiScale.For(panel);
             using (Pen pen = new Pen(border, 1F))
-                DrawRound(e.Graphics, pen, 0, 0, panel.Width - 1, panel.Height - 1, radius);
+                DrawRound(e.Graphics, pen, 0, 0, panel.Width - 1, panel.Height - 1, scaledRadius);
         };
         return panel;
     }
@@ -348,11 +366,34 @@ internal static partial class CalendarApp
         public event EventHandler ValueChanged;
         private bool dragging;
         public TimeSlider(){SetStyle(ControlStyles.AllPaintingInWmPaint|ControlStyles.OptimizedDoubleBuffer|ControlStyles.ResizeRedraw|ControlStyles.UserPaint,true);Height=34;Cursor=Cursors.Hand;}
-        protected override void OnPaint(PaintEventArgs e){base.OnPaint(e);e.Graphics.SmoothingMode=System.Drawing.Drawing2D.SmoothingMode.AntiAlias;int pad=10,trackY=Height/2,trackW=Math.Max(1,Width-pad*2),x=pad+(int)Math.Round(trackW*(Value/95.0));Color accent=Enabled?LightUi.Accent:Color.FromArgb(165,181,202),track=Enabled?Color.FromArgb(213,228,241):Color.FromArgb(226,235,243);using(Pen bg=new Pen(track,6)){bg.StartCap=bg.EndCap=System.Drawing.Drawing2D.LineCap.Round;e.Graphics.DrawLine(bg,pad,trackY,Width-pad,trackY);}using(Pen fg=new Pen(accent,6)){fg.StartCap=fg.EndCap=System.Drawing.Drawing2D.LineCap.Round;e.Graphics.DrawLine(fg,pad,trackY,x,trackY);}using(SolidBrush shadow=new SolidBrush(Enabled?Color.FromArgb(50,47,132,235):Color.FromArgb(35,120,135,155)))e.Graphics.FillEllipse(shadow,x-9,trackY-8,18,18);using(SolidBrush knob=new SolidBrush(Color.White))e.Graphics.FillEllipse(knob,x-8,trackY-9,16,16);using(Pen pen=new Pen(accent,2))e.Graphics.DrawEllipse(pen,x-8,trackY-9,16,16);}
-        private void SetFromX(int mouseX){int pad=10,trackW=Math.Max(1,Width-pad*2);int next=(int)Math.Round(Math.Max(0,Math.Min(trackW,mouseX-pad))/(trackW/95.0));if(next==Value)return;Value=next;Invalidate();if(ValueChanged!=null)ValueChanged(this,EventArgs.Empty);}
+        private float PaintScale { get { return Math.Max(0.5F, Height / 34F); } }
+        protected override void OnPaint(PaintEventArgs e){base.OnPaint(e);e.Graphics.SmoothingMode=System.Drawing.Drawing2D.SmoothingMode.AntiAlias;float s=PaintScale,pad=10F*s,trackY=Height/2F,trackW=Math.Max(1F,Width-pad*2F),x=pad+(float)Math.Round(trackW*(Value/95.0));Color accent=Enabled?LightUi.Accent:Color.FromArgb(165,181,202),track=Enabled?Color.FromArgb(213,228,241):Color.FromArgb(226,235,243);using(Pen bg=new Pen(track,Math.Max(2F,6F*s))){bg.StartCap=bg.EndCap=System.Drawing.Drawing2D.LineCap.Round;e.Graphics.DrawLine(bg,pad,trackY,Width-pad,trackY);}using(Pen fg=new Pen(accent,Math.Max(2F,6F*s))){fg.StartCap=fg.EndCap=System.Drawing.Drawing2D.LineCap.Round;e.Graphics.DrawLine(fg,pad,trackY,x,trackY);}using(SolidBrush shadow=new SolidBrush(Enabled?Color.FromArgb(50,47,132,235):Color.FromArgb(35,120,135,155)))e.Graphics.FillEllipse(shadow,x-9F*s,trackY-8F*s,18F*s,18F*s);using(SolidBrush knob=new SolidBrush(Color.White))e.Graphics.FillEllipse(knob,x-8F*s,trackY-9F*s,16F*s,16F*s);using(Pen pen=new Pen(accent,Math.Max(1F,2F*s)))e.Graphics.DrawEllipse(pen,x-8F*s,trackY-9F*s,16F*s,16F*s);}
+        private void SetFromX(int mouseX){float s=PaintScale,pad=10F*s,trackW=Math.Max(1F,Width-pad*2F);int next=(int)Math.Round(Math.Max(0F,Math.Min(trackW,mouseX-pad))/(trackW/95.0));if(next==Value)return;Value=next;Invalidate();if(ValueChanged!=null)ValueChanged(this,EventArgs.Empty);}
         protected override void OnMouseDown(MouseEventArgs e){base.OnMouseDown(e);dragging=true;Capture=true;SetFromX(e.X);}
         protected override void OnMouseMove(MouseEventArgs e){base.OnMouseMove(e);if(dragging)SetFromX(e.X);}
         protected override void OnMouseUp(MouseEventArgs e){base.OnMouseUp(e);dragging=false;Capture=false;}
+    }
+
+    private sealed class CalendarDayCell : Control
+    {
+        public Color DayBackColor = Color.Transparent;
+        public CalendarDayCell()
+        {
+            SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer | ControlStyles.ResizeRedraw | ControlStyles.SupportsTransparentBackColor | ControlStyles.UserPaint, true);
+            BackColor = Color.Transparent;
+        }
+        protected override void OnPaint(PaintEventArgs e)
+        {
+            base.OnPaint(e);
+            e.Graphics.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
+            if (DayBackColor.A > 0)
+            {
+                int diameter = Math.Max(1, Math.Min(ClientSize.Width, ClientSize.Height) - 1);
+                Rectangle circle = new Rectangle((ClientSize.Width - diameter) / 2, (ClientSize.Height - diameter) / 2, diameter, diameter);
+                using (SolidBrush background = new SolidBrush(DayBackColor)) e.Graphics.FillEllipse(background, circle);
+            }
+            TextRenderer.DrawText(e.Graphics, Text, Font, ClientRectangle, ForeColor, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding | TextFormatFlags.NoPrefix | TextFormatFlags.SingleLine);
+        }
     }
 
     private static TextBox AddCredentialField(Panel parent, string icon, string label, int y, string text, bool password, out Panel reveal)
@@ -513,11 +554,11 @@ internal static partial class CalendarApp
         Panel main = RoundedPanel(382, 112, 760, 540, Color.FromArgb(248,252,255), Color.FromArgb(224,233,244), 18);
         Label dayHeader = new Label { Left = 22, Top = 24, Width = 430, Height = 30, BackColor = Color.Transparent, ForeColor = LightUi.Text, Font = new System.Drawing.Font("Microsoft YaHei UI", 12F, System.Drawing.FontStyle.Bold) };
         int timeMode = 0;
-        Panel timeTabs = RoundedPanel(498, 20, 224, 36, Color.FromArgb(235,245,253), Color.FromArgb(218,232,246), 12);
+        Panel timeTabs = RoundedPanel(488, 20, 234, 36, Color.FromArgb(235,245,253), Color.FromArgb(218,232,246), 12);
         Button todayTab = LightUi.Button("今天", 2, 2, 62, DialogResult.None);
         Button weekTab = LightUi.Button("未来7天", 66, 2, 76, DialogResult.None);
-        Button allTimeTab = LightUi.Button("全部时间", 144, 2, 78, DialogResult.None);
-        foreach(Button tab in new[]{todayTab,weekTab,allTimeTab}){tab.Height=32;tab.Font=new System.Drawing.Font("Microsoft YaHei UI",8.5F,System.Drawing.FontStyle.Bold);tab.TextAlign=ContentAlignment.MiddleCenter;tab.FlatAppearance.BorderSize=0;tab.UseVisualStyleBackColor=false;}
+        Button allTimeTab = LightUi.Button("全部时间", 144, 2, 88, DialogResult.None);
+        foreach(Button tab in new[]{todayTab,weekTab,allTimeTab}){tab.Height=32;tab.Font=new System.Drawing.Font("Microsoft YaHei UI",8.5F,System.Drawing.FontStyle.Bold);tab.TextAlign=ContentAlignment.MiddleCenter;tab.Padding=Padding.Empty;tab.FlatAppearance.BorderSize=0;tab.UseVisualStyleBackColor=false;}
         timeTabs.Controls.AddRange(new Control[]{todayTab,weekTab,allTimeTab});
         FlowLayoutPanel list = new FlowLayoutPanel { Left = 20, Top = 72, Width = 720, Height = 446, BackColor = Color.Transparent, AutoScroll = true, FlowDirection = FlowDirection.TopDown, WrapContents = false };
         main.Controls.AddRange(new Control[] { dayHeader, timeTabs, list }); f.Controls.Add(main);
@@ -599,9 +640,10 @@ internal static partial class CalendarApp
             for(int cell=0;cell<42;cell++){
                 DateTime d=cursor.AddDays(cell);bool inMonth=d.Month==selectedDate.Month,selected=d.Date==selectedDate.Date,isToday=d.Date==today;List<string> daySources=sourcesOnDate(d);
                 Color dayBack=selected?LightUi.AccentFill:(isToday?Color.FromArgb(232,244,255):Color.Transparent);
-                Label day=new Label{Text=d.Day.ToString(CultureInfo.InvariantCulture),Left=(cell%7)*40+2,Top=28+(cell/7)*35,Width=30,Height=30,TextAlign=ContentAlignment.MiddleCenter,BackColor=dayBack,ForeColor=selected?Color.White:(isToday?LightUi.Accent:inMonth?LightUi.Text:Color.FromArgb(170,185,205)),Font=new System.Drawing.Font("Microsoft YaHei UI",10F,(selected||isToday)?System.Drawing.FontStyle.Bold:System.Drawing.FontStyle.Regular),Tag=d};
-                LightUi.Round(day,15);day.Cursor=Cursors.Hand;day.Click+=delegate(object sender,EventArgs args){selectedDate=((DateTime)((Control)sender).Tag).Date;reload();};calendarGrid.Controls.Add(day);
-                int dotCount=daySources.Count;int baseLeft=(cell%7)*40+17-(dotCount*8-2)/2, dotTop=day.Top+30;
+                int dayLeft=(cell%7)*40+1,dayTop=28+(cell/7)*35;
+                CalendarDayCell day=new CalendarDayCell{Text=d.Day.ToString(CultureInfo.InvariantCulture),Left=dayLeft,Top=dayTop,Width=32,Height=30,DayBackColor=dayBack,ForeColor=selected?Color.White:(isToday?LightUi.Accent:inMonth?LightUi.Text:Color.FromArgb(170,185,205)),Font=new System.Drawing.Font("Microsoft YaHei UI",10F,(selected||isToday)?System.Drawing.FontStyle.Bold:System.Drawing.FontStyle.Regular),Tag=d};
+                day.Cursor=Cursors.Hand;day.Click+=delegate(object sender,EventArgs args){selectedDate=((DateTime)((Control)sender).Tag).Date;reload();};calendarGrid.Controls.Add(day);
+                int dotCount=daySources.Count;int baseLeft=(cell%7)*40+17-(dotCount*8-2)/2, dotTop=dayTop+30;
                 for(int dotIndex=0;dotIndex<dotCount;dotIndex++){string source=daySources[dotIndex];Color dotColor=source=="caldav"?(selected?Color.White:LightUi.Accent):Color.FromArgb(63,178,119);Panel dot=new Panel{Left=baseLeft+dotIndex*8,Top=dotTop,Width=6,Height=6,BackColor=dotColor};LightUi.Round(dot,3);calendarGrid.Controls.Add(dot);dot.BringToFront();}
             }
         };

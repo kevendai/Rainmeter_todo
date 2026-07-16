@@ -40,6 +40,7 @@ internal static partial class TodoApp
     [STAThread]
     private static int Main(string[] args)
     {
+        UiScale.EnableDpiAwareness();
         Application.EnableVisualStyles();
         Application.SetCompatibleTextRenderingDefault(false);
         string action = args.Length > 0 ? args[0] : "Render";

@@ -161,7 +161,7 @@ function Install-Package {
         New-Item -ItemType Directory -Path $target -Force | Out-Null
 
         $preserved = @{}
-        foreach ($name in @('tasks.json','Generated.inc','calendar-cache.json','calendar-state.json','caldav.secret','translation.secret','paper-sync.secret')) {
+        foreach ($name in @('tasks.json','ui-scale.txt','calendar-cache.json','calendar-state.json','caldav.secret','translation.secret','paper-sync.secret')) {
             $path = Join-Path $target ('@Resources\' + $name)
             if (Test-Path -LiteralPath $path) { $preserved[$name] = [IO.File]::ReadAllBytes($path) }
         }
@@ -174,6 +174,7 @@ function Install-Package {
             New-Item -ItemType Directory -Path (Split-Path $destination -Parent) -Force | Out-Null
             [IO.File]::WriteAllBytes($destination, $preserved[$name])
         }
+        Remove-Item -LiteralPath (Join-Path $target '@Resources\UiScale.inc') -Force -ErrorAction SilentlyContinue
     }
 
     Install-UpdaterFiles $SourcePackageRoot $roots.SkinsRoot

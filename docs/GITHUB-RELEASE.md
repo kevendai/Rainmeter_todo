@@ -89,10 +89,15 @@ Expected values:
 
 Zip entries use Windows-style `\` separators because `Compress-Archive` preserves the PowerShell source path style; use `Skins\Todo\@Resources\app-version.txt`, not `Skins/Todo/@Resources/app-version.txt`, when reading entries.
 
-Also verify that `Install-Skins.ps1` uses the package directory as its root:
+Also verify that `Install-Skins.ps1` uses the package directory as its root and
+delegates installation to the packaged updater, while the updater keeps the
+expected wildcard copy flow:
 
 ```powershell
-Select-String -Path .\release-build\rainmeter-desktop-widgets-X.Y.Z\Install-Skins.ps1 -Pattern '\$packageRoot = \$PSScriptRoot','Copy-Item -Path'
+Select-String -Path .\release-build\rainmeter-desktop-widgets-X.Y.Z\Install-Skins.ps1 `
+  -Pattern '\$packageRoot = \$PSScriptRoot','InstallPackage','-PackageRoot'
+Select-String -Path .\release-build\rainmeter-desktop-widgets-X.Y.Z\Updater\RainmeterDesktopWidgetsUpdater.ps1 `
+  -Pattern 'Copy-Item -Path \(Join-Path \$source ''\*''\)'
 ```
 
 ## Commit And Tag

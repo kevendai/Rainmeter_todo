@@ -1,6 +1,7 @@
 using System;
 using System.Collections;
 using System.Collections.Generic;
+using System.ComponentModel;
 using System.Diagnostics;
 using System.Drawing;
 using System.Drawing.Drawing2D;
@@ -8,6 +9,7 @@ using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Reflection;
+using System.Runtime.CompilerServices;
 using System.Security.Cryptography;
 using System.Text;
 using System.Web.Script.Serialization;
@@ -16,6 +18,258 @@ using System.Runtime.InteropServices;
 
 namespace RainmeterBackend
 {
+    internal static class UiScale
+    {
+        private const float BaseWidth = 2560F;
+        private const float BaseHeight = 1440F;
+        private const float MinimumScale = 0.70F;
+        private const float MaximumScale = 1.25F;
+        private const string AutoMode = "auto";
+        private sealed class FormScaleState { public float Scale = 1F; public bool Applied; }
+        private sealed class ControlScaleState { public bool Scaled; public bool Watching; }
+        private static readonly ConditionalWeakTable<Form, FormScaleState> FormScales = new ConditionalWeakTable<Form, FormScaleState>();
+        private static readonly ConditionalWeakTable<Control, ControlScaleState> ControlScales = new ConditionalWeakTable<Control, ControlScaleState>();
+
+        [DllImport("user32.dll")]
+        private static extern bool SetProcessDPIAware();
+
+        public static void EnableDpiAwareness()
+        {
+            try { SetProcessDPIAware(); }
+            catch { }
+        }
+
+        private static string ConfigPath
+        {
+            get
+            {
+                string baseDir = AppDomain.CurrentDomain.BaseDirectory.TrimEnd(Path.DirectorySeparatorChar);
+                string local = Path.Combine(baseDir, "ui-scale.txt");
+                if (File.Exists(local) || !String.Equals(new DirectoryInfo(baseDir).Name, "@Resources", StringComparison.OrdinalIgnoreCase))
+                    return local;
+                DirectoryInfo skin = Directory.GetParent(baseDir);
+                DirectoryInfo skins = skin == null ? null : skin.Parent;
+                if (skin != null && skins != null && String.Equals(skin.Name, "Calendar", StringComparison.OrdinalIgnoreCase))
+                    return Path.Combine(skins.FullName, "Todo", "@Resources", "ui-scale.txt");
+                return local;
+            }
+        }
+
+        public static string Mode
+        {
+            get
+            {
+                try
+                {
+                    if (File.Exists(ConfigPath))
+                    {
+                        string value = File.ReadAllText(ConfigPath, Encoding.UTF8).Trim().ToLowerInvariant();
+                        if (value == AutoMode) return AutoMode;
+                        float parsed;
+                        if (Single.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out parsed))
+                            return Clamp(parsed).ToString("0.00", CultureInfo.InvariantCulture);
+                    }
+                }
+                catch { }
+                return AutoMode;
+            }
+        }
+
+        public static float Current
+        {
+            get
+            {
+                string overrideText = Environment.GetEnvironmentVariable("RAINMETER_UI_SCALE_OVERRIDE");
+                float overrideValue;
+                if (!String.IsNullOrWhiteSpace(overrideText) && Single.TryParse(overrideText, NumberStyles.Float, CultureInfo.InvariantCulture, out overrideValue))
+                    return Clamp(overrideValue);
+                string mode = Mode;
+                float manual;
+                if (mode != AutoMode && Single.TryParse(mode, NumberStyles.Float, CultureInfo.InvariantCulture, out manual))
+                    return Clamp(manual);
+                Rectangle bounds = Screen.PrimaryScreen == null ? new Rectangle(0, 0, 2560, 1440) : Screen.PrimaryScreen.Bounds;
+                float scale = Math.Min(bounds.Width / BaseWidth, bounds.Height / BaseHeight);
+                scale = (float)Math.Round(scale * 20F, MidpointRounding.AwayFromZero) / 20F;
+                return Clamp(scale);
+            }
+        }
+
+        public static int Percent { get { return (int)Math.Round(Current * 100F); } }
+
+        public static void SaveMode(string mode)
+        {
+            string normalized = String.IsNullOrWhiteSpace(mode) ? AutoMode : mode.Trim().ToLowerInvariant();
+            if (normalized != AutoMode)
+            {
+                float parsed;
+                if (!Single.TryParse(normalized, NumberStyles.Float, CultureInfo.InvariantCulture, out parsed))
+                    throw new ArgumentException("无效的界面缩放比例");
+                normalized = Clamp(parsed).ToString("0.00", CultureInfo.InvariantCulture);
+            }
+            string directory = Path.GetDirectoryName(ConfigPath);
+            if (!String.IsNullOrEmpty(directory)) Directory.CreateDirectory(directory);
+            File.WriteAllText(ConfigPath, normalized, new UTF8Encoding(false));
+        }
+
+        public static string RainmeterOption(string option, float scale)
+        {
+            if (String.IsNullOrEmpty(option)) return option;
+            string[] numeric = { "X=", "Y=", "W=", "H=", "FontSize=" };
+            foreach (string prefix in numeric)
+            {
+                if (!option.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)) continue;
+                double value;
+                if (Double.TryParse(option.Substring(prefix.Length), NumberStyles.Float, CultureInfo.InvariantCulture, out value))
+                    return prefix + (value * scale).ToString("0.###", CultureInfo.InvariantCulture);
+                return option;
+            }
+            if (!option.StartsWith("Shape=", StringComparison.OrdinalIgnoreCase)) return option;
+            int pipe = option.IndexOf('|');
+            string geometry = pipe < 0 ? option : option.Substring(0, pipe);
+            string styling = pipe < 0 ? "" : option.Substring(pipe);
+            geometry = System.Text.RegularExpressions.Regex.Replace(geometry, @"(?<![A-Za-z#])[-+]?\d+(?:\.\d+)?", delegate(System.Text.RegularExpressions.Match match) {
+                double value;
+                return Double.TryParse(match.Value, NumberStyles.Float, CultureInfo.InvariantCulture, out value) ? (value * scale).ToString("0.###", CultureInfo.InvariantCulture) : match.Value;
+            });
+            styling = System.Text.RegularExpressions.Regex.Replace(styling, @"(?i)(StrokeWidth\s+)(\d+(?:\.\d+)?)", delegate(System.Text.RegularExpressions.Match match) {
+                double value;
+                return Double.TryParse(match.Groups[2].Value, NumberStyles.Float, CultureInfo.InvariantCulture, out value) ? match.Groups[1].Value + (value * scale).ToString("0.###", CultureInfo.InvariantCulture) : match.Value;
+            });
+            return geometry + styling;
+        }
+
+        public static void ApplyTo(Form form)
+        {
+            float scale = Current;
+            FormScaleState formState = FormScales.GetOrCreateValue(form);
+            formState.Scale = scale;
+            formState.Applied = true;
+            form.SuspendLayout();
+            if (Math.Abs(scale - 1F) >= 0.001F)
+            {
+                form.Scale(new SizeF(scale, scale));
+                form.Font = ScaleFont(form.Font, scale);
+                ScaleFontsAndSpecialControls(form, scale);
+            }
+            form.ResumeLayout(true);
+            MarkScaledTree(form);
+            InstallDynamicScaling(form);
+            if (Math.Abs(scale - 1F) >= 0.001F)
+            {
+                Screen screen = Screen.FromControl(form);
+                Rectangle area = screen.WorkingArea;
+                form.Left = area.Left + Math.Max(0, (area.Width - form.Width) / 2);
+                form.Top = area.Top + Math.Max(0, (area.Height - form.Height) / 2);
+            }
+        }
+
+        public static float For(Control control)
+        {
+            if (control == null) return 1F;
+            Form form = control as Form ?? control.FindForm();
+            FormScaleState state;
+            return form != null && FormScales.TryGetValue(form, out state) && state.Applied ? state.Scale : 1F;
+        }
+
+        public static int Logical(Control control, int value)
+        {
+            return Math.Max(0, (int)Math.Round(value * For(control), MidpointRounding.AwayFromZero));
+        }
+
+        private static void ScaleAddedControl(Control control)
+        {
+            if (control == null) return;
+            ControlScaleState controlState = ControlScales.GetOrCreateValue(control);
+            if (controlState.Scaled) { InstallDynamicScaling(control); return; }
+            Form form = control.FindForm();
+            FormScaleState formState;
+            if (form == null || !FormScales.TryGetValue(form, out formState) || !formState.Applied) return;
+            if (Math.Abs(formState.Scale - 1F) >= 0.001F)
+            {
+                control.Scale(new SizeF(formState.Scale, formState.Scale));
+                ScaleControlTreeFontsAndSpecials(control, formState.Scale);
+            }
+            MarkScaledTree(control);
+            InstallDynamicScaling(control);
+        }
+
+        private static void MarkScaledTree(Control control)
+        {
+            ControlScales.GetOrCreateValue(control).Scaled = true;
+            foreach (Control child in control.Controls) MarkScaledTree(child);
+        }
+
+        private static void InstallDynamicScaling(Control parent)
+        {
+            ControlScaleState state = ControlScales.GetOrCreateValue(parent);
+            if (!state.Watching)
+            {
+                parent.ControlAdded += delegate(object sender, ControlEventArgs args) { ScaleAddedControl(args.Control); };
+                state.Watching = true;
+            }
+            foreach (Control child in parent.Controls) InstallDynamicScaling(child);
+        }
+
+        private static void ScaleFontsAndSpecialControls(Control parent, float scale)
+        {
+            foreach (Control control in parent.Controls)
+            {
+                ScaleFontAndSpecialControl(control, scale);
+                ScaleFontsAndSpecialControls(control, scale);
+            }
+        }
+
+        private static void ScaleControlTreeFontsAndSpecials(Control control, float scale)
+        {
+            ScaleFontAndSpecialControl(control, scale);
+            foreach (Control child in control.Controls) ScaleControlTreeFontsAndSpecials(child, scale);
+        }
+
+        private static void ScaleFontAndSpecialControl(Control control, float scale)
+        {
+            PropertyDescriptor fontProperty = TypeDescriptor.GetProperties(control)["Font"];
+            if (control.Font != null && fontProperty != null && fontProperty.ShouldSerializeValue(control))
+                control.Font = ScaleFont(control.Font, scale);
+            ListView list = control as ListView;
+            if (list != null)
+                foreach (ColumnHeader column in list.Columns) column.Width = Math.Max(24, (int)Math.Round(column.Width * scale));
+            TabControl tabs = control as TabControl;
+            if (tabs != null && tabs.SizeMode == TabSizeMode.Fixed)
+                tabs.ItemSize = new Size(Math.Max(24, (int)Math.Round(tabs.ItemSize.Width * scale)), Math.Max(20, (int)Math.Round(tabs.ItemSize.Height * scale)));
+            ListBox listBox = control as ListBox;
+            if (listBox != null && listBox.DrawMode != DrawMode.Normal)
+                listBox.ItemHeight = Math.Max(16, (int)Math.Round(listBox.ItemHeight * scale));
+            ScrollableControl scrollable = control as ScrollableControl;
+            if (scrollable != null && scrollable.AutoScrollMinSize != Size.Empty)
+                scrollable.AutoScrollMinSize = new Size(Math.Max(0, (int)Math.Round(scrollable.AutoScrollMinSize.Width * scale)), Math.Max(0, (int)Math.Round(scrollable.AutoScrollMinSize.Height * scale)));
+            CheckBox check = control as CheckBox;
+            if (check != null)
+            {
+                int centerY = check.Top + check.Height / 2;
+                int minimumHeight = String.IsNullOrEmpty(check.Text) ? 18 : 20;
+                if (check.Height < minimumHeight)
+                {
+                    check.Height = minimumHeight;
+                    check.Top = centerY - check.Height / 2;
+                }
+                if (String.IsNullOrEmpty(check.Text) && check.Width < 18) check.Width = 18;
+            }
+            ComboBox combo = control as ComboBox;
+            if (combo != null && combo.DropDownStyle == ComboBoxStyle.DropDownList)
+                combo.Height = combo.PreferredHeight;
+        }
+
+        private static Font ScaleFont(Font font, float scale)
+        {
+            return new Font(font.FontFamily, Math.Max(6F, font.Size * scale), font.Style, font.Unit);
+        }
+
+        private static float Clamp(float value)
+        {
+            return Math.Max(MinimumScale, Math.Min(MaximumScale, value));
+        }
+    }
+
     internal static class JsonUtil
     {
         private static JavaScriptSerializer NewSerializer()
@@ -264,7 +518,8 @@ namespace RainmeterBackend
 
         private static GraphicsPath RoundedPath(Rectangle bounds, int radius)
         {
-            int diameter = radius * 2;
+            int safeRadius = Math.Max(1, Math.Min(radius, Math.Max(1, Math.Min(bounds.Width, bounds.Height) / 2)));
+            int diameter = safeRadius * 2;
             GraphicsPath path = new GraphicsPath();
             path.AddArc(bounds.Left, bounds.Top, diameter, diameter, 180, 90);
             path.AddArc(bounds.Right - diameter, bounds.Top, diameter, diameter, 270, 90);
@@ -276,7 +531,8 @@ namespace RainmeterBackend
 
         private static void ApplyRoundedRegion(Form form)
         {
-            using (GraphicsPath path = RoundedPath(new Rectangle(0, 0, form.Width, form.Height), 14))
+            int radius = Math.Max(1, (int)Math.Round(14F * UiScale.For(form)));
+            using (GraphicsPath path = RoundedPath(new Rectangle(0, 0, form.Width, form.Height), radius))
             {
                 Region previous = form.Region;
                 form.Region = new Region(path);
@@ -288,7 +544,8 @@ namespace RainmeterBackend
         {
             Action apply = delegate {
                 if (control.Width <= 1 || control.Height <= 1) return;
-                using (GraphicsPath path = RoundedPath(new Rectangle(0, 0, control.Width, control.Height), radius))
+                int scaledRadius = Math.Max(1, (int)Math.Round(radius * UiScale.For(control), MidpointRounding.AwayFromZero));
+                using (GraphicsPath path = RoundedPath(new Rectangle(0, 0, control.Width, control.Height), scaledRadius))
                 {
                     Region previous = control.Region;
                     control.Region = new Region(path);
@@ -323,6 +580,7 @@ namespace RainmeterBackend
             form.AutoScaleMode = AutoScaleMode.Dpi;
             form.Padding = new Padding(1);
             form.Opacity = 0D;
+            form.Shown += delegate { UiScale.ApplyTo(form); };
             form.Shown += delegate {
                 form.BeginInvoke(new Action(delegate {
                     if (form.IsDisposed) return;
@@ -337,7 +595,8 @@ namespace RainmeterBackend
             form.Paint += delegate(object sender, PaintEventArgs e) {
                 e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
                 Rectangle bounds = new Rectangle(0, 0, form.Width - 1, form.Height - 1);
-                using (GraphicsPath path = RoundedPath(bounds, 18))
+                int radius = Math.Max(1, (int)Math.Round(18F * UiScale.For(form)));
+                using (GraphicsPath path = RoundedPath(bounds, radius))
                 using (LinearGradientBrush brush = new LinearGradientBrush(bounds, Color.FromArgb(247, 252, 255), Color.FromArgb(226, 242, 253), LinearGradientMode.ForwardDiagonal))
                 using (Pen pen = new Pen(Color.FromArgb(235, 246, 255), 1F))
                 {
