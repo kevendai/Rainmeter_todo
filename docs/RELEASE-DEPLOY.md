@@ -1,11 +1,10 @@
 # 发布包部署说明
 
-本项目发布两个 `.rmskin` 和两个 zip：
+本项目正式发布一个统一 `.rmskin` 和一个统一 zip：
 
-- `rainmeter-desktop-widgets-full-*.rmskin`：已有 Rainmeter 的初始安装包，双击后由 Rainmeter `SkinInstaller.exe` 安装完整功能版。
-- `rainmeter-desktop-widgets-lite-*.rmskin`：已有 Rainmeter 的初始安装包，双击后由 Rainmeter `SkinInstaller.exe` 安装精简版。
-- `rainmeter-desktop-widgets-full-*.zip`：完整功能版，包含待办、今日日程、CalDAV 同步、日程转待办、论文推送和论文标题翻译入口。发布包不会包含 `translation.secret`、`paper-sync.secret`、`caldav.secret`、`tasks.json` 或任何缓存。
-- `rainmeter-desktop-widgets-lite-*.zip`：精简版，包含待办和今日日程，关闭论文推送与论文翻译。CalDAV 日程功能仍可使用。
+- `rainmeter-desktop-widgets-*.rmskin`：已有 Rainmeter 的统一初始安装包。
+- `rainmeter-desktop-widgets-*.zip`：统一部署/更新包，包含待办、日程、CalDAV 和可选的论文推荐功能。
+- 构建脚本暂时还会复制出同内容、同哈希的 `full` / `lite` 文件名别名，仅用于兼容旧升级器。
 
 ## 已有 Rainmeter 的初始安装
 
@@ -32,8 +31,8 @@
 ## 凭据与数据
 
 - CalDAV 凭据通过 Calendar 设置窗口保存，密文位于目标 Rainmeter 目录的 `Skins\Todo\@Resources\caldav.secret`。
-- 完整功能版的论文同步凭据通过 Todo 设置窗口保存，密文位于 `Skins\Todo\@Resources\paper-sync.secret`。
-- 完整功能版的翻译凭据通过 Todo 设置窗口保存，密文位于 `Skins\Todo\@Resources\translation.secret`。
+- 论文开关、DeepSeek API、文件服务器及评分规则通过 Todo 设置窗口保存，密文位于 `Skins\Todo\@Resources\paper-sync.secret`。
+- 翻译凭据通过 Todo 设置窗口保存，密文位于 `Skins\Todo\@Resources\translation.secret`。
 - 这些 secret 使用 Windows DPAPI CurrentUser 加密，只能由创建它们的 Windows 用户解密。
 - 发布包不会覆盖已有的 `tasks.json`、`Generated.inc`、`paper-sync.secret`、`calendar-cache.json` 或 `calendar-state.json`。
 
@@ -45,4 +44,4 @@
 powershell -ExecutionPolicy Bypass -File .\scripts\Build-ReleasePackages.ps1
 ```
 
-脚本会生成完整功能版和精简版两个 zip，并自动下载官方 Rainmeter 4.5.26 安装器到 `.release-cache`。
+脚本会生成统一 zip / `.rmskin` 以及 full/lite 兼容别名，并自动下载官方 Rainmeter 4.5.26 安装器到 `.release-cache`。

@@ -21,8 +21,6 @@ internal static partial class TodoApp
             + " -Mode CheckAndInstall"
             + " -Repository " + QuoteArg(GitHubRepository)
             + " -CurrentVersion " + QuoteArg(AppVersion)
-            + " -Flavor " + QuoteArg(AppFlavor)
-            + " -FlavorName " + QuoteArg(AppFlavorName)
             + " -RainmeterRoot " + QuoteArg(CurrentRainmeterRoot())
             + " -Activate"
             + " -AssumeYes"
@@ -122,46 +120,6 @@ internal static partial class TodoApp
         if (body != null) { byte[] bytes = Encoding.UTF8.GetBytes(body); request.ContentLength = bytes.Length; using(Stream s=request.GetRequestStream()) s.Write(bytes,0,bytes.Length); }
         using (HttpWebResponse response=(HttpWebResponse)request.GetResponse()) using(StreamReader reader=new StreamReader(response.GetResponseStream(),Encoding.UTF8)) return reader.ReadToEnd();
     }
-    private static Dictionary<string, object> ReadPaperSyncSettings()
-    {
-        if (!File.Exists(PaperSyncSecret)) return new Dictionary<string, object>();
-        try { return JsonUtil.ReadDpapiJson(PaperSyncSecret); }
-        catch { return new Dictionary<string, object>(); }
-    }
-
-    private static void SavePaperSyncSettings(string baseUrl, string account, string password)
-    {
-        baseUrl = (baseUrl ?? "").Trim();
-        account = (account ?? "").Trim();
-        password = (password ?? "").Trim();
-        if (baseUrl == "" || account == "") throw new Exception("论文网页同步地址和账号不能为空");
-        if (!baseUrl.StartsWith("http://", StringComparison.OrdinalIgnoreCase) && !baseUrl.StartsWith("https://", StringComparison.OrdinalIgnoreCase)) baseUrl = "http://" + baseUrl;
-        JsonUtil.WriteDpapiJson(PaperSyncSecret, new Dictionary<string, object>{{"BaseUrl", baseUrl.TrimEnd('/')}, {"Account", account}, {"Password", password}});
-    }
-
-    private static string LoginPaperSync(string baseUrl, string account, string password)
-    {
-        string login = JsonUtil.Serialize(new Dictionary<string, object>{{"username", account}, {"password", password}});
-        return Http("POST", baseUrl.TrimEnd('/') + "/api/login", login, null, 5000).Trim().Trim('"');
-    }
-
-    private static void TestPaperSyncConnection(string baseUrl, string account, string password)
-    {
-        baseUrl = (baseUrl ?? "").Trim();
-        account = (account ?? "").Trim();
-        password = (password ?? "").Trim();
-        if (baseUrl == "" || account == "") throw new Exception("论文网页同步地址和账号不能为空");
-        if (!baseUrl.StartsWith("http://", StringComparison.OrdinalIgnoreCase) && !baseUrl.StartsWith("https://", StringComparison.OrdinalIgnoreCase)) baseUrl = "http://" + baseUrl;
-        LoginPaperSync(baseUrl, account, password);
-    }
-
-    private static bool DownloadPaper(string path, out string error)
-    {
-        error = ""; Dictionary<string, object> paperSync = ReadPaperSyncSettings(); string baseUrl = S(paperSync, "BaseUrl"), user = S(paperSync, "Account"), password = S(paperSync, "Password"); if(baseUrl==""||user==""){error="尚未配置论文网页同步";return false;} if(!baseUrl.StartsWith("http", StringComparison.OrdinalIgnoreCase))baseUrl="http://"+baseUrl;
-        try { string token=LoginPaperSync(baseUrl,user,password); string raw=Http("GET",baseUrl.TrimEnd('/')+"/api/resources/paper/"+Path.GetFileName(path),null,new Dictionary<string,string>{{"X-Auth",token}},5000); Dictionary<string,object> result=JsonUtil.Object(JsonUtil.Deserialize(raw)); object content=JsonUtil.Get(result,"content"); File.WriteAllText(path,content is string?(string)content:JsonUtil.Serialize(content??result),RuntimeUtil.Utf8NoBom); return true; }
-        catch(WebException ex){HttpWebResponse response=ex.Response as HttpWebResponse;error=response!=null&&response.StatusCode==HttpStatusCode.NotFound?"远端暂无该日期的已评分论文数据":"论文数据服务连接失败";return false;} catch{error="论文数据服务连接失败";return false;}
-    }
-
     private static Dictionary<string, object> ReadTranslationCredentials()
     {
         if (!File.Exists(TranslationSecret)) return new Dictionary<string, object>();
@@ -218,19 +176,5 @@ internal static partial class TodoApp
         try { return TranslateWithCredentials(JsonUtil.ReadDpapiJson(TranslationSecret), text); }
         catch { return null; }
     }
-    private static void SyncArxiv(Dictionary<string, object> state, bool manual, string paperDate)
-    {
-        Directory.CreateDirectory(PaperCache); foreach(string f in Directory.GetFiles(PaperCache,"*_papers.json"))if(File.GetLastWriteTime(f)<DateTime.Now.AddDays(-14))File.Delete(f);
-        DateTime now=DateTime.Now; string today=String.IsNullOrEmpty(paperDate)?now.ToString("yyyy-MM-dd"):paperDate;
-        if(!manual&&(now.TimeOfDay<TimeSpan.FromHours(8)||now.TimeOfDay>TimeSpan.FromHours(20))){Meta(state)["status"]="arXiv 自动检查时段为 08:00-20:00";return;}
-        if(Tasks(state).Any(t=>!B(t,"completed")&&S(t,"source")=="arxiv")){Meta(state)["status"]="待办中已有论文，未重复添加";return;}
-        if(!manual&&JsonUtil.String(Meta(state),"last_arxiv_sync_date","")==today){Meta(state)["status"]="今日 arXiv 已检查";return;}
-        string name=today+"_papers.json",path=Path.Combine(PaperCache,name),error="";if(!File.Exists(path))DownloadPaper(path,out error);if(!File.Exists(path)){Meta(state)["status"]=error!=""?error:"暂无 "+today+" 已评分论文数据";return;}
-        object parsed;try{string json=File.ReadAllText(path,Encoding.UTF8);while(json.StartsWith("[][") )json=json.Substring(2);parsed=JsonUtil.Deserialize(json);}catch{Meta(state)["status"]="今日论文 JSON 无法读取";return;}
-        List<Dictionary<string,object>> ranked=JsonUtil.Array(parsed).Select(JsonUtil.Object).Where(p=>JsonUtil.Get(JsonUtil.Object(JsonUtil.Get(p,"score")),"abstract")!=null).OrderByDescending(p=>Convert.ToDouble(JsonUtil.Get(JsonUtil.Object(JsonUtil.Get(p,"score")),"abstract"),CultureInfo.InvariantCulture)).ThenByDescending(p=>Convert.ToDouble(JsonUtil.Get(JsonUtil.Object(JsonUtil.Get(p,"score")),"title")??0,CultureInfo.InvariantCulture)).Take(5).ToList();if(ranked.Count==0){Meta(state)["status"]="今日还没有完成摘要评分的论文";return;}
-        int added=0,translated=0;foreach(Dictionary<string,object> p in ranked){string arxiv=S(p,"arxiv_id"),target="https://arxiv.org/html/"+arxiv;if(Tasks(state).Any(t=>S(t,"target")==target))continue;string original=S(p,"title"),translatedTitle=Translate(original);if(translatedTitle!=null){translated++;Thread.Sleep(220);}Dictionary<string,object> score=JsonUtil.Object(JsonUtil.Get(p,"score"));EditorResult e=new EditorResult{Title="("+Convert.ToString(JsonUtil.Get(score,"abstract"),CultureInfo.InvariantCulture)+") "+(translatedTitle??original),Target=target,Note="论文原标题："+original+"\r\narXiv ID："+arxiv,Labels=new List<string>{"论文"},Available="",Due=""};Tasks(state).Add(NewTask(e,"arxiv"));added++;}
-        Meta(state)["last_arxiv_sync_date"]=today;Meta(state)["status"]=added>0?"已添加 "+today+" 共 "+added+" 篇，翻译 "+translated+" 篇":today+" 前五篇均已存在";
-    }
-
 }
 

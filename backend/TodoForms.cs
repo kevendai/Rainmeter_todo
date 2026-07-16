@@ -55,176 +55,166 @@ internal static partial class TodoApp
     private static void ShowSettings()
     {
         Dictionary<string, object> credentials = ReadTranslationCredentials();
-        Dictionary<string, object> paperSync = ReadPaperSyncSettings();
-        Form f = LightUi.Form(PaperFeaturesEnabled ? "论文设置" : "关于", 620, 560);
-        LightUi.Heading(f, PaperFeaturesEnabled ? "论文设置" : "关于", PaperFeaturesEnabled ? "分别配置论文网页同步、arXiv 标题翻译和版本更新。" : "查看当前版本并检查可用更新。", "settings.svg");
-        Button close = LightUi.Button("×", 560, 22, 34, DialogResult.Cancel);
+        PaperSettings settings = LoadPaperSettings();
+        Form f = LightUi.Form("待办设置", 930, 760);
+        LightUi.Heading(f, "待办设置", "配置论文推荐、DeepSeek 并发评分、文件同步、标题翻译和版本更新。", "settings.svg");
+        Button close = LightUi.Button("×", 870, 22, 34, DialogResult.Cancel);
         close.Height = 34;
         f.Controls.Add(close);
 
-        int x = 28, w = 564;
-        int tabCount = PaperFeaturesEnabled ? 3 : 1;
-        Panel tabRail = new Panel { Left = x, Top = 98, Width = 140 * tabCount, Height = 42, BackColor = Color.FromArgb(235, 245, 253) };
-        LightUi.Round(tabRail, 11);
-        Button tabPaper = LightUi.Button("论文同步", 0, 0, 140, DialogResult.None);
-        Button tabTranslation = LightUi.Button("标题翻译", 140, 0, 140, DialogResult.None);
-        Button tabAbout = LightUi.Button("关于", PaperFeaturesEnabled ? 280 : 0, 0, 140, DialogResult.None);
-        tabPaper.Height = tabTranslation.Height = tabAbout.Height = 42;
-        tabPaper.Font = tabTranslation.Font = tabAbout.Font = new Font("Microsoft YaHei UI", 10F, FontStyle.Bold);
-        if (PaperFeaturesEnabled) tabRail.Controls.AddRange(new Control[] { tabPaper, tabTranslation, tabAbout });
-        else tabRail.Controls.Add(tabAbout);
-        f.Controls.Add(tabRail);
+        CheckBox enabled = new CheckBox { Left = 28, Top = 102, Width = 220, Height = 28, Text = "启用论文推荐", Checked = settings.Enabled, ForeColor = LightUi.Text, BackColor = Color.Transparent, Font = new Font("Microsoft YaHei UI", 10F, FontStyle.Bold) };
+        Label masterHint = LightUi.Label("关闭后启动和刷新都不会访问论文服务。", 250, 106, 500);
+        f.Controls.AddRange(new Control[] { enabled, masterHint });
 
-        Panel paperPage = new Panel { Left = x, Top = 154, Width = w, Height = 280, BackColor = Color.Transparent };
-        Panel translationPage = new Panel { Left = x, Top = 154, Width = w, Height = 280, BackColor = Color.Transparent, Visible = false };
-        Panel aboutPage = new Panel { Left = x, Top = 154, Width = w, Height = 280, BackColor = Color.Transparent, Visible = false };
-        f.Controls.AddRange(new Control[] { paperPage, translationPage, aboutPage });
+        string[] pageNames = { "论文推荐", "DeepSeek API", "筛选与评分", "文件同步", "标题翻译", "关于" };
+        Panel navigation = new Panel { Left = 28, Top = 148, Width = 150, Height = 492, BackColor = Color.FromArgb(235, 245, 253) };
+        LightUi.Round(navigation, 12);
+        Panel content = new Panel { Left = 194, Top = 148, Width = 708, Height = 492, BackColor = Color.Transparent };
+        f.Controls.AddRange(new Control[] { navigation, content });
+        List<Button> tabs = new List<Button>();
+        List<Panel> pages = new List<Panel>();
+        for (int i = 0; i < pageNames.Length; i++)
+        {
+            Button tab = LightUi.Button(pageNames[i], 8, 8 + i * 56, 134, DialogResult.None);
+            tab.Height = 46; tab.Font = new Font("Microsoft YaHei UI", 9F, FontStyle.Bold);
+            navigation.Controls.Add(tab); tabs.Add(tab);
+            Panel page = new Panel { Left = 0, Top = 0, Width = 708, Height = 492, BackColor = Color.Transparent, AutoScroll = true, Visible = false };
+            content.Controls.Add(page); pages.Add(page);
+        }
 
-        TextBox paperBaseUrl = Field(paperPage, "论文网页同步地址", 0, 0, w, S(paperSync, "BaseUrl"));
-        TextBox paperAccount = Field(paperPage, "论文网页同步账号", 0, 94, w, S(paperSync, "Account"));
-        TextBox paperPassword = PasswordField(paperPage, "论文网页同步密码", 0, 188, w, S(paperSync, "Password"));
-        Label paperHint = LightUi.Label("论文网页同步配置会保存到 paper-sync.secret，并使用 Windows DPAPI CurrentUser 加密。", x, 448, w);
-        Label paperStatus = LightUi.Label(File.Exists(PaperSyncSecret) ? "已保存论文网页同步配置" : "尚未配置论文网页同步", x, 476, 250);
-        paperStatus.Font = new Font("Microsoft YaHei UI", 10F, FontStyle.Bold);
-        paperStatus.ForeColor = File.Exists(PaperSyncSecret) ? Color.FromArgb(63, 178, 119) : LightUi.Muted;
+        int w = 660;
+        TextBox importCount = Field(pages[0], "每天导入论文数量（1-20）", 12, 12, 310, settings.ImportCount.ToString(CultureInfo.InvariantCulture));
+        TextBox cacheDays = Field(pages[0], "缓存保留天数（1-90）", 342, 12, 306, settings.CacheDays.ToString(CultureInfo.InvariantCulture));
+        Label jobState = new Label { Left = 12, Top = 126, Width = 636, Height = 76, Text = "当前状态：" + ReadPaperJobMessage("暂无后台评分任务"), ForeColor = LightUi.Text, BackColor = LightUi.Surface, Padding = new Padding(14), Font = new Font("Microsoft YaHei UI", 10F) };
+        LightUi.Round(jobState, 10);
+        Label generalHint = LightUi.Label("启动时仅在 08:00–20:00 读取本地或远端完整文件；只有手动刷新并确认后才会调用 DeepSeek。", 12, 222, 636);
+        generalHint.Height = 48;
+        pages[0].Controls.AddRange(new Control[] { jobState, generalHint });
 
-        Panel paperActions = new Panel { Left = 270, Top = 474, Width = 322, Height = 42, BackColor = Color.Transparent };
-        Button paperClear = LightUi.DangerButton("清除同步", 0, 0, 94, DialogResult.None);
-        Button paperTest = LightUi.Button("测试登录", 106, 0, 94, DialogResult.None);
-        Button paperSave = LightUi.PrimaryButton("保存同步", 212, 0, 110, DialogResult.None);
-        paperClear.Height = paperTest.Height = paperSave.Height = 38;
-        paperClear.Font = paperTest.Font = paperSave.Font = new Font("Microsoft YaHei UI", 9F, FontStyle.Bold);
-        paperActions.Controls.AddRange(new Control[] { paperClear, paperTest, paperSave });
+        TextBox apiUrl = Field(pages[1], "Chat Completions 地址", 12, 12, w, settings.ApiBaseUrl);
+        TextBox apiModel = Field(pages[1], "模型", 12, 106, w, settings.Model);
+        TextBox apiKey = PasswordField(pages[1], "API Key", 12, 200, w, settings.ApiKey);
+        TextBox concurrency = Field(pages[1], "最大并发（1-32，默认 8）", 12, 294, 310, settings.MaxConcurrency.ToString(CultureInfo.InvariantCulture));
+        TextBox timeout = Field(pages[1], "请求超时秒数（30-600）", 342, 294, 330, settings.TimeoutSeconds.ToString(CultureInfo.InvariantCulture));
+        Button testApi = LightUi.Button("测试 DeepSeek", 502, 408, 170, DialogResult.None);
+        pages[1].Controls.Add(testApi);
 
-        TextBox secretId = Field(translationPage, "Tencent Cloud SecretId", 0, 0, w, S(credentials, "SecretId"));
-        TextBox secretKey = PasswordField(translationPage, "Tencent Cloud SecretKey", 0, 94, w, S(credentials, "SecretKey"));
-        Label hint = LightUi.Label("翻译凭据会保存到 translation.secret，并使用 Windows DPAPI CurrentUser 加密。", x, 448, w);
-        Label status = LightUi.Label(File.Exists(TranslationSecret) ? "已保存翻译凭据" : "尚未配置翻译凭据", x, 476, 250);
-        status.Font = new Font("Microsoft YaHei UI", 10F, FontStyle.Bold);
-        status.ForeColor = File.Exists(TranslationSecret) ? Color.FromArgb(63, 178, 119) : LightUi.Muted;
+        TextBox categories = Field(pages[2], "包含分类（逗号分隔）", 12, 12, w, settings.Categories);
+        TextBox excludes = Field(pages[2], "排除分类（逗号分隔）", 12, 106, w, settings.ExcludeCategories);
+        TextBox threshold = Field(pages[2], "标题进入摘要评分阈值（0-10）", 12, 200, 206, settings.TitleThreshold.ToString(CultureInfo.InvariantCulture));
+        TextBox titleBatch = Field(pages[2], "标题批大小（1-50）", 230, 200, 206, settings.TitleBatchSize.ToString(CultureInfo.InvariantCulture));
+        TextBox abstractBatch = Field(pages[2], "摘要批大小（1-20）", 448, 200, 224, settings.AbstractBatchSize.ToString(CultureInfo.InvariantCulture));
+        TextBox titlePrompt = MultiLineField(pages[2], "标题评分提示词", 12, 294, w, 160, settings.TitlePrompt);
+        TextBox abstractPrompt = MultiLineField(pages[2], "摘要评分提示词", 12, 490, w, 190, settings.AbstractPrompt);
+        pages[2].AutoScrollMinSize = new Size(0, 710);
 
-        Panel translationActions = new Panel { Left = 270, Top = 474, Width = 322, Height = 42, BackColor = Color.Transparent, Visible = false };
-        Button clear = LightUi.DangerButton("清除设置", 0, 0, 94, DialogResult.None);
-        Button test = LightUi.Button("测试连接", 106, 0, 94, DialogResult.None);
-        Button save = LightUi.PrimaryButton("保存凭据", 212, 0, 110, DialogResult.None);
-        clear.Height = test.Height = save.Height = 38;
-        clear.Font = test.Font = save.Font = new Font("Microsoft YaHei UI", 9F, FontStyle.Bold);
-        translationActions.Controls.AddRange(new Control[] { clear, test, save });
-        f.Controls.AddRange(new Control[] { paperHint, paperStatus, paperActions, hint, status, translationActions });
+        CheckBox fileEnabled = new CheckBox { Left = 12, Top = 12, Width = 220, Height = 26, Text = "启用文件服务器同步", Checked = settings.FileServerEnabled, ForeColor = LightUi.Text, BackColor = Color.Transparent, Font = new Font("Microsoft YaHei UI", 10F, FontStyle.Bold) };
+        TextBox fileUrl = Field(pages[3], "File Browser 地址", 12, 58, w, settings.FileBaseUrl);
+        TextBox fileAccount = Field(pages[3], "账号", 12, 152, w, settings.FileAccount);
+        TextBox filePassword = PasswordField(pages[3], "密码", 12, 246, w, settings.FilePassword);
+        Button testFile = LightUi.Button("测试文件服务器", 502, 374, 170, DialogResult.None);
+        pages[3].Controls.AddRange(new Control[] { fileEnabled, testFile });
 
-        Label aboutTitle = new Label { Text = "Rainmeter Desktop Widgets", Left = 0, Top = 4, Width = w, Height = 32, ForeColor = LightUi.Text, BackColor = Color.Transparent, Font = new Font("Microsoft YaHei UI", 14F, FontStyle.Bold) };
-        Label aboutVersion = new Label { Text = "当前版本：" + AppVersion + "（" + AppFlavorName + "）", Left = 0, Top = 54, Width = w, Height = 24, ForeColor = LightUi.Text, BackColor = Color.Transparent, Font = new Font("Microsoft YaHei UI", 10F, FontStyle.Bold) };
-        Label aboutRepo = LightUi.Label("更新源：github.com/kevendai/Rainmeter_todo", 0, 88, w);
-        Label aboutHint = LightUi.Label("检查更新会启动独立升级器，并优先更新升级器本身。", 0, 120, w);
-        aboutPage.Controls.AddRange(new Control[] { aboutTitle, aboutVersion, aboutRepo, aboutHint });
+        TextBox secretId = Field(pages[4], "Tencent Cloud SecretId", 12, 12, w, S(credentials, "SecretId"));
+        TextBox secretKey = PasswordField(pages[4], "Tencent Cloud SecretKey", 12, 106, w, S(credentials, "SecretKey"));
+        Label translationStatus = LightUi.Label(File.Exists(TranslationSecret) ? "已保存翻译凭据" : "尚未配置翻译凭据；未配置时论文标题保留英文。", 12, 214, 636);
+        Button clearTranslation = LightUi.DangerButton("清除翻译", 350, 266, 140, DialogResult.None);
+        Button testTranslation = LightUi.Button("测试翻译", 502, 266, 140, DialogResult.None);
+        pages[4].Controls.AddRange(new Control[] { translationStatus, clearTranslation, testTranslation });
 
-        Label updateStatus = LightUi.Label("尚未检查更新", x, 476, 300);
-        updateStatus.Font = new Font("Microsoft YaHei UI", 10F, FontStyle.Bold);
-        updateStatus.ForeColor = LightUi.Muted;
-        Panel aboutActions = new Panel { Left = 412, Top = 474, Width = 180, Height = 42, BackColor = Color.Transparent, Visible = false };
-        Button checkUpdate = LightUi.PrimaryButton("检查更新", 70, 0, 110, DialogResult.None);
-        checkUpdate.Height = 38;
-        checkUpdate.Font = new Font("Microsoft YaHei UI", 9F, FontStyle.Bold);
-        aboutActions.Controls.Add(checkUpdate);
-        f.Controls.AddRange(new Control[] { updateStatus, aboutActions });
+        Label aboutTitle = new Label { Text = "Rainmeter Desktop Widgets", Left = 12, Top = 18, Width = 636, Height = 36, ForeColor = LightUi.Text, BackColor = Color.Transparent, Font = new Font("Microsoft YaHei UI", 15F, FontStyle.Bold) };
+        Label aboutVersion = new Label { Text = "当前版本：" + AppVersion + "（" + AppEditionName + "）", Left = 12, Top = 72, Width = 636, Height = 26, ForeColor = LightUi.Text, BackColor = Color.Transparent, Font = new Font("Microsoft YaHei UI", 10F, FontStyle.Bold) };
+        Label aboutRepo = LightUi.Label("更新源：github.com/kevendai/Rainmeter_todo", 12, 112, 636);
+        Label updateStatus = LightUi.Label("尚未检查更新", 12, 158, 420);
+        Button checkUpdate = LightUi.PrimaryButton("检查更新", 502, 146, 146, DialogResult.None);
+        pages[5].Controls.AddRange(new Control[] { aboutTitle, aboutVersion, aboutRepo, updateStatus, checkUpdate });
 
-        Action<int> showPage = delegate(int page) {
-            bool paper = page == 0 && PaperFeaturesEnabled;
-            bool translation = page == 1 && PaperFeaturesEnabled;
-            bool about = page == 2 || !PaperFeaturesEnabled;
-            paperPage.Visible = paper;
-            translationPage.Visible = translation;
-            aboutPage.Visible = about;
-            paperHint.Visible = paper;
-            paperStatus.Visible = paper;
-            paperActions.Visible = paper;
-            hint.Visible = translation;
-            status.Visible = translation;
-            translationActions.Visible = translation;
-            updateStatus.Visible = about;
-            aboutActions.Visible = about;
-            PaintTabButton(tabPaper, paper);
-            PaintTabButton(tabTranslation, translation);
-            PaintTabButton(tabAbout, about);
+        Label saveStatus = LightUi.Label(File.Exists(PaperSyncSecret) ? "论文配置已加密保存" : "尚未保存论文配置", 194, 666, 470);
+        saveStatus.Font = new Font("Microsoft YaHei UI", 10F, FontStyle.Bold);
+        Button clearPaper = LightUi.DangerButton("清除论文配置", 666, 654, 112, DialogResult.None);
+        Button saveAll = LightUi.PrimaryButton("保存设置", 790, 654, 112, DialogResult.None);
+        f.Controls.AddRange(new Control[] { saveStatus, clearPaper, saveAll });
+
+        Action<int> showPage = delegate(int selected) {
+            for (int i = 0; i < pages.Count; i++) { pages[i].Visible = i == selected; PaintTabButton(tabs[i], i == selected); }
         };
-        tabPaper.Click += delegate { showPage(0); };
-        tabTranslation.Click += delegate { showPage(1); };
-        tabAbout.Click += delegate { showPage(2); };
-        showPage(PaperFeaturesEnabled ? 0 : 2);
+        for (int i = 0; i < tabs.Count; i++) { int selected = i; tabs[i].Click += delegate { showPage(selected); }; }
+        showPage(0);
 
-        paperTest.Click += delegate {
+        Action updatePaperEnabled = delegate {
+            for (int i = 0; i < 4; i++) SetChildrenEnabled(pages[i], enabled.Checked);
+            enabled.Enabled = true;
+        };
+        enabled.CheckedChanged += delegate { updatePaperEnabled(); };
+        updatePaperEnabled();
+
+        Func<PaperSettings> collect = delegate {
+            PaperSettings value = new PaperSettings();
+            value.Enabled = enabled.Checked;
+            value.ApiBaseUrl = apiUrl.Text;
+            value.ApiKey = apiKey.Text;
+            value.Model = apiModel.Text;
+            value.MaxConcurrency = ParseSettingInt(concurrency.Text, 1, 32, "最大并发");
+            value.TimeoutSeconds = ParseSettingInt(timeout.Text, 30, 600, "请求超时");
+            value.FileServerEnabled = fileEnabled.Checked;
+            value.FileBaseUrl = fileUrl.Text;
+            value.FileAccount = fileAccount.Text;
+            value.FilePassword = filePassword.Text;
+            value.Categories = categories.Text;
+            value.ExcludeCategories = excludes.Text;
+            value.TitleThreshold = ParseSettingInt(threshold.Text, 0, 10, "标题阈值");
+            value.TitleBatchSize = ParseSettingInt(titleBatch.Text, 1, 50, "标题批大小");
+            value.AbstractBatchSize = ParseSettingInt(abstractBatch.Text, 1, 20, "摘要批大小");
+            value.TitlePrompt = titlePrompt.Text;
+            value.AbstractPrompt = abstractPrompt.Text;
+            value.ImportCount = ParseSettingInt(importCount.Text, 1, 20, "导入数量");
+            value.CacheDays = ParseSettingInt(cacheDays.Text, 1, 90, "缓存天数");
+            return value;
+        };
+
+        saveAll.Click += delegate {
             try
             {
-                paperStatus.Text = "正在测试...";
-                paperStatus.ForeColor = LightUi.Muted;
-                paperStatus.Refresh();
-                TestPaperSyncConnection(paperBaseUrl.Text, paperAccount.Text, paperPassword.Text);
-                paperStatus.Text = "连接成功";
-                paperStatus.ForeColor = Color.FromArgb(63, 178, 119);
+                PaperSettings value = collect();
+                SavePaperSettings(value);
+                if (!String.IsNullOrWhiteSpace(secretId.Text) || !String.IsNullOrWhiteSpace(secretKey.Text))
+                    SaveTranslationCredentials(secretId.Text, secretKey.Text);
+                saveStatus.Text = "设置已保存；论文凭据使用 Windows DPAPI CurrentUser 加密";
+                saveStatus.ForeColor = Color.FromArgb(63, 178, 119);
             }
-            catch (Exception ex)
-            {
-                LightUi.Error("连接失败：" + ex.Message);
-                paperStatus.Text = "连接失败";
-                paperStatus.ForeColor = LightUi.Danger;
-            }
+            catch (Exception ex) { saveStatus.Text = "保存失败"; saveStatus.ForeColor = LightUi.Danger; LightUi.Error(ex.Message); }
         };
-        paperSave.Click += delegate {
-            try
-            {
-                SavePaperSyncSettings(paperBaseUrl.Text, paperAccount.Text, paperPassword.Text);
-                paperStatus.Text = "已保存论文网页同步配置";
-                paperStatus.ForeColor = Color.FromArgb(63, 178, 119);
-            }
-            catch (Exception ex) { LightUi.Error(ex.Message); }
-        };
-        paperClear.Click += delegate {
+        clearPaper.Click += delegate {
             try
             {
                 if (File.Exists(PaperSyncSecret)) File.Delete(PaperSyncSecret);
-                paperBaseUrl.Text = "";
-                paperAccount.Text = "";
-                paperPassword.Text = "";
-                paperStatus.Text = "尚未配置论文网页同步";
-                paperStatus.ForeColor = LightUi.Muted;
+                enabled.Checked = false; apiKey.Text = ""; fileUrl.Text = ""; fileAccount.Text = ""; filePassword.Text = ""; fileEnabled.Checked = false;
+                saveStatus.Text = "论文配置已清除";
+                saveStatus.ForeColor = LightUi.Muted;
             }
             catch (Exception ex) { LightUi.Error(ex.Message); }
         };
-
-        test.Click += delegate {
-            try
-            {
-                status.Text = "正在测试...";
-                status.ForeColor = LightUi.Muted;
-                status.Refresh();
-                string result = TestTranslationCredentials(secretId.Text, secretKey.Text);
-                status.Text = "连接成功：" + result;
-                status.ForeColor = Color.FromArgb(63, 178, 119);
-            }
-            catch (Exception ex)
-            {
-                LightUi.Error("连接失败：" + ex.Message);
-                status.Text = "连接失败";
-                status.ForeColor = LightUi.Danger;
-            }
+        testApi.Click += delegate {
+            try { testApi.Enabled = false; testApi.Text = "测试中..."; Application.DoEvents(); TestDeepSeekConnection(collect()); saveStatus.Text = "DeepSeek 测试成功"; saveStatus.ForeColor = Color.FromArgb(63, 178, 119); }
+            catch (Exception ex) { LightUi.Error("DeepSeek 测试失败：" + ex.Message); }
+            finally { testApi.Enabled = true; testApi.Text = "测试 DeepSeek"; }
         };
-        save.Click += delegate {
-            try
-            {
-                SaveTranslationCredentials(secretId.Text, secretKey.Text);
-                status.Text = "已保存翻译凭据";
-                status.ForeColor = Color.FromArgb(63, 178, 119);
-            }
-            catch (Exception ex) { LightUi.Error(ex.Message); }
+        testFile.Click += delegate {
+            try { TestFileServerConnection(collect()); saveStatus.Text = "文件服务器登录成功"; saveStatus.ForeColor = Color.FromArgb(63, 178, 119); }
+            catch (Exception ex) { LightUi.Error("文件服务器测试失败：" + ex.Message); }
         };
-        clear.Click += delegate {
+        testTranslation.Click += delegate {
+            try { string result = TestTranslationCredentials(secretId.Text, secretKey.Text); translationStatus.Text = "连接成功：" + result; translationStatus.ForeColor = Color.FromArgb(63, 178, 119); }
+            catch (Exception ex) { LightUi.Error("翻译测试失败：" + ex.Message); }
+        };
+        clearTranslation.Click += delegate {
             try
             {
                 if (File.Exists(TranslationSecret)) File.Delete(TranslationSecret);
                 secretId.Text = "";
                 secretKey.Text = "";
-                status.Text = "尚未配置翻译凭据";
-                status.ForeColor = LightUi.Muted;
+                translationStatus.Text = "尚未配置翻译凭据；论文标题将保留英文";
+                translationStatus.ForeColor = LightUi.Muted;
             }
             catch (Exception ex) { LightUi.Error(ex.Message); }
         };
@@ -247,7 +237,7 @@ internal static partial class TodoApp
                 updateStatus.Text = "检测到新版本：" + info.Tag;
                 updateStatus.ForeColor = LightUi.Accent;
                 DialogResult update = MessageBox.Show(
-                    "检测到新版本 " + info.Tag + "（" + AppFlavorName + "）。\r\n\r\n是否现在下载并自动部署？部署脚本会重启 Rainmeter。",
+                    "检测到新版本 " + info.Tag + "（统一版）。\r\n\r\n是否现在下载并自动部署？部署脚本会重启 Rainmeter。",
                     "检查更新",
                     MessageBoxButtons.YesNo,
                     MessageBoxIcon.Question);
@@ -279,11 +269,36 @@ internal static partial class TodoApp
         f.ShowDialog();
     }
 
+    private static int ParseSettingInt(string text, int minimum, int maximum, string name)
+    {
+        int value;
+        if (!Int32.TryParse((text ?? "").Trim(), NumberStyles.Integer, CultureInfo.InvariantCulture, out value) || value < minimum || value > maximum)
+            throw new Exception(name + "必须是 " + minimum + "-" + maximum + " 的整数");
+        return value;
+    }
+
+    private static void SetChildrenEnabled(Control parent, bool enabled)
+    {
+        foreach (Control child in parent.Controls)
+        {
+            child.Enabled = enabled;
+            if (child.HasChildren) SetChildrenEnabled(child, enabled);
+        }
+    }
+
+    private static TextBox MultiLineField(Control parent, string label, int x, int y, int width, int height, string text)
+    {
+        parent.Controls.Add(LightUi.Label(label, x, y, width));
+        Panel surface = new Panel { Left = x, Top = y + 26, Width = width, Height = height, BackColor = LightUi.Panel };
+        LightUi.Round(surface, 10);
+        TextBox box = new TextBox { Left = 14, Top = 12, Width = width - 28, Height = height - 24, Text = text ?? "", Multiline = true, ScrollBars = ScrollBars.Vertical, AcceptsReturn = true, BorderStyle = BorderStyle.None, BackColor = LightUi.Panel, ForeColor = LightUi.Text, Font = new Font("Microsoft YaHei UI", 9F) };
+        surface.Controls.Add(box); parent.Controls.Add(surface);
+        return box;
+    }
+
     private static IEnumerable<string> CommonLabels(Dictionary<string, object> task)
     {
-        string[] defaults = PaperFeaturesEnabled
-            ? new[] { "论文", "考试", "功能", "修复", "日程", "已读", "自动归档" }
-            : new[] { "考试", "功能", "修复", "日程" };
+        string[] defaults = { "论文", "考试", "功能", "修复", "日程", "已读", "自动归档" };
         return defaults.Concat(task == null ? Enumerable.Empty<string>() : Labels(task)).Where(x => !String.IsNullOrWhiteSpace(x)).Distinct();
     }
 

@@ -26,22 +26,24 @@ Copy the generated release files into the versioned release folder:
 
 ```powershell
 New-Item -ItemType Directory -Path .\releases\vX.Y.Z -Force | Out-Null
+Copy-Item .\release-build\rainmeter-desktop-widgets-X.Y.Z.zip .\releases\vX.Y.Z\ -Force
+Copy-Item .\release-build\rainmeter-desktop-widgets-X.Y.Z.rmskin .\releases\vX.Y.Z\ -Force
+# Transitional aliases for old full/lite updaters:
 Copy-Item .\release-build\rainmeter-desktop-widgets-full-X.Y.Z.zip .\releases\vX.Y.Z\ -Force
 Copy-Item .\release-build\rainmeter-desktop-widgets-lite-X.Y.Z.zip .\releases\vX.Y.Z\ -Force
 Copy-Item .\release-build\rainmeter-desktop-widgets-full-X.Y.Z.rmskin .\releases\vX.Y.Z\ -Force
 Copy-Item .\release-build\rainmeter-desktop-widgets-lite-X.Y.Z.rmskin .\releases\vX.Y.Z\ -Force
 ```
 
-Before committing, inspect both zip manifests, app versions, feature flags, and user-data exclusions:
+Before committing, inspect the unified zip manifest, app version, runtime feature flag, user-data exclusions, and compatibility alias hashes:
 
 ```powershell
 $version = 'X.Y.Z'
 Add-Type -AssemblyName System.IO.Compression.FileSystem
 
-foreach ($flavor in 'full','lite') {
-  $zip = Resolve-Path ".\release-build\rainmeter-desktop-widgets-$flavor-$version.zip"
-  $archive = [IO.Compression.ZipFile]::OpenRead($zip)
-  try {
+$zip = Resolve-Path ".\release-build\rainmeter-desktop-widgets-$version.zip"
+$archive = [IO.Compression.ZipFile]::OpenRead($zip)
+try {
     $manifestEntry = $archive.Entries | Where-Object FullName -eq 'manifest.json' | Select-Object -First 1
     $reader = [IO.StreamReader]::new($manifestEntry.Open())
     try { $manifest = $reader.ReadToEnd() | ConvertFrom-Json }
@@ -53,33 +55,39 @@ foreach ($flavor in 'full','lite') {
     finally { $reader.Dispose() }
 
     $bad = $archive.Entries |
-      Where-Object { $_.FullName -match '(translation\.secret|paper-sync\.secret|caldav\.secret|tasks\.json|calendar-cache\.json|calendar-state\.json)$' } |
+      Where-Object { $_.FullName -match '(translation\.secret|paper-sync\.secret|caldav\.secret|tasks\.json|calendar-cache\.json|calendar-state\.json|PaperCache)' } |
       Select-Object -ExpandProperty FullName
 
     [pscustomobject]@{
-      Flavor = $flavor
       Version = $manifest.version
       Updater = $manifest.updater_version
       PaperFeatures = $manifest.paper_features
+      RuntimeSwitch = $manifest.paper_features_runtime_switch
       AppVersion = $appVersion
       BadEntries = ($bad -join ', ')
     }
-  }
-  finally { $archive.Dispose() }
 }
+finally { $archive.Dispose() }
+
+Get-FileHash .\release-build\rainmeter-desktop-widgets-$version.zip,
+  .\release-build\rainmeter-desktop-widgets-full-$version.zip,
+  .\release-build\rainmeter-desktop-widgets-lite-$version.zip
+Get-FileHash .\release-build\rainmeter-desktop-widgets-$version.rmskin,
+  .\release-build\rainmeter-desktop-widgets-full-$version.rmskin,
+  .\release-build\rainmeter-desktop-widgets-lite-$version.rmskin
 ```
 
 Expected values:
 
-- `full`: `Version = X.Y.Z`, `AppVersion = X.Y.Z`, `PaperFeatures = True`, `BadEntries` empty.
-- `lite`: `Version = X.Y.Z`, `AppVersion = X.Y.Z`, `PaperFeatures = False`, `BadEntries` empty.
+- Unified package: `Version = X.Y.Z`, `AppVersion = X.Y.Z`, `PaperFeatures = True`, `RuntimeSwitch = True`, `BadEntries` empty.
+- Unified, full, and lite compatibility zip hashes must be identical; the three `.rmskin` hashes must also be identical.
 
 Zip entries use Windows-style `\` separators because `Compress-Archive` preserves the PowerShell source path style; use `Skins\Todo\@Resources\app-version.txt`, not `Skins/Todo/@Resources/app-version.txt`, when reading entries.
 
 Also verify that `Install-Skins.ps1` uses the package directory as its root:
 
 ```powershell
-Select-String -Path .\release-build\rainmeter-desktop-widgets-full-X.Y.Z\Install-Skins.ps1 -Pattern '\$packageRoot = \$PSScriptRoot','Copy-Item -Path'
+Select-String -Path .\release-build\rainmeter-desktop-widgets-X.Y.Z\Install-Skins.ps1 -Pattern '\$packageRoot = \$PSScriptRoot','Copy-Item -Path'
 ```
 
 ## Commit And Tag
@@ -119,6 +127,8 @@ for ($i = $start + 1; $i -lt $lines.Count; $i++) {
 [IO.File]::WriteAllText((Resolve-Path .\release-build).Path + "\release-notes-v$version.md", (($lines[($start + 1)..($end - 1)] -join "`r`n").Trim() + "`r`n"), [Text.UTF8Encoding]::new($false))
 
 gh release create "v$version" `
+  ".\releases\v$version\rainmeter-desktop-widgets-$version.zip" `
+  ".\releases\v$version\rainmeter-desktop-widgets-$version.rmskin" `
   ".\releases\v$version\rainmeter-desktop-widgets-full-$version.zip" `
   ".\releases\v$version\rainmeter-desktop-widgets-lite-$version.zip" `
   ".\releases\v$version\rainmeter-desktop-widgets-full-$version.rmskin" `
@@ -152,6 +162,7 @@ Check the direct release asset redirects:
 ```powershell
 curl.exe -I https://github.com/kevendai/Rainmeter_todo/releases/download/vX.Y.Z/rainmeter-desktop-widgets-full-X.Y.Z.zip
 curl.exe -I https://github.com/kevendai/Rainmeter_todo/releases/download/vX.Y.Z/rainmeter-desktop-widgets-lite-X.Y.Z.zip
+curl.exe -I https://github.com/kevendai/Rainmeter_todo/releases/download/vX.Y.Z/rainmeter-desktop-widgets-X.Y.Z.zip
 curl.exe -I https://github.com/kevendai/Rainmeter_todo/releases/download/vX.Y.Z/rainmeter-desktop-widgets-full-X.Y.Z.rmskin
 curl.exe -I https://github.com/kevendai/Rainmeter_todo/releases/download/vX.Y.Z/rainmeter-desktop-widgets-lite-X.Y.Z.rmskin
 ```

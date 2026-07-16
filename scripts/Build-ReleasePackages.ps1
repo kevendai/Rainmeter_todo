@@ -43,6 +43,7 @@ function Copy-Tree {
         if ($excludedNames -contains $item.Name) { continue }
         if ($item.Name -like '*.tmp' -or $item.Name -like '*.log' -or $item.Name -like '*.build.exe' -or $item.Name -like '*.pdb') { continue }
         $relative = $item.FullName.Substring($Source.Length).TrimStart('\', '/')
+        if ($relative -match '(^|[\\/])PaperCache([\\/]|$)') { continue }
         $target = Join-Path $Destination $relative
         if ($item.PSIsContainer) {
             New-Item -ItemType Directory -Path $target -Force | Out-Null
@@ -73,6 +74,9 @@ function Remove-ReleaseSecrets {
         if ($file.Name -like '*.tmp' -or $file.Name -like '*.log' -or $file.Name -like '*.build.exe' -or $file.Name -like '*.pdb') {
             Remove-Item -LiteralPath $file.FullName -Force -ErrorAction SilentlyContinue
         }
+    }
+    foreach ($directory in Get-ChildItem -LiteralPath $Root -Recurse -Force -Directory -ErrorAction SilentlyContinue | Where-Object { $_.Name -eq 'PaperCache' } | Sort-Object FullName -Descending) {
+        Remove-Item -LiteralPath $directory.FullName -Recurse -Force -ErrorAction SilentlyContinue
     }
 }
 
@@ -124,12 +128,11 @@ if ($Activate) { $args += '-Activate' }
 
 function New-RmskinPackage {
     param(
-        [string]$Flavor,
         [string]$DisplayName,
         [string]$PackageRoot
     )
 
-    $rmskinRoot = Join-Path $OutputRoot ("rmskin-$Flavor-$Version")
+    $rmskinRoot = Join-Path $OutputRoot ("rmskin-standard-$Version")
     if (Test-Path -LiteralPath $rmskinRoot) { Remove-Item -LiteralPath $rmskinRoot -Recurse -Force }
     New-Item -ItemType Directory -Path $rmskinRoot -Force | Out-Null
     Copy-Item -Path (Join-Path $PackageRoot 'Skins') -Destination (Join-Path $rmskinRoot 'Skins') -Recurse -Force
@@ -150,8 +153,8 @@ MinimumWindows=10.0
 "@
     [IO.File]::WriteAllText((Join-Path $rmskinRoot 'RMSKIN.ini'), ($rmskinIni.Trim() + "`r`n"), [Text.UTF8Encoding]::new($false))
 
-    $rmskin = Join-Path $OutputRoot ("rainmeter-desktop-widgets-$Flavor-$Version.rmskin")
-    $rmskinZip = Join-Path $OutputRoot ("rainmeter-desktop-widgets-$Flavor-$Version.rmskin.zip")
+    $rmskin = Join-Path $OutputRoot ("rainmeter-desktop-widgets-$Version.rmskin")
+    $rmskinZip = Join-Path $OutputRoot ("rainmeter-desktop-widgets-$Version.rmskin.zip")
     Compress-Archive -Path (Join-Path $rmskinRoot '*') -DestinationPath $rmskinZip -Force
     if (Test-Path -LiteralPath $rmskin) { Remove-Item -LiteralPath $rmskin -Force }
     Move-Item -LiteralPath $rmskinZip -Destination $rmskin -Force
@@ -159,13 +162,9 @@ MinimumWindows=10.0
 }
 
 function New-Package {
-    param(
-        [string]$Flavor,
-        [string]$DisplayName,
-        [switch]$NoPaperFeatures
-    )
+    param([string]$DisplayName)
 
-    $packageName = "rainmeter-desktop-widgets-$Flavor-$Version"
+    $packageName = "rainmeter-desktop-widgets-$Version"
     $packageRoot = Join-Path $OutputRoot $packageName
     $skinsRoot = Join-Path $packageRoot 'Skins'
     $todoRoot = Join-Path $skinsRoot 'Todo'
@@ -179,17 +178,6 @@ function New-Package {
     & (Join-Path $PSScriptRoot 'New-RefreshArrow.ps1') -OutputDirectory (Join-Path $todoRoot '@Resources\RefreshFrames')
     & (Join-Path $PSScriptRoot 'New-RefreshArrow.ps1') -OutputDirectory (Join-Path $calendarRoot '@Resources\RefreshFrames')
 
-    if ($NoPaperFeatures) {
-        $todoIni = Join-Path $todoRoot 'Todo.ini'
-        $ini = [IO.File]::ReadAllText($todoIni, [Text.UTF8Encoding]::new($false))
-        $ini = $ini -replace '(?m)^Information=.*$', 'Information=Editable todo board without paper feed integration.'
-        $ini = $ini -replace '(?m)^LeftMouseUpAction=\["#@#TodoHost\.exe" "SyncArxiv" "Force"\]$', 'Hidden=1'
-        $ini = $ini -replace '(?m)^MouseOverAction=\[!SetOption Sync FontColor.*$', 'Hidden=1'
-        $ini = $ini -replace '(?m)^MouseLeaveAction=\[!SetOption Sync FontColor.*$', 'Hidden=1'
-        $ini = $ini -replace '(?m)^LeftMouseUpAction=.*"SyncArxiv".*$', 'LeftMouseUpAction=[]'
-        [IO.File]::WriteAllText($todoIni, $ini, [Text.UTF8Encoding]::new($false))
-    }
-
     Set-SkinVersion $todoRoot 'Todo.ini'
     Set-SkinVersion $calendarRoot 'Calendar.ini'
     Convert-IniToUtf16 (Join-Path $todoRoot 'Todo.ini')
@@ -202,7 +190,6 @@ function New-Package {
     $todoExe = Join-Path $todoRoot '@Resources\TodoHost.exe'
     $calendarExe = Join-Path $calendarRoot '@Resources\CalendarHost.exe'
     $todoCompileArgs = @('/nologo','/target:winexe','/optimize+','/r:System.Web.Extensions.dll','/r:System.Windows.Forms.dll','/r:System.Drawing.dll','/r:System.Security.dll',"/out:$todoExe",$common) + $todoSources
-    if ($NoPaperFeatures) { $todoCompileArgs = @('/define:NO_PAPER_FEATURES') + $todoCompileArgs }
     & $csc @todoCompileArgs
     if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $todoExe)) { throw "Failed to build TodoHost.exe for $DisplayName" }
     & $csc /nologo /target:winexe /optimize+ /r:System.Web.Extensions.dll /r:System.Windows.Forms.dll /r:System.Drawing.dll /r:System.Security.dll "/out:$calendarExe" $common $calendarSources
@@ -220,16 +207,24 @@ function New-Package {
         version = $Version
         updater_version = 1
         rainmeter = '4.5.26.3894'
-        paper_features = -not $NoPaperFeatures
-        excludes = @('translation.secret','paper-sync.secret','caldav.secret','tasks.json','calendar-cache.json','calendar-state.json')
+        paper_features = $true
+        paper_features_runtime_switch = $true
+        excludes = @('translation.secret','paper-sync.secret','caldav.secret','tasks.json','calendar-cache.json','calendar-state.json','PaperCache')
     } | ConvertTo-Json -Depth 4
     Set-Content -LiteralPath (Join-Path $packageRoot 'manifest.json') -Value $manifest -Encoding UTF8
 
     $zip = Join-Path $OutputRoot ($packageName + '.zip')
     Compress-Archive -Path (Join-Path $packageRoot '*') -DestinationPath $zip -Force
     Write-Host "Created $zip"
-    New-RmskinPackage -Flavor $Flavor -DisplayName $DisplayName -PackageRoot $packageRoot
+    New-RmskinPackage -DisplayName $DisplayName -PackageRoot $packageRoot
 }
 
-New-Package -Flavor 'full' -DisplayName 'Rainmeter Desktop Widgets Full'
-New-Package -Flavor 'lite' -DisplayName 'Rainmeter Desktop Widgets Lite' -NoPaperFeatures
+New-Package -DisplayName 'Rainmeter Desktop Widgets'
+
+$canonicalZip = Join-Path $OutputRoot "rainmeter-desktop-widgets-$Version.zip"
+$canonicalRmskin = Join-Path $OutputRoot "rainmeter-desktop-widgets-$Version.rmskin"
+foreach ($legacyFlavor in @('full','lite')) {
+    Copy-Item -LiteralPath $canonicalZip -Destination (Join-Path $OutputRoot "rainmeter-desktop-widgets-$legacyFlavor-$Version.zip") -Force
+    Copy-Item -LiteralPath $canonicalRmskin -Destination (Join-Path $OutputRoot "rainmeter-desktop-widgets-$legacyFlavor-$Version.rmskin") -Force
+}
+Write-Host 'Created full/lite compatibility aliases from the unified package.'

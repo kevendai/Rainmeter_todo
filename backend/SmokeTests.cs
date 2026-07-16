@@ -30,6 +30,7 @@ internal static class SmokeTests
                 }}
             };
             File.WriteAllText(Path.Combine(todoDir,"tasks.json"), Json.Serialize(todo), new UTF8Encoding(false));
+            Run(Path.Combine(todoDir,"TodoHost.exe"), "PaperSelfTest");
             Run(Path.Combine(todoDir,"TodoHost.exe"), "Toggle 11111111111111111111111111111111");
             Dictionary<string,object> saved = (Dictionary<string,object>)Json.DeserializeObject(File.ReadAllText(Path.Combine(todoDir,"tasks.json"),Encoding.UTF8));
             object[] tasks=(object[])saved["tasks"]; Dictionary<string,object> manual=(Dictionary<string,object>)tasks[0],paper=(Dictionary<string,object>)tasks[1];
@@ -56,10 +57,11 @@ internal static class SmokeTests
             try {
                 RunUi(Path.Combine(todoDir,"TodoHost.exe"),"Add");
                 RunUi(Path.Combine(todoDir,"TodoHost.exe"),"Manage");
+                RunUi(Path.Combine(todoDir,"TodoHost.exe"),"Settings");
                 RunUi(Path.Combine(calendarDir,"CalendarHost.exe"),"Manage");
                 RunUi(Path.Combine(calendarDir,"CalendarHost.exe"),"Detail aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
             } finally { Environment.SetEnvironmentVariable("RAINMETER_UI_SMOKE",null); }
-            Console.WriteLine("PASS: Todo migration/toggle/render and Calendar render/action compatibility");
+            Console.WriteLine("PASS: Todo paper self-tests, settings, migration/toggle/render and Calendar compatibility");
         }
         finally { try { Directory.Delete(root,true); } catch { } }
     }

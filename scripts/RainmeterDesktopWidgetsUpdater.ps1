@@ -249,16 +249,27 @@ function Check-And-Install {
         return
     }
 
-    $displayFlavor = if ([string]::IsNullOrWhiteSpace($FlavorName)) { $Flavor } else { $FlavorName }
-    $prompt = "New version $latestTag ($displayFlavor) is available.`r`n`r`nDownload and install now? Rainmeter will restart."
+    $prompt = "New version $latestTag (Unified) is available.`r`n`r`nDownload and install now? Rainmeter will restart."
     if (-not $AssumeYes -and -not (Confirm-Update $prompt)) {
         Show-Message "Update canceled: $latestTag"
         return
     }
 
-    $assetName = "rainmeter-desktop-widgets-$Flavor-$latestVersion.zip"
-    $assetUrl = "https://raw.githubusercontent.com/$Repository/$([Uri]::EscapeDataString($latestTag))/releases/$([Uri]::EscapeDataString($latestTag))/$([Uri]::EscapeDataString($assetName))"
-    Invoke-WebRequestCompat -Uri $assetUrl -Method Head -Headers @{ 'User-Agent' = $UserAgent } -TimeoutSec 20 | Out-Null
+    $candidateNames = @("rainmeter-desktop-widgets-$latestVersion.zip")
+    if (-not [string]::IsNullOrWhiteSpace($Flavor)) { $candidateNames += "rainmeter-desktop-widgets-$Flavor-$latestVersion.zip" }
+    $candidateNames += @("rainmeter-desktop-widgets-full-$latestVersion.zip","rainmeter-desktop-widgets-lite-$latestVersion.zip")
+    $assetName = ''
+    $assetUrl = ''
+    foreach ($candidate in @($candidateNames | Select-Object -Unique)) {
+        $candidateUrl = "https://raw.githubusercontent.com/$Repository/$([Uri]::EscapeDataString($latestTag))/releases/$([Uri]::EscapeDataString($latestTag))/$([Uri]::EscapeDataString($candidate))"
+        try {
+            Invoke-WebRequestCompat -Uri $candidateUrl -Method Head -Headers @{ 'User-Agent' = $UserAgent } -TimeoutSec 20 | Out-Null
+            $assetName = $candidate
+            $assetUrl = $candidateUrl
+            break
+        } catch {}
+    }
+    if ([string]::IsNullOrWhiteSpace($assetUrl)) { throw "No compatible update package was found for $latestTag." }
 
     $downloads = Join-Path ([Environment]::GetFolderPath([Environment+SpecialFolder]::UserProfile)) 'Downloads'
     New-Item -ItemType Directory -Path $downloads -Force | Out-Null

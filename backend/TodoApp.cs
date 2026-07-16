@@ -17,15 +17,7 @@ internal static partial class TodoApp
     private const string GitHubRepository = "kevendai/Rainmeter_todo";
     private static string ResourceDir = AppDomain.CurrentDomain.BaseDirectory.TrimEnd(Path.DirectorySeparatorChar);
     private static readonly string AppVersion = LoadAppVersion();
-#if NO_PAPER_FEATURES
-    private static readonly bool PaperFeaturesEnabled = false;
-    private const string AppFlavor = "lite";
-    private const string AppFlavorName = "Lite 精简版";
-#else
-    private static readonly bool PaperFeaturesEnabled = true;
-    private const string AppFlavor = "full";
-    private const string AppFlavorName = "Full 完整版";
-#endif
+    private const string AppEditionName = "统一版";
     private static string StatePath { get { return Path.Combine(ResourceDir, "tasks.json"); } }
     private static string IncludePath { get { return Path.Combine(ResourceDir, "Generated.inc"); } }
     private static string GuardPath { get { return Path.Combine(ResourceDir, ".refresh-guard"); } }
@@ -57,6 +49,8 @@ internal static partial class TodoApp
         if (action == "Edit") return EditInteractive(id);
         if (action == "Manage") return ManageInteractive();
         if (action == "Settings") return SettingsInteractive();
+        if (action == "PaperWorker") return RunPaperWorker(id);
+        if (action == "PaperSelfTest") return RunPaperSelfTests();
         using (Mutex mutex = new Mutex(false, @"Global\RainmeterTodoState"))
         {
             bool held = false;
@@ -73,27 +67,25 @@ internal static partial class TodoApp
                 {
                     case "Startup":
                         bool guarded = ConsumeGuard();
-                        if (PaperFeaturesEnabled) SyncArxiv(state, false, "");
+                        SyncArxiv(state, false, "");
                         Save(state);
                         refresh |= Render(state) && !guarded;
                         break;
                     case "Rollover": refresh |= Render(state); break;
                     case "Refresh":
-                        if (PaperFeaturesEnabled) SyncArxiv(state, force, "");
+                        SyncArxiv(state, true, "");
                         Save(state); Render(state); refresh = true; break;
                     case "Render": Render(state); break;
                     case "Delete": Delete(state, id, ref refresh); break;
                     case "Toggle": Toggle(state, id, ref refresh); break;
                     case "Open": Open(state, id, ref refresh); break;
                     case "ClearArxiv":
-                        if (!PaperFeaturesEnabled) { Meta(state)["status"] = "此版本未包含论文功能"; Commit(state); refresh = true; break; }
                         Tasks(state).RemoveAll(t => S(t, "source") == "arxiv");
                         Meta(state)["last_arxiv_sync_date"] = "";
                         Meta(state)["status"] = "已清除论文待办";
                         Commit(state); refresh = true; break;
                     case "SyncArxiv":
-                        if (!PaperFeaturesEnabled) { Meta(state)["status"] = "此版本未包含论文功能"; Commit(state); refresh = true; break; }
-                        SyncArxiv(state, force, ""); Commit(state); refresh = true; break;
+                        SyncArxiv(state, true, ""); Commit(state); refresh = true; break;
                 }
                 if (refresh) Refresh();
                 return 0;

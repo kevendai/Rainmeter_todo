@@ -1,0 +1,780 @@
+using System;
+using System.Collections.Generic;
+using System.Diagnostics;
+using System.Globalization;
+using System.IO;
+using System.Linq;
+using System.Net;
+using System.Text;
+using System.Text.RegularExpressions;
+using System.Threading;
+using System.Threading.Tasks;
+using System.Windows.Forms;
+using System.Xml;
+using RainmeterBackend;
+
+internal static partial class TodoApp
+{
+    private const string DefaultTitlePrompt =
+        "你是计算机视觉研究论文筛选助手。请根据论文标题评估与领域自适应目标检测、视觉表征、鲁棒性和可迁移方法的相关性及研究价值。"
+        + " 为每篇论文给出0到10的整数分数。必须仅输出JSON对象，格式为 {\"scores\":{\"论文ID\":分数}}，不得遗漏、增加或解释任何ID。";
+    private const string DefaultAbstractPrompt =
+        "你是严格的计算机视觉论文评审助手。请根据标题和摘要评估方法创新性、实验价值、与目标检测或领域迁移的相关性及可迁移性。"
+        + " 为每篇论文给出0到50的整数分数。必须仅输出JSON对象，格式为 {\"scores\":{\"论文ID\":分数}}，不得遗漏、增加或解释任何ID。";
+
+    private sealed class PaperSettings
+    {
+        public bool Enabled;
+        public string ApiBaseUrl = "https://api.deepseek.com/chat/completions";
+        public string ApiKey = "";
+        public string Model = "deepseek-v4-flash";
+        public int MaxConcurrency = 8;
+        public int TimeoutSeconds = 180;
+        public bool FileServerEnabled;
+        public string FileBaseUrl = "";
+        public string FileAccount = "";
+        public string FilePassword = "";
+        public string Categories = "cs.CV,cs.AI";
+        public string ExcludeCategories = "cs.CL,cs.SD,cs.CY,cs.RO,cs.CE";
+        public string TitlePrompt = DefaultTitlePrompt;
+        public string AbstractPrompt = DefaultAbstractPrompt;
+        public int TitleThreshold = 7;
+        public int TitleBatchSize = 10;
+        public int AbstractBatchSize = 3;
+        public int ImportCount = 5;
+        public int CacheDays = 14;
+    }
+
+    private sealed class RemotePaperResult
+    {
+        public string Status;
+        public string Error;
+    }
+
+    private sealed class PaperHttpException : Exception
+    {
+        public int StatusCode;
+        public PaperHttpException(int statusCode, string message) : base(message) { StatusCode = statusCode; }
+    }
+
+    private static string PaperJobPath { get { return Path.Combine(PaperCache, "paper-job.json"); } }
+
+    private static PaperSettings LoadPaperSettings()
+    {
+        PaperSettings settings = new PaperSettings();
+        if (!File.Exists(PaperSyncSecret)) return settings;
+        try
+        {
+            Dictionary<string, object> root = JsonUtil.ReadDpapiJson(PaperSyncSecret);
+            Dictionary<string, object> api = JsonUtil.Object(JsonUtil.Get(root, "DeepSeek"));
+            Dictionary<string, object> file = JsonUtil.Object(JsonUtil.Get(root, "FileServer"));
+            Dictionary<string, object> scoring = JsonUtil.Object(JsonUtil.Get(root, "Scoring"));
+            bool legacy = api.Count == 0 && file.Count == 0 && scoring.Count == 0;
+            settings.Enabled = JsonUtil.Bool(root, "Enabled", legacy);
+            if (legacy)
+            {
+                settings.FileBaseUrl = S(root, "BaseUrl");
+                settings.FileAccount = S(root, "Account");
+                settings.FilePassword = S(root, "Password");
+                settings.FileServerEnabled = settings.FileBaseUrl != "" || settings.FileAccount != "";
+                return settings;
+            }
+            settings.ApiBaseUrl = JsonUtil.String(api, "BaseUrl", settings.ApiBaseUrl);
+            settings.ApiKey = JsonUtil.String(api, "ApiKey", "");
+            settings.Model = JsonUtil.String(api, "Model", settings.Model);
+            settings.MaxConcurrency = Clamp(JsonUtil.Int(api, "MaxConcurrency", settings.MaxConcurrency), 1, 32);
+            settings.TimeoutSeconds = Clamp(JsonUtil.Int(api, "TimeoutSeconds", settings.TimeoutSeconds), 30, 600);
+            settings.FileServerEnabled = JsonUtil.Bool(file, "Enabled", false);
+            settings.FileBaseUrl = JsonUtil.String(file, "BaseUrl", "");
+            settings.FileAccount = JsonUtil.String(file, "Account", "");
+            settings.FilePassword = JsonUtil.String(file, "Password", "");
+            settings.Categories = JsonUtil.String(scoring, "Categories", settings.Categories);
+            settings.ExcludeCategories = JsonUtil.String(scoring, "ExcludeCategories", settings.ExcludeCategories);
+            settings.TitlePrompt = JsonUtil.String(scoring, "TitlePrompt", settings.TitlePrompt);
+            settings.AbstractPrompt = JsonUtil.String(scoring, "AbstractPrompt", settings.AbstractPrompt);
+            settings.TitleThreshold = Clamp(JsonUtil.Int(scoring, "TitleThreshold", settings.TitleThreshold), 0, 10);
+            settings.TitleBatchSize = Clamp(JsonUtil.Int(scoring, "TitleBatchSize", settings.TitleBatchSize), 1, 50);
+            settings.AbstractBatchSize = Clamp(JsonUtil.Int(scoring, "AbstractBatchSize", settings.AbstractBatchSize), 1, 20);
+            settings.ImportCount = Clamp(JsonUtil.Int(scoring, "ImportCount", settings.ImportCount), 1, 20);
+            settings.CacheDays = Clamp(JsonUtil.Int(scoring, "CacheDays", settings.CacheDays), 1, 90);
+        }
+        catch { }
+        return settings;
+    }
+
+    private static void SavePaperSettings(PaperSettings settings)
+    {
+        ValidatePaperSettings(settings);
+        Dictionary<string, object> root = new Dictionary<string, object> {
+            {"Version", 2},
+            {"Enabled", settings.Enabled},
+            {"DeepSeek", new Dictionary<string, object> {
+                {"BaseUrl", NormalizeHttpUrl(settings.ApiBaseUrl)},
+                {"ApiKey", settings.ApiKey.Trim()},
+                {"Model", settings.Model.Trim()},
+                {"MaxConcurrency", Clamp(settings.MaxConcurrency, 1, 32)},
+                {"TimeoutSeconds", Clamp(settings.TimeoutSeconds, 30, 600)}
+            }},
+            {"FileServer", new Dictionary<string, object> {
+                {"Enabled", settings.FileServerEnabled},
+                {"BaseUrl", NormalizeHttpUrl(settings.FileBaseUrl)},
+                {"Account", settings.FileAccount.Trim()},
+                {"Password", settings.FilePassword}
+            }},
+            {"Scoring", new Dictionary<string, object> {
+                {"Categories", settings.Categories.Trim()},
+                {"ExcludeCategories", settings.ExcludeCategories.Trim()},
+                {"TitlePrompt", settings.TitlePrompt.Trim()},
+                {"AbstractPrompt", settings.AbstractPrompt.Trim()},
+                {"TitleThreshold", Clamp(settings.TitleThreshold, 0, 10)},
+                {"TitleBatchSize", Clamp(settings.TitleBatchSize, 1, 50)},
+                {"AbstractBatchSize", Clamp(settings.AbstractBatchSize, 1, 20)},
+                {"ImportCount", Clamp(settings.ImportCount, 1, 20)},
+                {"CacheDays", Clamp(settings.CacheDays, 1, 90)}
+            }}
+        };
+        JsonUtil.WriteDpapiJson(PaperSyncSecret, root);
+    }
+
+    private static void ValidatePaperSettings(PaperSettings settings)
+    {
+        if (!settings.Enabled) return;
+        bool anyApi = !String.IsNullOrWhiteSpace(settings.ApiKey);
+        if (anyApi && (String.IsNullOrWhiteSpace(settings.ApiBaseUrl) || String.IsNullOrWhiteSpace(settings.Model)))
+            throw new Exception("DeepSeek API 地址、API Key 和模型必须同时填写，或全部留空");
+        if (settings.FileServerEnabled && (String.IsNullOrWhiteSpace(settings.FileBaseUrl) || String.IsNullOrWhiteSpace(settings.FileAccount)))
+            throw new Exception("启用文件同步时，服务器地址和账号不能为空");
+        if (String.IsNullOrWhiteSpace(settings.TitlePrompt) || String.IsNullOrWhiteSpace(settings.AbstractPrompt))
+            throw new Exception("标题和摘要评分提示词不能为空");
+    }
+
+    private static int Clamp(int value, int minimum, int maximum) { return Math.Max(minimum, Math.Min(maximum, value)); }
+    private static string NormalizeHttpUrl(string value)
+    {
+        value = (value ?? "").Trim();
+        if (value == "") return "";
+        if (!value.StartsWith("http://", StringComparison.OrdinalIgnoreCase) && !value.StartsWith("https://", StringComparison.OrdinalIgnoreCase)) value = "https://" + value;
+        return value.TrimEnd('/');
+    }
+    private static bool HasScoringApi(PaperSettings settings)
+    {
+        return settings.Enabled && settings.ApiBaseUrl.Trim() != "" && settings.ApiKey.Trim() != "" && settings.Model.Trim() != "";
+    }
+    private static bool HasFileServer(PaperSettings settings)
+    {
+        return settings.Enabled && settings.FileServerEnabled && settings.FileBaseUrl.Trim() != "" && settings.FileAccount.Trim() != "";
+    }
+
+    private static void SyncArxiv(Dictionary<string, object> state, bool manual, string paperDate)
+    {
+        PaperSettings settings = LoadPaperSettings();
+        string today = String.IsNullOrWhiteSpace(paperDate) ? DateTime.Now.ToString("yyyy-MM-dd") : paperDate;
+        if (!settings.Enabled)
+        {
+            if (manual) Meta(state)["status"] = "论文推荐已关闭";
+            return;
+        }
+        DateTime now = DateTime.Now;
+        if (!manual && (now.TimeOfDay < TimeSpan.FromHours(8) || now.TimeOfDay > TimeSpan.FromHours(20))) return;
+        if (!manual && IsPaperJobRunning()) { Meta(state)["status"] = ReadPaperJobMessage("论文后台评分正在运行"); return; }
+        if (!manual && JsonUtil.String(Meta(state), "last_arxiv_sync_date", "") == today) return;
+        Directory.CreateDirectory(PaperCache);
+        CleanupPaperCache(settings);
+        string finalPath = Path.Combine(PaperCache, today + "_papers.json");
+
+        RemotePaperResult remote = null;
+        if (HasFileServer(settings))
+        {
+            remote = DownloadRemotePaper(settings, finalPath);
+            if (remote.Status == "found")
+            {
+                List<Dictionary<string, object>> downloaded;
+                if (TryLoadPapers(finalPath, out downloaded))
+                {
+                    ImportPapers(state, downloaded, today, settings);
+                    return;
+                }
+                remote.Status = "error";
+                remote.Error = "远端论文 JSON 无法读取";
+            }
+        }
+
+        List<Dictionary<string, object>> local;
+        if (TryLoadPapers(finalPath, out local) && IsPaperFileComplete(local, settings))
+        {
+            if (HasFileServer(settings) && remote != null && remote.Status == "notfound") UploadRemotePaper(settings, finalPath);
+            ImportPapers(state, local, today, settings);
+            return;
+        }
+
+        if (!manual)
+        {
+            Meta(state)["status"] = remote == null ? "本地暂无 " + today + " 已评分论文" :
+                remote.Status == "notfound" ? "远端暂无 " + today + " 已评分论文" : remote.Error;
+            return;
+        }
+        if (IsPaperJobRunning())
+        {
+            Meta(state)["status"] = ReadPaperJobMessage("论文后台评分正在运行");
+            return;
+        }
+        if (!HasScoringApi(settings))
+        {
+            Meta(state)["status"] = "未配置 DeepSeek 评分 API";
+            return;
+        }
+
+        string prompt;
+        if (remote != null && remote.Status == "error")
+            prompt = "无法确认远端论文文件状态，继续可能产生重复评分费用。\r\n\r\n是否仍在本机抓取 arXiv 并调用 DeepSeek 评分？";
+        else if (remote != null && remote.Status == "notfound")
+            prompt = "远端暂无 " + today + " 的论文文件。\r\n\r\n是否在本机抓取 arXiv 并调用 DeepSeek 评分？";
+        else
+            prompt = "本地暂无 " + today + " 的完整论文缓存。\r\n\r\n是否抓取 arXiv 并调用 DeepSeek 评分？";
+        if (MessageBox.Show(prompt, "本地论文评分", MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes)
+        {
+            Meta(state)["status"] = "已取消本地论文评分";
+            return;
+        }
+        WritePaperJob("queued", "已启动后台评分，正在准备 " + today + " 的论文", 0, 0);
+        StartPaperWorker(today);
+        Meta(state)["status"] = "已启动后台论文评分";
+    }
+
+    private static void StartPaperWorker(string date)
+    {
+        string arguments = "PaperWorker " + QuoteArg(date);
+        Process.Start(new ProcessStartInfo(Application.ExecutablePath, arguments) { UseShellExecute = false, CreateNoWindow = true, WindowStyle = ProcessWindowStyle.Hidden });
+    }
+
+    private static int RunPaperWorker(string date)
+    {
+        using (Mutex mutex = new Mutex(false, @"Global\RainmeterTodoPaperWorker"))
+        {
+            bool held = false;
+            try
+            {
+                held = mutex.WaitOne(0);
+                if (!held) return 0;
+                PaperSettings settings = LoadPaperSettings();
+                if (!HasScoringApi(settings)) { WritePaperJob("failed", "DeepSeek 评分 API 未配置完整", 0, 0); return 2; }
+                ServicePointManager.DefaultConnectionLimit = Math.Max(ServicePointManager.DefaultConnectionLimit, settings.MaxConcurrency + 4);
+                ServicePointManager.Expect100Continue = false;
+                Directory.CreateDirectory(PaperCache);
+                CleanupPaperCache(settings);
+                string finalPath = Path.Combine(PaperCache, date + "_papers.json");
+                string partialPath = Path.Combine(PaperCache, date + "_papers.partial.json");
+                List<Dictionary<string, object>> papers;
+                if (!TryLoadPapers(partialPath, out papers))
+                {
+                    WritePaperJob("fetching", "正在从 arXiv 获取 " + date + " 的论文", 0, 0);
+                    papers = FetchArxivPapers(settings, date);
+                    if (papers.Count == 0)
+                    {
+                        WritePaperJob("completed", date + " 没有符合条件的新论文", 0, 0);
+                        UpdatePaperStatus(date + " 没有符合条件的新论文", false);
+                        return 0;
+                    }
+                    JsonUtil.SaveAtomic(partialPath, papers);
+                }
+                ScorePapers(papers, settings, partialPath);
+                if (!IsPaperFileComplete(papers, settings)) throw new Exception("论文评分未完整完成");
+                JsonUtil.SaveAtomic(finalPath, papers);
+                if (File.Exists(partialPath)) File.Delete(partialPath);
+                bool uploaded = !HasFileServer(settings) || UploadRemotePaper(settings, finalPath);
+                WritePaperJob("importing", "评分完成，正在导入本地待办", papers.Count, papers.Count);
+                int result = WithLockedState(delegate(Dictionary<string, object> state, ref bool refresh) {
+                    ImportPapers(state, papers, date, settings);
+                    if (!uploaded) Meta(state)["status"] += "；文件服务器上传失败";
+                    Commit(state);
+                    refresh = true;
+                });
+                WritePaperJob(result == 0 ? "completed" : "failed", result == 0 ? "论文评分和待办同步完成" : "评分完成，但待办同步失败", papers.Count, papers.Count);
+                return result;
+            }
+            catch (Exception ex)
+            {
+                WritePaperJob("failed", "论文评分失败：" + SafeStatusMessage(ex.Message), 0, 0);
+                UpdatePaperStatus("论文评分失败：" + SafeStatusMessage(ex.Message), true);
+                return 1;
+            }
+            finally { if (held) mutex.ReleaseMutex(); }
+        }
+    }
+
+    private static void UpdatePaperStatus(string message, bool refreshSkin)
+    {
+        WithLockedState(delegate(Dictionary<string, object> state, ref bool refresh) {
+            Meta(state)["status"] = message;
+            Commit(state);
+            refresh = refreshSkin;
+        });
+    }
+
+    private static bool IsPaperJobRunning()
+    {
+        if (!File.Exists(PaperJobPath)) return false;
+        try
+        {
+            Dictionary<string, object> job = JsonUtil.LoadObject(PaperJobPath);
+            string state = JsonUtil.String(job, "state", "");
+            DateTimeOffset updated;
+            if (!DateTimeOffset.TryParse(JsonUtil.String(job, "updated_at", ""), out updated)) return false;
+            return state != "completed" && state != "failed" && DateTimeOffset.Now - updated < TimeSpan.FromMinutes(30);
+        }
+        catch { return false; }
+    }
+
+    private static string ReadPaperJobMessage(string fallback)
+    {
+        if (!File.Exists(PaperJobPath)) return fallback;
+        try { return JsonUtil.String(JsonUtil.LoadObject(PaperJobPath), "message", fallback); }
+        catch { return fallback; }
+    }
+
+    private static string PaperDisplayStatus(Dictionary<string, object> state)
+    {
+        return IsPaperJobRunning() ? ReadPaperJobMessage("论文后台评分正在运行") : JsonUtil.String(Meta(state), "status", "就绪");
+    }
+
+    private static void WritePaperJob(string state, string message, int completed, int total)
+    {
+        Directory.CreateDirectory(PaperCache);
+        JsonUtil.SaveAtomic(PaperJobPath, new Dictionary<string, object> {
+            {"state", state}, {"message", message}, {"completed", completed}, {"total", total},
+            {"updated_at", RuntimeUtil.Iso(DateTimeOffset.Now)}
+        });
+        RuntimeUtil.Refresh("Todo");
+    }
+
+    private static void CleanupPaperCache(PaperSettings settings)
+    {
+        Directory.CreateDirectory(PaperCache);
+        DateTime cutoff = DateTime.Now.AddDays(-settings.CacheDays);
+        foreach (string file in Directory.GetFiles(PaperCache))
+        {
+            string name = Path.GetFileName(file);
+            if ((name.EndsWith("_papers.json", StringComparison.OrdinalIgnoreCase) ||
+                 name.EndsWith("_papers.partial.json", StringComparison.OrdinalIgnoreCase) ||
+                 name.Equals("paper-job.json", StringComparison.OrdinalIgnoreCase)) &&
+                File.GetLastWriteTime(file) < cutoff)
+            {
+                try { File.Delete(file); } catch { }
+            }
+        }
+    }
+
+    private static List<Dictionary<string, object>> FetchArxivPapers(PaperSettings settings, string date)
+    {
+        string xml = PaperHttp("GET", "https://rss.arxiv.org/rss/cs", null, null, settings.TimeoutSeconds * 1000);
+        XmlDocument document = new XmlDocument();
+        document.XmlResolver = null;
+        document.LoadXml(xml);
+        DateTime target = DateTime.ParseExact(date, "yyyy-MM-dd", CultureInfo.InvariantCulture).Date;
+        HashSet<string> include = CsvSet(settings.Categories);
+        HashSet<string> exclude = CsvSet(settings.ExcludeCategories);
+        HashSet<string> seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        List<Dictionary<string, object>> papers = new List<Dictionary<string, object>>();
+        XmlNodeList items = document.SelectNodes("//*[local-name()='item' or local-name()='entry']");
+        foreach (XmlNode item in items)
+        {
+            string link = NodeText(item, "link");
+            if (link == "")
+            {
+                XmlNode linkNode = item.SelectSingleNode("./*[local-name()='link']");
+                if (linkNode != null && linkNode.Attributes != null && linkNode.Attributes["href"] != null) link = linkNode.Attributes["href"].Value;
+            }
+            MatchResult idResult = ParseArxivId(link);
+            if (!idResult.Valid || !seen.Add(idResult.Value)) continue;
+            string dateText = NodeText(item, "date");
+            if (dateText == "") dateText = NodeText(item, "published");
+            if (dateText == "") dateText = NodeText(item, "updated");
+            DateTimeOffset published;
+            if (!DateTimeOffset.TryParse(dateText, CultureInfo.InvariantCulture, DateTimeStyles.AllowWhiteSpaces, out published)) continue;
+            if (published.ToOffset(TimeSpan.FromHours(8)).Date != target) continue;
+            HashSet<string> categories = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (XmlNode node in item.SelectNodes("./*[local-name()='category' or local-name()='subject']"))
+            {
+                string value = node.InnerText.Trim();
+                if (node.Attributes != null && node.Attributes["term"] != null) value = node.Attributes["term"].Value.Trim();
+                foreach (string part in value.Split(new[] { ',', ' ', ';' }, StringSplitOptions.RemoveEmptyEntries)) categories.Add(part.Trim());
+            }
+            if (include.Count > 0 && !categories.Any(include.Contains)) continue;
+            if (categories.Any(exclude.Contains)) continue;
+            string title = CleanPaperText(NodeText(item, "title"));
+            string summary = NodeText(item, "description");
+            if (summary == "") summary = NodeText(item, "summary");
+            summary = CleanPaperText(Regex.Replace(summary, @"^arXiv:\S+\s+Announce Type:\s*\w+\s*", "", RegexOptions.IgnoreCase));
+            string authors = String.Join(", ", item.SelectNodes("./*[local-name()='author']").Cast<XmlNode>().Select(n => CleanPaperText(NodeText(n, "name") == "" ? n.InnerText : NodeText(n, "name"))).Where(v => v != ""));
+            papers.Add(new Dictionary<string, object> {
+                {"id", papers.Count + 1}, {"arxiv_id", idResult.Value}, {"title", title},
+                {"authors", authors == "" ? "Unknown" : authors}, {"abstract", summary},
+                {"pdf_link", "https://arxiv.org/pdf/" + idResult.Value + ".pdf"},
+                {"abs_link", "https://arxiv.org/abs/" + idResult.Value},
+                {"category", categories.Cast<object>().ToList()},
+                {"all_categories", categories.Cast<object>().ToList()},
+                {"score", new Dictionary<string, object>{{"title", null}, {"abstract", null}}},
+                {"status", "idle"}, {"current_task", null}
+            });
+        }
+        return papers;
+    }
+
+    private sealed class MatchResult { public bool Valid; public string Value; }
+    private static MatchResult ParseArxivId(string link)
+    {
+        System.Text.RegularExpressions.Match match = System.Text.RegularExpressions.Regex.Match(link ?? "", @"/(?:abs|pdf)/([^/?#]+)", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+        string value = match.Success ? match.Groups[1].Value : "";
+        if (value.EndsWith(".pdf", StringComparison.OrdinalIgnoreCase)) value = value.Substring(0, value.Length - 4);
+        value = System.Text.RegularExpressions.Regex.Replace(value, @"v\d+$", "");
+        return new MatchResult { Valid = value != "", Value = value };
+    }
+    private static string NodeText(XmlNode node, string localName)
+    {
+        XmlNode child = node.SelectSingleNode("./*[local-name()='" + localName + "']");
+        return child == null ? "" : child.InnerText.Trim();
+    }
+    private static string CleanPaperText(string value)
+    {
+        if (String.IsNullOrWhiteSpace(value)) return "";
+        return WebUtility.HtmlDecode(System.Text.RegularExpressions.Regex.Replace(value, "<[^>]+>", " ")).Replace("\r", " ").Replace("\n", " ").Trim();
+    }
+    private static HashSet<string> CsvSet(string value)
+    {
+        return new HashSet<string>((value ?? "").Split(new[] { ',', ';', '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries).Select(v => v.Trim()).Where(v => v != ""), StringComparer.OrdinalIgnoreCase);
+    }
+
+    private static void ScorePapers(List<Dictionary<string, object>> papers, PaperSettings settings, string partialPath)
+    {
+        ScoreStage(papers.Where(p => JsonUtil.Get(JsonUtil.Object(JsonUtil.Get(p, "score")), "title") == null).ToList(), "title", settings.TitleBatchSize, 0, 10, settings, partialPath, papers);
+        List<Dictionary<string, object>> abstracts = papers.Where(p => {
+            Dictionary<string, object> score = JsonUtil.Object(JsonUtil.Get(p, "score"));
+            object title = JsonUtil.Get(score, "title");
+            return title != null && Convert.ToInt32(title, CultureInfo.InvariantCulture) >= settings.TitleThreshold && JsonUtil.Get(score, "abstract") == null;
+        }).ToList();
+        ScoreStage(abstracts, "abstract", settings.AbstractBatchSize, 0, 50, settings, partialPath, papers);
+    }
+
+    private static void ScoreStage(List<Dictionary<string, object>> stagePapers, string stage, int batchSize, int minimum, int maximum, PaperSettings settings, string partialPath, List<Dictionary<string, object>> allPapers)
+    {
+        List<List<Dictionary<string, object>>> batches = new List<List<Dictionary<string, object>>>();
+        for (int i = 0; i < stagePapers.Count; i += batchSize) batches.Add(stagePapers.Skip(i).Take(batchSize).ToList());
+        if (batches.Count == 0) return;
+        object saveLock = new object();
+        int completed = 0;
+        WritePaperJob(stage, stage == "title" ? "正在并发进行标题评分" : "正在并发进行摘要评分", 0, stagePapers.Count);
+        Parallel.ForEach(batches, new ParallelOptions { MaxDegreeOfParallelism = settings.MaxConcurrency }, delegate(List<Dictionary<string, object>> batch) {
+            Dictionary<int, int> scores = ScoreBatchWithRecovery(batch, stage, minimum, maximum, settings);
+            lock (saveLock)
+            {
+                foreach (Dictionary<string, object> paper in batch)
+                {
+                    int id = Convert.ToInt32(JsonUtil.Get(paper, "id"), CultureInfo.InvariantCulture);
+                    Dictionary<string, object> score = JsonUtil.Object(JsonUtil.Get(paper, "score"));
+                    score[stage] = scores[id];
+                    paper["score"] = score;
+                    if (stage == "title" && scores[id] < settings.TitleThreshold) paper["status"] = "filtered";
+                    else if (stage == "abstract") paper["status"] = "done";
+                    else paper["status"] = "idle";
+                }
+                completed += batch.Count;
+                JsonUtil.SaveAtomic(partialPath, allPapers);
+                WritePaperJob(stage, (stage == "title" ? "标题评分 " : "摘要评分 ") + completed + "/" + stagePapers.Count, completed, stagePapers.Count);
+            }
+        });
+    }
+
+    private static Dictionary<int, int> ScoreBatchWithRecovery(List<Dictionary<string, object>> batch, string stage, int minimum, int maximum, PaperSettings settings)
+    {
+        Exception last = null;
+        for (int attempt = 0; attempt < 2; attempt++)
+        {
+            try { return CallDeepSeekBatch(batch, stage, minimum, maximum, settings); }
+            catch (Exception ex) { last = ex; }
+        }
+        if (batch.Count > 1)
+        {
+            int split = batch.Count / 2;
+            Dictionary<int, int> left = ScoreBatchWithRecovery(batch.Take(split).ToList(), stage, minimum, maximum, settings);
+            Dictionary<int, int> right = ScoreBatchWithRecovery(batch.Skip(split).ToList(), stage, minimum, maximum, settings);
+            foreach (KeyValuePair<int, int> pair in right) left[pair.Key] = pair.Value;
+            return left;
+        }
+        throw new Exception("论文 " + Convert.ToString(JsonUtil.Get(batch[0], "id"), CultureInfo.InvariantCulture) + " 评分失败：" + (last == null ? "未知错误" : last.Message));
+    }
+
+    private static Dictionary<int, int> CallDeepSeekBatch(List<Dictionary<string, object>> batch, string stage, int minimum, int maximum, PaperSettings settings)
+    {
+        string prompt = stage == "title" ? settings.TitlePrompt : settings.AbstractPrompt;
+        StringBuilder input = new StringBuilder();
+        foreach (Dictionary<string, object> paper in batch)
+        {
+            input.Append(Convert.ToString(JsonUtil.Get(paper, "id"), CultureInfo.InvariantCulture)).Append(": ").Append(S(paper, "title")).AppendLine();
+            if (stage == "abstract") input.Append("Abstract: ").Append(S(paper, "abstract")).AppendLine().AppendLine();
+        }
+        Dictionary<string, object> body = new Dictionary<string, object> {
+            {"model", settings.Model},
+            {"messages", new object[] {
+                new Dictionary<string, object>{{"role", "system"}, {"content", prompt}},
+                new Dictionary<string, object>{{"role", "user"}, {"content", input.ToString()}}
+            }},
+            {"thinking", new Dictionary<string, object>{{"type", "disabled"}}},
+            {"response_format", new Dictionary<string, object>{{"type", "json_object"}}},
+            {"stream", false}
+        };
+        string raw = DeepSeekRequest(settings, JsonUtil.Serialize(body));
+        Dictionary<string, object> root = JsonUtil.Object(JsonUtil.Deserialize(raw.Trim()));
+        List<object> choices = JsonUtil.Array(JsonUtil.Get(root, "choices"));
+        if (choices.Count == 0) throw new Exception("DeepSeek 未返回 choices");
+        Dictionary<string, object> message = JsonUtil.Object(JsonUtil.Get(JsonUtil.Object(choices[0]), "message"));
+        string content = JsonUtil.String(message, "content", "").Trim();
+        return ParseDeepSeekScores(content, batch, minimum, maximum);
+    }
+
+    private static Dictionary<int, int> ParseDeepSeekScores(string content, List<Dictionary<string, object>> batch, int minimum, int maximum)
+    {
+        Dictionary<string, object> parsed = JsonUtil.Object(JsonUtil.Deserialize(content));
+        Dictionary<string, object> values = JsonUtil.Object(JsonUtil.Get(parsed, "scores"));
+        if (values.Count == 0) values = parsed;
+        HashSet<int> expected = new HashSet<int>(batch.Select(p => Convert.ToInt32(JsonUtil.Get(p, "id"), CultureInfo.InvariantCulture)));
+        Dictionary<int, int> result = new Dictionary<int, int>();
+        foreach (KeyValuePair<string, object> pair in values)
+        {
+            int id, score;
+            if (!Int32.TryParse(pair.Key, NumberStyles.Integer, CultureInfo.InvariantCulture, out id) ||
+                !Int32.TryParse(Convert.ToString(pair.Value, CultureInfo.InvariantCulture), NumberStyles.Integer, CultureInfo.InvariantCulture, out score))
+                throw new Exception("DeepSeek 返回了非整数 ID 或分数");
+            if (score < minimum || score > maximum) throw new Exception("DeepSeek 返回分数超出 " + minimum + "-" + maximum);
+            result[id] = score;
+        }
+        if (!expected.SetEquals(result.Keys)) throw new Exception("DeepSeek 返回的论文 ID 与请求批次不一致");
+        return result;
+    }
+
+    private static string DeepSeekRequest(PaperSettings settings, string body)
+    {
+        int[] delays = { 2000, 4000, 8000 };
+        for (int attempt = 0; ; attempt++)
+        {
+            try
+            {
+                return PaperHttp("POST", NormalizeHttpUrl(settings.ApiBaseUrl), body,
+                    new Dictionary<string, string>{{"Authorization", "Bearer " + settings.ApiKey.Trim()}}, settings.TimeoutSeconds * 1000);
+            }
+            catch (PaperHttpException ex)
+            {
+                bool transient = ex.StatusCode == 429 || ex.StatusCode == 500 || ex.StatusCode == 503;
+                if (!transient || attempt >= delays.Length) throw;
+                Thread.Sleep(delays[attempt] + new Random(unchecked(Environment.TickCount * 31 + Thread.CurrentThread.ManagedThreadId)).Next(200, 900));
+            }
+        }
+    }
+
+    private static string PaperHttp(string method, string url, string body, IDictionary<string, string> headers, int timeout)
+    {
+        ServicePointManager.SecurityProtocol |= (SecurityProtocolType)3072;
+        HttpWebRequest request = (HttpWebRequest)WebRequest.Create(url);
+        request.Method = method;
+        request.Timeout = timeout;
+        request.ReadWriteTimeout = timeout;
+        request.KeepAlive = true;
+        request.UserAgent = "RainmeterDesktopWidgets/" + AppVersion;
+        request.Accept = "application/json, application/xml, text/xml, */*";
+        if (headers != null) foreach (KeyValuePair<string, string> header in headers) request.Headers[header.Key] = header.Value;
+        if (body != null)
+        {
+            byte[] bytes = Encoding.UTF8.GetBytes(body);
+            request.ContentType = "application/json; charset=utf-8";
+            request.ContentLength = bytes.Length;
+            using (Stream stream = request.GetRequestStream()) stream.Write(bytes, 0, bytes.Length);
+        }
+        try
+        {
+            using (HttpWebResponse response = (HttpWebResponse)request.GetResponse())
+            using (StreamReader reader = new StreamReader(response.GetResponseStream(), Encoding.UTF8)) return reader.ReadToEnd();
+        }
+        catch (WebException ex)
+        {
+            HttpWebResponse response = ex.Response as HttpWebResponse;
+            int code = response == null ? 0 : (int)response.StatusCode;
+            string message = ex.Message;
+            if (response != null)
+            {
+                try { using (StreamReader reader = new StreamReader(response.GetResponseStream(), Encoding.UTF8)) message = reader.ReadToEnd(); } catch { }
+            }
+            throw new PaperHttpException(code, "HTTP " + code + " " + SafeStatusMessage(message));
+        }
+    }
+
+    private static void TestDeepSeekConnection(PaperSettings settings)
+    {
+        ValidatePaperSettings(settings);
+        if (!HasScoringApi(settings)) throw new Exception("请先填写完整的 DeepSeek API 配置");
+        Dictionary<string, object> paper = new Dictionary<string, object>{{"id", 1}, {"title", "Test paper"}, {"abstract", "A test abstract."}};
+        CallDeepSeekBatch(new List<Dictionary<string, object>>{paper}, "title", 0, 10, settings);
+    }
+
+    private static string LoginFileServer(PaperSettings settings)
+    {
+        string body = JsonUtil.Serialize(new Dictionary<string, object>{{"username", settings.FileAccount.Trim()}, {"password", settings.FilePassword}});
+        return PaperHttp("POST", NormalizeHttpUrl(settings.FileBaseUrl) + "/api/login", body, null, 10000).Trim().Trim('"');
+    }
+
+    private static void TestFileServerConnection(PaperSettings settings)
+    {
+        ValidatePaperSettings(settings);
+        if (!HasFileServer(settings)) throw new Exception("请先启用并填写完整的文件服务器配置");
+        LoginFileServer(settings);
+    }
+
+    private static RemotePaperResult DownloadRemotePaper(PaperSettings settings, string path)
+    {
+        try
+        {
+            string token = LoginFileServer(settings);
+            string raw = PaperHttp("GET", NormalizeHttpUrl(settings.FileBaseUrl) + "/api/resources/paper/" + Path.GetFileName(path), null,
+                new Dictionary<string, string>{{"X-Auth", token}}, 15000);
+            Dictionary<string, object> result = JsonUtil.Object(JsonUtil.Deserialize(raw));
+            object content = JsonUtil.Get(result, "content");
+            string json = content is string ? (string)content : JsonUtil.Serialize(content ?? result);
+            object parsed = JsonUtil.Deserialize(json);
+            JsonUtil.SaveAtomic(path, parsed);
+            return new RemotePaperResult { Status = "found", Error = "" };
+        }
+        catch (PaperHttpException ex)
+        {
+            return new RemotePaperResult { Status = ex.StatusCode == 404 ? "notfound" : "error", Error = ex.StatusCode == 404 ? "" : "论文文件服务器连接失败" };
+        }
+        catch { return new RemotePaperResult { Status = "error", Error = "论文文件服务器连接失败" }; }
+    }
+
+    private static bool UploadRemotePaper(PaperSettings settings, string path)
+    {
+        if (!File.Exists(path)) return false;
+        try
+        {
+            string token = LoginFileServer(settings);
+            EnsureRemotePaperDirectory(settings, token);
+            byte[] data = File.ReadAllBytes(path);
+            HttpWebRequest request = (HttpWebRequest)WebRequest.Create(NormalizeHttpUrl(settings.FileBaseUrl) + "/api/resources/paper/" + Path.GetFileName(path) + "?override=true");
+            request.Method = "POST"; request.Timeout = 30000; request.ReadWriteTimeout = 30000; request.ContentLength = data.Length; request.Headers["X-Auth"] = token;
+            using (Stream stream = request.GetRequestStream()) stream.Write(data, 0, data.Length);
+            using (HttpWebResponse response = (HttpWebResponse)request.GetResponse()) return (int)response.StatusCode >= 200 && (int)response.StatusCode < 300;
+        }
+        catch { return false; }
+    }
+
+    private static void EnsureRemotePaperDirectory(PaperSettings settings, string token)
+    {
+        string baseUrl = NormalizeHttpUrl(settings.FileBaseUrl);
+        try
+        {
+            PaperHttp("GET", baseUrl + "/api/resources/paper", null, new Dictionary<string, string>{{"X-Auth", token}}, 10000);
+        }
+        catch (PaperHttpException ex)
+        {
+            if (ex.StatusCode != 404) throw;
+            string body = JsonUtil.Serialize(new Dictionary<string, object>{{"name", "paper"}, {"type", "directory"}});
+            PaperHttp("POST", baseUrl + "/api/resources/", body, new Dictionary<string, string>{{"X-Auth", token}}, 10000);
+        }
+    }
+
+    private static bool TryLoadPapers(string path, out List<Dictionary<string, object>> papers)
+    {
+        papers = new List<Dictionary<string, object>>();
+        if (!File.Exists(path)) return false;
+        try
+        {
+            string json = File.ReadAllText(path, Encoding.UTF8).Trim();
+            while (json.StartsWith("[][", StringComparison.Ordinal)) json = json.Substring(2);
+            papers = JsonUtil.Array(JsonUtil.Deserialize(json)).Select(JsonUtil.Object).Where(p => p.Count > 0).ToList();
+            return papers.Count > 0;
+        }
+        catch { return false; }
+    }
+
+    private static bool IsPaperFileComplete(List<Dictionary<string, object>> papers, PaperSettings settings)
+    {
+        if (papers == null || papers.Count == 0) return false;
+        foreach (Dictionary<string, object> paper in papers)
+        {
+            Dictionary<string, object> score = JsonUtil.Object(JsonUtil.Get(paper, "score"));
+            object title = JsonUtil.Get(score, "title");
+            if (title == null) return false;
+            int titleScore;
+            if (!Int32.TryParse(Convert.ToString(title, CultureInfo.InvariantCulture), out titleScore)) return false;
+            if (titleScore >= settings.TitleThreshold && JsonUtil.Get(score, "abstract") == null) return false;
+        }
+        return true;
+    }
+
+    private static void ImportPapers(Dictionary<string, object> state, List<Dictionary<string, object>> papers, string date, PaperSettings settings)
+    {
+        List<Dictionary<string, object>> ranked = papers.Where(p => JsonUtil.Get(JsonUtil.Object(JsonUtil.Get(p, "score")), "abstract") != null)
+            .OrderByDescending(p => Convert.ToDouble(JsonUtil.Get(JsonUtil.Object(JsonUtil.Get(p, "score")), "abstract"), CultureInfo.InvariantCulture))
+            .ThenByDescending(p => Convert.ToDouble(JsonUtil.Get(JsonUtil.Object(JsonUtil.Get(p, "score")), "title") ?? 0, CultureInfo.InvariantCulture))
+            .Take(settings.ImportCount).ToList();
+        if (ranked.Count == 0) { Meta(state)["status"] = date + " 没有通过摘要评分的论文"; return; }
+        int added = 0, translated = 0;
+        foreach (Dictionary<string, object> paper in ranked)
+        {
+            string arxiv = S(paper, "arxiv_id");
+            string target = "https://arxiv.org/html/" + arxiv;
+            if (Tasks(state).Any(t => S(t, "target").Equals(target, StringComparison.OrdinalIgnoreCase) || S(t, "note").Contains("arXiv ID：" + arxiv))) continue;
+            string original = S(paper, "title");
+            string translatedTitle = Translate(original);
+            if (translatedTitle != null) { translated++; Thread.Sleep(220); }
+            Dictionary<string, object> score = JsonUtil.Object(JsonUtil.Get(paper, "score"));
+            EditorResult editor = new EditorResult {
+                Title = "(" + Convert.ToString(JsonUtil.Get(score, "abstract"), CultureInfo.InvariantCulture) + ") " + (translatedTitle ?? original),
+                Target = target,
+                Note = "论文原标题：" + original + "\r\narXiv ID：" + arxiv,
+                Labels = new List<string>{"论文"}, Available = "", Due = ""
+            };
+            Tasks(state).Add(NewTask(editor, "arxiv"));
+            added++;
+        }
+        Meta(state)["last_arxiv_sync_date"] = date;
+        Meta(state)["status"] = added > 0 ? "已添加 " + date + " 共 " + added + " 篇，翻译 " + translated + " 篇" : date + " 推荐论文均已存在";
+    }
+
+    private static string SafeStatusMessage(string value)
+    {
+        value = (value ?? "").Replace("\r", " ").Replace("\n", " ").Trim();
+        return value.Length > 180 ? value.Substring(0, 180) : value;
+    }
+
+    private static int RunPaperSelfTests()
+    {
+        byte[] original = File.Exists(PaperSyncSecret) ? File.ReadAllBytes(PaperSyncSecret) : null;
+        try
+        {
+            PaperSettings settings = new PaperSettings();
+            List<Dictionary<string, object>> papers = new List<Dictionary<string, object>> {
+                new Dictionary<string, object>{{"id",1},{"score",new Dictionary<string,object>{{"title",8},{"abstract",40}}}},
+                new Dictionary<string, object>{{"id",2},{"score",new Dictionary<string,object>{{"title",5},{"abstract",null}}}}
+            };
+            if (!IsPaperFileComplete(papers, settings)) return 31;
+            JsonUtil.Object(JsonUtil.Get(papers[0], "score"))["abstract"] = null;
+            if (IsPaperFileComplete(papers, settings)) return 32;
+            if (!ParseArxivId("https://arxiv.org/abs/2601.00001v2").Valid || ParseArxivId("https://arxiv.org/abs/2601.00001v2").Value != "2601.00001") return 33;
+            if (Clamp(99, 1, 32) != 32 || Clamp(-1, 1, 32) != 1) return 34;
+            Dictionary<int, int> parsed = ParseDeepSeekScores("{\"scores\":{\"1\":8,\"2\":5}}", papers, 0, 10);
+            if (parsed.Count != 2 || parsed[1] != 8 || parsed[2] != 5) return 35;
+            try { ParseDeepSeekScores("{\"scores\":{\"1\":8}}", papers, 0, 10); return 36; }
+            catch { }
+            JsonUtil.WriteDpapiJson(PaperSyncSecret, new Dictionary<string, object>{{"BaseUrl","http://example.invalid"},{"Account","legacy"},{"Password","secret"}});
+            PaperSettings migrated = LoadPaperSettings();
+            if (!migrated.Enabled || !migrated.FileServerEnabled || migrated.FileAccount != "legacy") return 37;
+            PaperSettings disabled = new PaperSettings { Enabled = false, ApiBaseUrl = "", Model = "", TitlePrompt = "", AbstractPrompt = "" };
+            SavePaperSettings(disabled);
+            if (LoadPaperSettings().Enabled) return 38;
+            return 0;
+        }
+        finally
+        {
+            if (original == null) { try { File.Delete(PaperSyncSecret); } catch { } }
+            else File.WriteAllBytes(PaperSyncSecret, original);
+        }
+    }
+}

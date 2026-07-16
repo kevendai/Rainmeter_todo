@@ -66,7 +66,7 @@ internal static partial class TodoApp
             y += 42;
         }
         if (done.Count > 8) { Meter(lines, "DoneMore", "Meter=String", "MeterStyle=StyleText", "X=60", "Y=" + (y + 7), "W=420", "H=20", "FontSize=9", "FontColor=#MutedColor#", "Text=另有 " + (done.Count - 8) + " 项未展开"); y += 30; }
-        string status = RuntimeUtil.CleanRainmeter(JsonUtil.String(Meta(state), "status", "就绪")); y += 18;
+        string status = RuntimeUtil.CleanRainmeter(PaperDisplayStatus(state)); y += 18;
         Meter(lines, "FooterRule", "Meter=Shape", "X=22", "Y=" + y, "Shape=Rectangle 0,0,476,1 | Fill Color #BorderColor# | StrokeWidth 0");
         Meter(lines, "Status", "Meter=String", "MeterStyle=StyleText", "X=23", "Y=" + (y + 13), "W=470", "H=18", "FontSize=9", "FontColor=#MutedColor#", "Text=" + status, "ToolTipText=" + status); y += 42;
         Meter(lines, "BottomSpacer", "Meter=Shape", "X=0", "Y=" + y, "Shape=Rectangle 0,0,520,1 | Fill Color 0,0,0,0 | StrokeWidth 0");
