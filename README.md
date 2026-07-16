@@ -1,62 +1,106 @@
 # Rainmeter Desktop Widgets
 
-用于维护本机 Rainmeter 桌面磁贴、待办面板和部署脚本。
+一套面向 Windows 的 Rainmeter 桌面组件，把待办、日程和论文推荐放在桌面右上角。日常操作通过原生 C# 窗口完成，不需要常驻终端，也不依赖外部 Python 服务。
 
-## 本机环境
+## 功能
 
-- Rainmeter：4.5.26.3894（64 位，便携安装）
-- 运行目录：`D:\Program Files (x86)\Rainmeter`
-- 项目目录：`E:\Programmes\Rainmeter`
-- 当前磁盘皮肤：`illustro\Disk\3 Disks.ini`
+### 待办与已办
 
-## 目录
+- 快速新增、编辑、完成、恢复和删除任务。
+- 支持开始时间、截止时间、逾期标红、备注、标签和批量管理。
+- 点击任务可打开网页、文件、文件夹或应用。
+- 每天 06:00 自动整理上一周期未完成的论文任务，并区分“已读”和“自动归档”。
 
-- `skins/`：可编辑的皮肤源码
-- `scripts/`：安装、部署和备份脚本
-- `backend/`：Todo / Calendar 的 C# 运行时后端；Rainmeter 运行时不再启动 PowerShell
-- `docs/`：项目说明与设计记录
-- `backups/`：手动备份（不提交大型或敏感文件）
+### 今日日程
 
-## 当前状态
+- 从 CalDAV 只读同步当天日程，支持跨天事件、重复日程和时间冲突提示。
+- 显示地点、备注、会议链接和提醒时间。
+- 可将单次日程或整个重复系列单向转换为本地待办，不修改服务器上的原日程。
+- 支持网页链接和腾讯会议链接。
 
-- 磁盘磁贴显示 C、D、E 三个盘。
-- 已关闭 Rainmeter 默认 Welcome 面板。
-- 已关闭 Rainmeter 默认 Clock 面板。
-- 已部署桌面右上角“待办 / 已办”磁贴，支持增删改、完成/恢复、点击跳转、定时出现和逾期标红。
-- 已内置 C# arXiv 抓取与 DeepSeek 两阶段并发评分；08:00–20:00 启动时只读取已有本地/远端文件，手动刷新确认后才会产生评分 API 调用。
-- Todo 与 Calendar 的事件、窗口、JSON、网络同步均由编译后的单文件 C# 后端执行；PowerShell 仅用于部署和凭据维护。
-- 后端编译与数据兼容冒烟测试：`powershell -ExecutionPolicy Bypass -File scripts/Test-Backends.ps1`
+### arXiv 论文推荐
 
-## 待办磁贴
+- 直接在本机使用 C# 抓取 arXiv RSS，不需要安装 Python。
+- 使用 DeepSeek 对标题和摘要进行两阶段并发评分，并把推荐论文导入待办。
+- 可配置分类、排除分类、评分提示词、阈值、批大小、并发、导入数量和缓存时间。
+- 支持断点续跑、本地缓存、进度显示和可选的文件服务器同步。
+- 只有用户主动确认后才会调用评分 API；论文推荐也可以在设置中完全关闭。
 
-- 源码：`skins/Todo/`
-- 部署脚本：`scripts/Deploy-Todo.ps1`
-- 使用和 arXiv 自动同步规则：`docs/TODO-TILE.md`
+## 安装
 
-## 今日日程磁贴
+从 [GitHub Releases](https://github.com/kevendai/Rainmeter_todo/releases/latest) 下载最新版本。
 
-- 源码：`skins/Calendar/`
-- 部署：`powershell -ExecutionPolicy Bypass -File scripts/Deploy-Calendar.ps1 -Activate`
-- 从 Davis CalDAV 只读同步当天 VEVENT，支持跨天、冲突提示和单向转为带时间待办。
-- 详细规则：`docs/CALENDAR-TILE.md`
+### 已安装 Rainmeter
 
-## 发布包
+下载 `rainmeter-desktop-widgets-<版本>.rmskin`，双击后通过 Rainmeter Skin Installer 安装。
 
-生成发布包：
+`.rmskin` 适合首次安装，不用于迁移已有任务和凭据。
+
+### 尚未安装 Rainmeter
+
+下载并解压 `rainmeter-desktop-widgets-<版本>.zip`，然后运行：
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File scripts/Build-ReleasePackages.ps1
+powershell -ExecutionPolicy Bypass -File .\Install-Skins.ps1 -Activate
 ```
 
-发布到 GitHub 的正式包如下：
+压缩包包含 Rainmeter 4.5.26 安装程序、Todo、Calendar 和数据保留型升级器。详细步骤见 [部署说明](docs/RELEASE-DEPLOY.md)。
 
-- `rainmeter-desktop-widgets-*.rmskin`：已有 Rainmeter 的统一初始安装包，论文功能由 Todo 设置页运行时开关控制。
-- `rainmeter-desktop-widgets-*.zip`：统一 zip，包含 Rainmeter 官方安装器、部署脚本和自动更新器。
-- 为兼容旧 full/lite 升级器，构建时会额外生成两个很小的 flavor 引导 zip；它们只负责更新升级器并转到统一 zip，不包含重复编译的皮肤。`.rmskin` 只生成统一版。
+### 从旧版本更新
 
-`.rmskin` 面向初始安装，不迁移旧数据；已有数据或从旧版本更新时继续使用应用内“检查更新”或 zip 里的 `Install-Skins.ps1`，以保留 `tasks.json`、缓存和 DPAPI 密钥。zip 部署详情见 `docs/RELEASE-DEPLOY.md`。
+优先在 Todo 设置的“关于”页面点击“检查更新”。更新器会保留：
 
-## 维护提醒
+- 待办任务和日程转换状态
+- CalDAV、DeepSeek、文件服务器和腾讯翻译凭据
+- 论文设置与本地缓存
 
-- 每次改完源码、脚本、文档或部署配置后，先运行相关检查，再用 Git 提交并推送到 GitHub 做备份。
-- 不要提交 `translation.secret`、`paper-sync.secret`、`caldav.secret`、`tasks.json`、`PaperCache`、备份 JSON 或编译出来的 exe。
+为兼容旧版 full/lite 升级器，每个版本仍发布 full 和 lite 引导 zip。它们会先更新旧升级器，再下载同一份统一完整包；full 和 lite 不再代表不同功能。
+
+## 初次使用
+
+1. 加载 `Todo\Todo.ini` 和 `Calendar\Calendar.ini`。
+2. 点击 Todo 顶部的 `+` 新增任务，点击 `☰` 管理全部任务。
+3. 如需日程同步，在 Calendar 设置中填写 CalDAV 配置。
+4. 如需论文推荐，在 Todo 设置中开启该功能并填写 DeepSeek API Key。
+5. 文件服务器同步和腾讯云标题翻译均为可选功能。
+
+更完整的行为说明：
+
+- [待办与论文推荐](docs/TODO-TILE.md)
+- [日程与 CalDAV](docs/CALENDAR-TILE.md)
+
+## 数据与隐私
+
+- 任务、日程缓存和论文缓存只保存在本机 Rainmeter 皮肤目录。
+- API Key、服务器密码和 CalDAV 等凭据使用 Windows DPAPI CurrentUser 加密。
+- 发布包不包含任何凭据、任务、论文缓存或用户配置。
+- 启动检查不会自动消费 DeepSeek API；本地评分需要用户主动确认。
+
+## 系统要求
+
+- Windows 10 或更高版本
+- Rainmeter 4.5.26 或更高版本
+- 使用论文评分、CalDAV 或文件同步时需要网络连接
+
+## 开发
+
+源码目录：
+
+- `skins/`：Todo 与 Calendar 皮肤
+- `backend/`：C# 后端
+- `scripts/`：部署、测试、升级和打包脚本
+- `docs/`：功能与发布文档
+
+运行后端和 UI 冒烟测试：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\Test-Backends.ps1
+```
+
+构建统一包、full/lite 兼容引导包和 `.rmskin`：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\Build-ReleasePackages.ps1
+```
+
+发布流程见 [GitHub Release 指南](docs/GITHUB-RELEASE.md)。
