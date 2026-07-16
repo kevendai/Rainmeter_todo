@@ -55,6 +55,8 @@ try {
     $bad = $archive.Entries |
       Where-Object { $_.FullName -match '(translation\.secret|paper-sync\.secret|caldav\.secret|tasks\.json|calendar-cache\.json|calendar-state\.json|PaperCache)' } |
       Select-Object -ExpandProperty FullName
+    $hasUpdater = $null -ne ($archive.Entries | Where-Object FullName -eq 'Updater\RainmeterDesktopWidgetsUpdater.ps1' | Select-Object -First 1)
+    $hasInstallEntry = $null -ne ($archive.Entries | Where-Object FullName -eq 'Install-Skins.ps1' | Select-Object -First 1)
 
     [pscustomobject]@{
       Version = $manifest.version
@@ -63,6 +65,8 @@ try {
       RuntimeSwitch = $manifest.paper_features_runtime_switch
       AppVersion = $appVersion
       BadEntries = ($bad -join ', ')
+      HasUpdater = $hasUpdater
+      HasInstallEntry = $hasInstallEntry
     }
 }
 finally { $archive.Dispose() }
@@ -83,21 +87,26 @@ foreach ($flavor in 'full','lite') {
 Expected values:
 
 - Unified package: `Version = X.Y.Z`, `AppVersion = X.Y.Z`, `PaperFeatures = True`, `RuntimeSwitch = True`, `BadEntries` empty.
-- Unified zip contains the complete product. full/lite zips contain only `Install-Skins.ps1`, the updater, and `unified-bootstrap.json`.
+- Unified zip contains the complete product and its top-level updater, but `HasInstallEntry = False`; it is an automatic-update transport package, not a manual installer.
+- full/lite zips retain `Install-Skins.ps1`, the updater, and `unified-bootstrap.json` only as a compatibility bootstrap for pre-1.4.4 clients.
 - Only the unified `.rmskin` is published.
 - The `.rmskin` must end with the 16-byte Rainmeter package footer: an 8-byte little-endian archive size, one flags byte, and the ASCII key `RMSKIN\0`. A normal ZIP renamed to `.rmskin` is invalid.
 
 Zip entries use Windows-style `\` separators because `Compress-Archive` preserves the PowerShell source path style; use `Skins\Todo\@Resources\app-version.txt`, not `Skins/Todo/@Resources/app-version.txt`, when reading entries.
 
-Also verify that `Install-Skins.ps1` uses the package directory as its root and
-delegates installation to the packaged updater, while the updater keeps the
-expected wildcard copy flow:
+Also verify that the `.rmskin` contains the installed updater path, and that
+the updater keeps the expected package discovery and wildcard copy flow:
 
 ```powershell
-Select-String -Path .\release-build\rainmeter-desktop-widgets-X.Y.Z\Install-Skins.ps1 `
-  -Pattern '\$packageRoot = \$PSScriptRoot','InstallPackage','-PackageRoot'
+Add-Type -AssemblyName System.IO.Compression.FileSystem
+$rmskin = [IO.Compression.ZipFile]::OpenRead((Resolve-Path .\release-build\rainmeter-desktop-widgets-X.Y.Z.rmskin))
+try {
+  if ($null -eq ($rmskin.Entries | Where-Object FullName -eq 'Skins\Todo\@Resources\Updater\RainmeterDesktopWidgetsUpdater.ps1' | Select-Object -First 1)) {
+    throw 'RMSKIN updater missing'
+  }
+} finally { $rmskin.Dispose() }
 Select-String -Path .\release-build\rainmeter-desktop-widgets-X.Y.Z\Updater\RainmeterDesktopWidgetsUpdater.ps1 `
-  -Pattern 'Copy-Item -Path \(Join-Path \$source ''\*''\)'
+  -Pattern 'manifest.json','Copy-Item -Path \(Join-Path \$source ''\*''\)'
 ```
 
 ## Commit And Tag

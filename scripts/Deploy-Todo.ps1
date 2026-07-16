@@ -18,6 +18,9 @@ foreach ($name in @('tasks.json','ui-scale.txt','caldav.secret','translation.sec
     if (Test-Path -LiteralPath $path) { $preserved[$name] = [IO.File]::ReadAllBytes($path) }
 }
 Copy-Item -Path (Join-Path $source '*') -Destination $target -Recurse -Force
+$updaterTarget = Join-Path $target '@Resources\Updater'
+New-Item -ItemType Directory -Path $updaterTarget -Force | Out-Null
+Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'RainmeterDesktopWidgetsUpdater.ps1') -Destination (Join-Path $updaterTarget 'RainmeterDesktopWidgetsUpdater.ps1') -Force
 foreach ($name in $preserved.Keys) {
     [IO.File]::WriteAllBytes((Join-Path $target ('@Resources\' + $name)), $preserved[$name])
 }

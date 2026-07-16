@@ -241,9 +241,15 @@ function Invoke-WebRequestCompat {
 
 function Find-PackageRoot {
     param([string]$ExtractRoot)
-    $installer = Get-ChildItem -LiteralPath $ExtractRoot -Recurse -Filter 'Install-Skins.ps1' -File | Select-Object -First 1
-    if ($null -eq $installer) { throw 'Install-Skins.ps1 not found in update package.' }
-    return $installer.Directory.FullName
+    $manifest = Get-ChildItem -LiteralPath $ExtractRoot -Recurse -Filter 'manifest.json' -File |
+        Where-Object {
+            $root = $_.Directory.FullName
+            (Test-Path -LiteralPath (Join-Path $root 'Skins')) -and
+            (Test-Path -LiteralPath (Join-Path $root 'Updater\RainmeterDesktopWidgetsUpdater.ps1'))
+        } |
+        Select-Object -First 1
+    if ($null -eq $manifest) { throw 'Complete update package (manifest, Skins, and updater) not found.' }
+    return $manifest.Directory.FullName
 }
 
 function Show-Message {

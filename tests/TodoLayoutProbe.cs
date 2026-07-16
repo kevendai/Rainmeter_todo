@@ -37,6 +37,12 @@ internal static class TodoLayoutProbe
         return typeof(TodoApp).GetMethods(BindingFlags.NonPublic | BindingFlags.Static).First(method => method.Name == name);
     }
 
+    private static void AssertTextFits(Form form, string text, bool checkWidth, string name)
+    {
+        foreach (Control control in Descendants(form).Where(candidate => candidate.Text == text))
+            DpiLayoutAssertions.AssertFitsAt200Percent(control, checkWidth, name);
+    }
+
     private static void ProbeEditor()
     {
         int stage = 0;
@@ -46,6 +52,10 @@ internal static class TodoLayoutProbe
             if (form == null) return;
             try
             {
+                DpiLayoutAssertions.AssertManualScaling(form);
+                DpiLayoutAssertions.AssertPixelFonts(form);
+                AssertTextFits(form, "新增待办", true, "Todo editor title");
+                AssertTextFits(form, "备注", true, "Todo note label");
                 Button expand = Descendants(form).OfType<Button>().First(button => button.Text == "展开" || button.Text == "收起");
                 Label note = Descendants(form).OfType<Label>().First(label => label.Text == "备注");
                 Panel surface = expand.Parent as Panel;
@@ -69,6 +79,10 @@ internal static class TodoLayoutProbe
                 List<Button> chips = surface.Controls.OfType<Button>().Where(button => button != expand).ToList();
                 if (chips.Count == 0 || chips.Count(button => button.Visible) == 0) throw new Exception("Collapsed selector lost first-row labels");
                 if (selector.Bottom > note.Top) throw new Exception("Collapsed selector overlaps note label");
+                DpiLayoutAssertions.AssertPixelFonts(form);
+                DpiLayoutAssertions.AssertFitsAt200Percent(expand, true, "Todo expand button");
+                foreach (Button chip in chips.Where(button => button.Visible))
+                    DpiLayoutAssertions.AssertFitsAt200Percent(chip, true, "Todo label chip");
                 timer.Stop();
                 form.Close();
             }
@@ -103,6 +117,10 @@ internal static class TodoLayoutProbe
             if (form == null) return;
             try
             {
+                DpiLayoutAssertions.AssertManualScaling(form);
+                DpiLayoutAssertions.AssertPixelFonts(form);
+                AssertTextFits(form, "全部任务", true, "Todo manager title");
+                AssertTextFits(form, "只看未完成", true, "Todo open-only filter");
                 List<CheckBox> rowChecks = Descendants(form).OfType<CheckBox>().Where(check => String.IsNullOrEmpty(check.Text) && check.Parent != null && check.Parent.Tag is string).ToList();
                 if (rowChecks.Count == 0) throw new Exception("Task row checkbox missing");
                 foreach (CheckBox check in rowChecks)

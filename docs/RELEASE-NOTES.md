@@ -1,5 +1,11 @@
 # Release Notes
 
+## 1.4.4 - 2026-07-16
+
+- 修复 Windows 显示缩放为 150%/200% 时 WinForms 字体继续按 DPI 放大、但窗口和控件仍保持固定像素尺寸而造成标题、月份、筛选按钮和底栏文字被裁切的问题；窗口字体现在以 2560×1440、125% 显示缩放的设计基准转换为像素字体，由项目界面比例统一控制，并新增 192 DPI 离屏文字裁切检查。
+- 初次安装统一改为直接双击 `.rmskin`；用户可下载的完整 ZIP 不再提供 `Install-Skins.ps1` 安装入口。自动更新仍使用 ZIP 作为传输包，并改为通过 `manifest.json`、`Skins` 与包内更新器识别完整更新包。
+- `.rmskin`、自动更新包和本地 `Deploy-Todo.ps1` 现在都会明确写入 `Todo\@Resources\Updater\RainmeterDesktopWidgetsUpdater.ps1`；构建阶段会校验该文件已进入 `.rmskin`，避免直接部署遗漏独立升级器。
+
 ## 1.4.3 - 2026-07-16
 
 - Todo 与 Calendar 新增统一界面缩放：以 2560×1440 为 100% 基准，自动模式会在 1920×1080 上使用约 75%，同时缩放 Rainmeter 磁贴、文字、图标、行高以及 WinForms 编辑/设置/管理窗口。

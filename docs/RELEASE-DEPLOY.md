@@ -1,48 +1,35 @@
-# 发布包部署说明
+# Rainmeter Desktop Widgets 部署说明
 
-本项目正式发布一个统一 `.rmskin` 和一个统一 zip：
+本项目的初次安装只使用 `.rmskin`，不再提供 ZIP 内 PowerShell 安装入口。
 
-- `rainmeter-desktop-widgets-*.rmskin`：已有 Rainmeter 的统一初始安装包。
-- `rainmeter-desktop-widgets-*.zip`：统一部署/更新包，包含待办、日程、CalDAV 和可选的论文推荐功能。
-- `rainmeter-desktop-widgets-full-*.zip` / `lite-*.zip`：仅供旧升级器使用的轻量引导包。旧升级器先从其中更新自身，随后新版升级器下载上面的统一 zip；引导包不包含 Skins、Rainmeter 安装器或重复编译的后端。
-- full/lite `.rmskin` 不再生成。
+- `rainmeter-desktop-widgets-*.rmskin`：给新用户或手动重装使用。双击后由 Rainmeter Skin Installer 安装 Todo 和 Calendar。
+- `rainmeter-desktop-widgets-*.zip`：仅供应用内数据保留型自动更新下载，不应手动解压安装。
+- `rainmeter-desktop-widgets-full-*.zip` / `lite-*.zip`：仅为旧升级器保留的内部兼容引导包，不包含皮肤，也不是安装包。
 
-## 已有 Rainmeter 的初始安装
+## 初次安装
 
-1. 下载对应的 `.rmskin`。
-2. 双击 `.rmskin`，确认 Rainmeter Skin Installer 窗口中的安装内容。
-3. 点击 Install。安装完成后应看到 `Todo` 和 `Calendar` 两个皮肤。
-4. 初始安装不会迁移旧数据；已有数据或从旧版本更新时，请使用应用内“检查更新”或 zip 部署方式。
+1. 从 [Rainmeter 官网](https://www.rainmeter.net/) 安装 Rainmeter 4.5.26 或更高版本。
+2. 从 GitHub Releases 下载 `rainmeter-desktop-widgets-<版本>.rmskin`。
+3. 双击该文件，在 Rainmeter Skin Installer 中确认并点击 Install。
+4. 安装完成后应能看到 `Todo` 和 `Calendar` 两个皮肤；如未自动加载，可在 Rainmeter 管理器中加载各自的 `.ini` 文件。
 
-## 空白机器部署
+`.rmskin` 已内置独立升级器：`Todo\@Resources\Updater\RainmeterDesktopWidgetsUpdater.ps1`。因此首次安装完成后，可在 Todo 设置的“关于”页直接检查更新。
 
-1. 解压对应 zip。
-2. 运行包内 `Rainmeter-4.5.26.exe`。
-3. 安装时选择 Portable installation，并自行选择一个 Rainmeter 便携安装目录。记下这个目录，后面部署皮肤时会用到。
-4. 安装完成后关闭 Rainmeter。
-5. 在解压目录运行：
+## 从旧版本更新
 
-   ```powershell
-   powershell -ExecutionPolicy Bypass -File .\Install-Skins.ps1 -Activate
-   ```
-
-6. 脚本会询问 Rainmeter 皮肤库目录。便携安装可输入第 3 步选择的目录；标准安装可输入 `Documents\Rainmeter`，也可以直接输入 `Documents\Rainmeter\Skins`。
-7. 脚本部署皮肤后会自动重启 Rainmeter；启动后应看到 `Todo` 和 `Calendar` 两个皮肤。
+请在 Todo 设置的“关于”页点击“检查更新”。更新器会下载 ZIP、保留任务、缓存和 DPAPI 凭据，并更新自身后部署 Todo/Calendar。不要手动覆盖 `Skins` 目录；这正是过去可能漏掉独立升级器的路径。
 
 ## 凭据与数据
 
-- CalDAV 凭据通过 Calendar 设置窗口保存，密文位于目标 Rainmeter 目录的 `Skins\Todo\@Resources\caldav.secret`。
-- 论文开关、DeepSeek API、文件服务器及评分规则通过 Todo 设置窗口保存，密文位于 `Skins\Todo\@Resources\paper-sync.secret`。
-- 翻译凭据通过 Todo 设置窗口保存，密文位于 `Skins\Todo\@Resources\translation.secret`。
-- 这些 secret 使用 Windows DPAPI CurrentUser 加密，只能由创建它们的 Windows 用户解密。
-- 发布包不会覆盖已有的 `tasks.json`、`paper-sync.secret`、`calendar-cache.json` 或 `calendar-state.json`；`Generated.inc` 是可再生界面文件，会由当前版本后端按界面缩放设置重新生成。
+- CalDAV 凭据位于 `Skins\Todo\@Resources\caldav.secret`。
+- 论文和翻译设置分别位于 `paper-sync.secret`、`translation.secret`，均使用 Windows DPAPI CurrentUser 加密。
+- 自动更新会保留 `tasks.json`、各类 secret、`calendar-cache.json`、`calendar-state.json` 与 `ui-scale.txt`。
 
-## 从源码重新打包
-
-在源码根目录运行：
+## 从源码打包
 
 ```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\Test-Backends.ps1
 powershell -ExecutionPolicy Bypass -File .\scripts\Build-ReleasePackages.ps1
 ```
 
-脚本会生成统一 zip / `.rmskin` 和两个轻量 full/lite 升级引导 zip，并自动下载官方 Rainmeter 4.5.26 安装器到 `.release-cache`。
+构建会生成统一 ZIP、统一 `.rmskin` 和仅供旧客户端使用的 full/lite 引导 ZIP。

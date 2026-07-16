@@ -22,6 +22,7 @@ namespace RainmeterBackend
     {
         private const float BaseWidth = 2560F;
         private const float BaseHeight = 1440F;
+        private const float DesignDpi = 120F;
         private const float MinimumScale = 0.70F;
         private const float MaximumScale = 1.25F;
         private const string AutoMode = "auto";
@@ -142,15 +143,14 @@ namespace RainmeterBackend
         {
             float scale = Current;
             FormScaleState formState = FormScales.GetOrCreateValue(form);
+            if (formState.Applied) return;
             formState.Scale = scale;
             formState.Applied = true;
             form.SuspendLayout();
             if (Math.Abs(scale - 1F) >= 0.001F)
-            {
                 form.Scale(new SizeF(scale, scale));
-                form.Font = ScaleFont(form.Font, scale);
-                ScaleFontsAndSpecialControls(form, scale);
-            }
+            form.Font = ScaleFont(form.Font, scale);
+            ScaleFontsAndSpecialControls(form, scale);
             form.ResumeLayout(true);
             MarkScaledTree(form);
             InstallDynamicScaling(form);
@@ -185,10 +185,8 @@ namespace RainmeterBackend
             FormScaleState formState;
             if (form == null || !FormScales.TryGetValue(form, out formState) || !formState.Applied) return;
             if (Math.Abs(formState.Scale - 1F) >= 0.001F)
-            {
                 control.Scale(new SizeF(formState.Scale, formState.Scale));
-                ScaleControlTreeFontsAndSpecials(control, formState.Scale);
-            }
+            ScaleControlTreeFontsAndSpecials(control, formState.Scale);
             MarkScaledTree(control);
             InstallDynamicScaling(control);
         }
@@ -246,22 +244,42 @@ namespace RainmeterBackend
             if (check != null)
             {
                 int centerY = check.Top + check.Height / 2;
-                int minimumHeight = String.IsNullOrEmpty(check.Text) ? 18 : 20;
+                Size preferred = check.GetPreferredSize(Size.Empty);
+                Size glyph = Size.Empty;
+                try
+                {
+                    using (Graphics graphics = check.CreateGraphics())
+                        glyph = CheckBoxRenderer.GetGlyphSize(graphics, System.Windows.Forms.VisualStyles.CheckBoxState.UncheckedNormal);
+                }
+                catch { }
+                int minimumHeight = Math.Max(String.IsNullOrEmpty(check.Text) ? 18 : 20, Math.Max(preferred.Height, glyph.Height));
                 if (check.Height < minimumHeight)
                 {
                     check.Height = minimumHeight;
                     check.Top = centerY - check.Height / 2;
                 }
-                if (String.IsNullOrEmpty(check.Text) && check.Width < 18) check.Width = 18;
+                if (String.IsNullOrEmpty(check.Text))
+                {
+                    int minimumWidth = Math.Max(18, Math.Max(preferred.Width, glyph.Width));
+                    if (check.Width < minimumWidth) check.Width = minimumWidth;
+                }
             }
             ComboBox combo = control as ComboBox;
             if (combo != null && combo.DropDownStyle == ComboBoxStyle.DropDownList)
                 combo.Height = combo.PreferredHeight;
+            DateTimePicker picker = control as DateTimePicker;
+            if (picker != null)
+                picker.Height = Math.Max(picker.Height, picker.GetPreferredSize(Size.Empty).Height);
         }
 
         private static Font ScaleFont(Font font, float scale)
         {
-            return new Font(font.FontFamily, Math.Max(6F, font.Size * scale), font.Style, font.Unit);
+            // The UI was authored and visually tuned on the 2560x1440 / 125%
+            // reference display. Pixel fonts preserve that appearance while
+            // preventing Windows 150%-200% DPI from enlarging text without the
+            // fixed-pixel control bounds.
+            float logicalPixels = font.Unit == GraphicsUnit.Pixel ? font.Size : font.SizeInPoints * DesignDpi / 72F;
+            return new Font(font.FontFamily, Math.Max(8F, logicalPixels * scale), font.Style, GraphicsUnit.Pixel, font.GdiCharSet, font.GdiVerticalFont);
         }
 
         private static float Clamp(float value)
@@ -577,7 +595,7 @@ namespace RainmeterBackend
             form.MaximizeBox = false;
             form.MinimizeBox = true;
             form.ShowInTaskbar = true;
-            form.AutoScaleMode = AutoScaleMode.Dpi;
+            form.AutoScaleMode = AutoScaleMode.None;
             form.Padding = new Padding(1);
             form.Opacity = 0D;
             form.Shown += delegate { UiScale.ApplyTo(form); };

@@ -38,6 +38,38 @@ internal static class CalendarLayoutProbe
         return typeof(CalendarApp).GetMethods(BindingFlags.NonPublic | BindingFlags.Static).First(method => method.Name == name);
     }
 
+    private static void AssertTextFits(Form form, string text, bool checkWidth, string name)
+    {
+        foreach (Control control in Descendants(form).Where(candidate => candidate.Text == text))
+            DpiLayoutAssertions.AssertFitsAt200Percent(control, checkWidth, name);
+    }
+
+    private static void AssertManagerHighDpi(Form form, Button allTime, List<Control> days)
+    {
+        DpiLayoutAssertions.AssertManualScaling(form);
+        DpiLayoutAssertions.AssertPixelFonts(form);
+        AssertTextFits(form, "日程管理", true, "Calendar manager title");
+        AssertTextFits(form, "查看、编辑和同步你的本地日历与 CalDAV 日历。", true, "Calendar manager subtitle");
+        AssertTextFits(form, "日历筛选", true, "Calendar filter title");
+        AssertTextFits(form, "今天", true, "Calendar today button");
+        AssertTextFits(form, "未来7天", true, "Calendar week tab");
+        AssertTextFits(form, "全部时间", true, "Calendar all-time tab");
+        AssertTextFits(form, "设置", true, "Calendar settings button");
+        AssertTextFits(form, "刷新同步", true, "Calendar sync button");
+        AssertTextFits(form, "新建日程", true, "Calendar add button");
+        foreach (Control month in Descendants(form).Where(control => control is Label && control.Text.Contains(" 年 ") && control.Text.EndsWith(" 月", StringComparison.Ordinal)))
+            DpiLayoutAssertions.AssertFitsAt200Percent(month, true, "Calendar month title");
+        foreach (Control source in Descendants(form).Where(control => control is Button && (control.Text.Contains("本地") || control.Text.Contains("CalDAV"))))
+            DpiLayoutAssertions.AssertFitsAt200Percent(source, true, "Calendar source filter");
+        foreach (Control day in days)
+            DpiLayoutAssertions.AssertFitsAt200Percent(day, true, "Calendar date");
+        Panel grid = days.Count == 0 ? null : days[0].Parent as Panel;
+        if (grid != null)
+            foreach (Label weekday in grid.Controls.OfType<Label>())
+                DpiLayoutAssertions.AssertFitsAt200Percent(weekday, true, "Calendar weekday");
+        DpiLayoutAssertions.AssertFitsAt200Percent(allTime, true, "Calendar all-time tab");
+    }
+
     private static Dictionary<string, object> State()
     {
         return (Dictionary<string, object>)Method("NewState").Invoke(null, null);
@@ -89,6 +121,7 @@ internal static class CalendarLayoutProbe
                 if (rows.Any(row => row.Width > list.ClientSize.Width + 1)) throw new Exception("Calendar event row did not scale with list");
                 Size tabText = TextRenderer.MeasureText(allTime.Text, allTime.Font, Size.Empty, TextFormatFlags.NoPadding | TextFormatFlags.SingleLine);
                 if (tabText.Width > allTime.ClientSize.Width + 2) throw new Exception("All-time tab text clipped");
+                AssertManagerHighDpi(form, allTime, days);
                 if (stage == 1)
                 {
                     string capturePath = Environment.GetEnvironmentVariable("RAINMETER_UI_CAPTURE_PATH");
@@ -131,6 +164,9 @@ internal static class CalendarLayoutProbe
             if (form == null) return;
             try
             {
+                DpiLayoutAssertions.AssertManualScaling(form);
+                DpiLayoutAssertions.AssertPixelFonts(form);
+                AssertTextFits(form, "日程设置", true, "Calendar settings title");
                 HashSet<string> kinds = new HashSet<string>(new[] { "globe", "user", "lock" });
                 List<Panel> icons = Descendants(form).OfType<Panel>().Where(panel => panel.Tag is string && kinds.Contains(Convert.ToString(panel.Tag, CultureInfo.InvariantCulture))).ToList();
                 if (icons.Count < 3) throw new Exception("Credential icons missing");

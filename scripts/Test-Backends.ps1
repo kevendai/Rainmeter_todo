@@ -15,6 +15,7 @@ try {
     $smoke = Join-Path $build 'SmokeTests.exe'
     $todoLayout = Join-Path $build 'TodoLayoutProbe.exe'
     $calendarLayout = Join-Path $build 'CalendarLayoutProbe.exe'
+    $dpiAssertions = Join-Path $tests 'DpiLayoutAssertions.cs'
     $todoSources = @(Get-ChildItem -LiteralPath $backend -Filter 'Todo*.cs' | Sort-Object Name | ForEach-Object { $_.FullName })
     $calendarSources = @(Get-ChildItem -LiteralPath $backend -Filter 'Calendar*.cs' | Sort-Object Name | ForEach-Object { $_.FullName })
     & $csc /nologo /target:winexe /optimize+ @refs "/out:$todo" (Join-Path $backend 'Common.cs') @todoSources
@@ -23,9 +24,9 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'Calendar backend compilation failed' }
     & $csc /nologo /target:exe /optimize+ /r:System.Web.Extensions.dll "/out:$smoke" (Join-Path $backend 'SmokeTests.cs')
     if ($LASTEXITCODE -ne 0) { throw 'Smoke test compilation failed' }
-    & $csc /nologo /target:exe /main:TodoLayoutProbe /optimize+ @refs "/out:$todoLayout" (Join-Path $backend 'Common.cs') @todoSources (Join-Path $tests 'TodoLayoutProbe.cs')
+    & $csc /nologo /target:exe /main:TodoLayoutProbe /optimize+ @refs "/out:$todoLayout" (Join-Path $backend 'Common.cs') @todoSources $dpiAssertions (Join-Path $tests 'TodoLayoutProbe.cs')
     if ($LASTEXITCODE -ne 0) { throw 'Todo layout probe compilation failed' }
-    & $csc /nologo /target:exe /main:CalendarLayoutProbe /optimize+ @refs "/out:$calendarLayout" (Join-Path $backend 'Common.cs') @calendarSources (Join-Path $tests 'CalendarLayoutProbe.cs')
+    & $csc /nologo /target:exe /main:CalendarLayoutProbe /optimize+ @refs "/out:$calendarLayout" (Join-Path $backend 'Common.cs') @calendarSources $dpiAssertions (Join-Path $tests 'CalendarLayoutProbe.cs')
     if ($LASTEXITCODE -ne 0) { throw 'Calendar layout probe compilation failed' }
     & $smoke $todo $calendar
     if ($LASTEXITCODE -ne 0) { throw 'Backend smoke tests failed' }

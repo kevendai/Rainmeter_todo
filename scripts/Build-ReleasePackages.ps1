@@ -178,7 +178,9 @@ function New-RmskinPackage {
 
     $targetUpdater = Join-Path $rmskinRoot 'Skins\Todo\@Resources\Updater'
     New-Item -ItemType Directory -Path $targetUpdater -Force | Out-Null
-    Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'RainmeterDesktopWidgetsUpdater.ps1') -Destination (Join-Path $targetUpdater 'RainmeterDesktopWidgetsUpdater.ps1') -Force
+    $rmskinUpdater = Join-Path $targetUpdater 'RainmeterDesktopWidgetsUpdater.ps1'
+    Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'RainmeterDesktopWidgetsUpdater.ps1') -Destination $rmskinUpdater -Force
+    if (-not (Test-Path -LiteralPath $rmskinUpdater)) { throw 'Updater was not staged in the rmskin package.' }
 
     $rmskinIni = @"
 [rmskin]
@@ -240,7 +242,6 @@ function New-Package {
     $updaterRoot = Join-Path $packageRoot 'Updater'
     New-Item -ItemType Directory -Path $updaterRoot -Force | Out-Null
     New-UpdaterScript (Join-Path $updaterRoot 'RainmeterDesktopWidgetsUpdater.ps1')
-    New-InstallScript (Join-Path $packageRoot 'Install-Skins.ps1')
 
     $manifest = [ordered]@{
         name = $DisplayName
@@ -267,6 +268,8 @@ function New-LegacyBootstrapPackages {
     $updaterRoot = Join-Path $bootstrapRoot 'Updater'
     New-Item -ItemType Directory -Path $updaterRoot -Force | Out-Null
     New-UpdaterScript (Join-Path $updaterRoot 'RainmeterDesktopWidgetsUpdater.ps1')
+    # Kept only inside the legacy full/lite bootstrap for pre-1.4.4 clients.
+    # It is not included in the user-facing unified zip.
     New-InstallScript (Join-Path $bootstrapRoot 'Install-Skins.ps1')
     $bootstrap = [ordered]@{
         repository = 'kevendai/Rainmeter_todo'

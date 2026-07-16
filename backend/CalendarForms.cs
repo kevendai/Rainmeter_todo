@@ -422,7 +422,7 @@ internal static partial class CalendarApp
         Form f = LightUi.Form("日程设置", 720, 560);
         Panel headerIcon = RoundedPanel(38, 34, 48, 48, Color.FromArgb(238,245,252), Color.FromArgb(205,224,241), 14);
         AddHeaderSvgIcon(headerIcon, "settings.svg", "shield", 8, 8, 32);
-        Label title = new Label { Text = "日程设置", Left = 112, Top = 34, Width = 240, Height = 36, BackColor = Color.Transparent, ForeColor = LightUi.Text, Font = new System.Drawing.Font("Microsoft YaHei UI", 18F, System.Drawing.FontStyle.Bold) };
+        Label title = new Label { Text = "日程设置", Left = 112, Top = 34, Width = 240, Height = 40, BackColor = Color.Transparent, ForeColor = LightUi.Text, Font = new System.Drawing.Font("Microsoft YaHei UI", 18F, System.Drawing.FontStyle.Bold) };
         Label subtitle = new Label { Text = "管理 CalDAV 同步账号和周期自动转入规则。", Left = 42, Top = 92, Width = 540, Height = 26, BackColor = Color.Transparent, ForeColor = Color.FromArgb(76, 94, 132), Font = new System.Drawing.Font("Microsoft YaHei UI", 10F) };
         Button closeTop = LightUi.Button("×", 648, 38, 42, DialogResult.Cancel);
         closeTop.Height = 42;

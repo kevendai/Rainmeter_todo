@@ -38,13 +38,7 @@
 
 ### 尚未安装 Rainmeter
 
-下载并解压 `rainmeter-desktop-widgets-<版本>.zip`，然后运行：
-
-```powershell
-powershell -ExecutionPolicy Bypass -File .\Install-Skins.ps1 -Activate
-```
-
-压缩包包含 Rainmeter 4.5.26 安装程序、Todo、Calendar 和数据保留型升级器。详细步骤见 [部署说明](docs/RELEASE-DEPLOY.md)。
+先从 [Rainmeter 官网](https://www.rainmeter.net/) 安装 Rainmeter 4.5.26 或更高版本，再下载 `rainmeter-desktop-widgets-<版本>.rmskin` 并双击安装。完整 ZIP 仅供应用内自动更新下载，不能作为手动安装入口。
 
 ### 从旧版本更新
 
