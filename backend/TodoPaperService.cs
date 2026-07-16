@@ -67,8 +67,8 @@ internal static partial class TodoApp
         public string FileBaseUrl = "";
         public string FileAccount = "";
         public string FilePassword = "";
-        public string Categories = "cs.CV,cs.AI";
-        public string ExcludeCategories = "cs.CL,cs.SD,cs.CY,cs.RO,cs.CE";
+        public string Categories = "";
+        public string ExcludeCategories = "";
         public string TitlePrompt = DefaultTitlePrompt;
         public string AbstractPrompt = DefaultAbstractPrompt;
         public int TitleThreshold = 7;
@@ -1142,6 +1142,7 @@ internal static partial class TodoApp
             if (!TryGetPaperPublished(rss.DocumentElement, out published) || published.ToOffset(TimeSpan.FromHours(8)).Date != new DateTime(2026, 7, 16)) return 41;
             string feed = BuildArxivFeedPath("cs.CV,cs.AI");
             if (!feed.Contains("cs.CV") || !feed.Contains("cs.AI") || feed.Equals("/rss/cs", StringComparison.OrdinalIgnoreCase)) return 42;
+            if (settings.Categories != "" || settings.ExcludeCategories != "" || BuildArxivFeedPath(settings.Categories) != "/rss/cs") return 44;
             Dictionary<string, object> todayTask = new Dictionary<string, object>{{"source","arxiv"},{"created_at","2026-07-16T10:00:00+08:00"}};
             Dictionary<string, object> oldTask = new Dictionary<string, object>{{"source","arxiv"},{"created_at","2026-07-15T10:00:00+08:00"}};
             if (!IsPaperTaskCreatedOnDate(todayTask, "2026-07-16") || IsPaperTaskCreatedOnDate(oldTask, "2026-07-16")) return 43;

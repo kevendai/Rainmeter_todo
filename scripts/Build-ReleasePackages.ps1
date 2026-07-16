@@ -119,11 +119,48 @@ $ErrorActionPreference = 'Stop'
 $packageRoot = $PSScriptRoot
 $updater = Join-Path $packageRoot 'Updater\RainmeterDesktopWidgetsUpdater.ps1'
 if (-not (Test-Path -LiteralPath $updater)) { throw 'Updater script not found in package.' }
-$args = @('-NoProfile','-ExecutionPolicy','Bypass','-File',$updater,'-Mode','InstallPackage','-PackageRoot',$packageRoot,'-RainmeterRoot',$RainmeterRoot,'-WaitForProcessId',$WaitForProcessId)
+$args = @('-NoProfile','-ExecutionPolicy','Bypass','-File',$updater,'-Mode','InstallPackage','-PackageRoot',$packageRoot)
+if (-not [string]::IsNullOrWhiteSpace($RainmeterRoot)) { $args += @('-RainmeterRoot',$RainmeterRoot) }
+$args += @('-WaitForProcessId',$WaitForProcessId)
 if ($Activate) { $args += '-Activate' }
 & powershell @args
 '@
     Set-Content -LiteralPath $Path -Value $content -Encoding UTF8
+}
+
+function Add-RmskinFooter {
+    param([string]$Path)
+    $stream = [IO.File]::Open($Path, [IO.FileMode]::Open, [IO.FileAccess]::ReadWrite, [IO.FileShare]::None)
+    try {
+        $archiveSize = [Int64]$stream.Length
+        $stream.Position = $archiveSize
+        $writer = [IO.BinaryWriter]::new($stream, [Text.Encoding]::ASCII, $true)
+        try {
+            $writer.Write($archiveSize)
+            $writer.Write([byte]0)
+            $writer.Write([Text.Encoding]::ASCII.GetBytes("RMSKIN`0"))
+            $writer.Flush()
+        }
+        finally { $writer.Dispose() }
+    }
+    finally { $stream.Dispose() }
+
+    $stream = [IO.File]::OpenRead($Path)
+    try {
+        if ($stream.Length -lt 16) { throw 'Generated rmskin is too small.' }
+        $stream.Position = $stream.Length - 16
+        $reader = [IO.BinaryReader]::new($stream, [Text.Encoding]::ASCII, $true)
+        try {
+            $declaredSize = $reader.ReadInt64()
+            $flags = $reader.ReadByte()
+            $key = [Text.Encoding]::ASCII.GetString($reader.ReadBytes(7))
+            if ($declaredSize -ne $stream.Length - 16 -or $flags -ne 0 -or $key -ne "RMSKIN`0") {
+                throw 'Generated rmskin footer validation failed.'
+            }
+        }
+        finally { $reader.Dispose() }
+    }
+    finally { $stream.Dispose() }
 }
 
 function New-RmskinPackage {
@@ -158,6 +195,7 @@ MinimumWindows=10.0
     Compress-Archive -Path (Join-Path $rmskinRoot '*') -DestinationPath $rmskinZip -Force
     if (Test-Path -LiteralPath $rmskin) { Remove-Item -LiteralPath $rmskin -Force }
     Move-Item -LiteralPath $rmskinZip -Destination $rmskin -Force
+    Add-RmskinFooter $rmskin
     Write-Host "Created $rmskin"
 }
 

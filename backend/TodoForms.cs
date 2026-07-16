@@ -118,8 +118,8 @@ internal static partial class TodoApp
         Button testApi = LightUi.Button("测试 DeepSeek", 502, 408, 170, DialogResult.None);
         pages[1].Controls.Add(testApi);
 
-        TextBox categories = Field(pages[2], "包含分类（逗号分隔）", 12, 12, w, settings.Categories);
-        TextBox excludes = Field(pages[2], "排除分类（逗号分隔）", 12, 106, w, settings.ExcludeCategories);
+        TextBox categories = Field(pages[2], "包含分类（逗号分隔；留空表示全部 CS 分类）", 12, 12, w, settings.Categories);
+        TextBox excludes = Field(pages[2], "排除分类（逗号分隔；留空表示不排除）", 12, 106, w, settings.ExcludeCategories);
         TextBox threshold = Field(pages[2], "标题进入摘要评分阈值（0-10）", 12, 200, 206, settings.TitleThreshold.ToString(CultureInfo.InvariantCulture));
         TextBox titleBatch = Field(pages[2], "标题批大小（1-50）", 230, 200, 206, settings.TitleBatchSize.ToString(CultureInfo.InvariantCulture));
         TextBox abstractBatch = Field(pages[2], "摘要批大小（1-20）", 448, 200, 224, settings.AbstractBatchSize.ToString(CultureInfo.InvariantCulture));

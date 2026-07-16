@@ -85,6 +85,7 @@ Expected values:
 - Unified package: `Version = X.Y.Z`, `AppVersion = X.Y.Z`, `PaperFeatures = True`, `RuntimeSwitch = True`, `BadEntries` empty.
 - Unified zip contains the complete product. full/lite zips contain only `Install-Skins.ps1`, the updater, and `unified-bootstrap.json`.
 - Only the unified `.rmskin` is published.
+- The `.rmskin` must end with the 16-byte Rainmeter package footer: an 8-byte little-endian archive size, one flags byte, and the ASCII key `RMSKIN\0`. A normal ZIP renamed to `.rmskin` is invalid.
 
 Zip entries use Windows-style `\` separators because `Compress-Archive` preserves the PowerShell source path style; use `Skins\Todo\@Resources\app-version.txt`, not `Skins/Todo/@Resources/app-version.txt`, when reading entries.
 

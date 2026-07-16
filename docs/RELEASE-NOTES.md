@@ -1,5 +1,11 @@
 # Release Notes
 
+## 1.4.2 - 2026-07-16
+
+- 修复发布包安装入口在未显式传入 `RainmeterRoot` 时仍向子 PowerShell 传递空参数、导致 `Install-Skins.ps1 -Activate` 直接报缺少参数的问题；现在会正常进入皮肤目录选择。
+- 修复 `.rmskin` 仅由普通 ZIP 改后缀、缺少 Rainmeter Skin Packager 校验 footer 而被 SkinInstaller 判定为无效包的问题。
+- 新安装或没有旧论文配置时，“包含分类”和“排除分类”默认均为空；包含分类留空会抓取全部计算机科学分类，排除分类留空则不排除任何分类。已有用户保存的分类配置不会被更新或部署覆盖。
+
 ## 1.4.1 - 2026-07-16
 
 - DeepSeek 论文评分请求启用 thinking 模式，提高复杂评分规则的遵循稳定性；用户自行保存的提示词与凭据继续由 DPAPI 配置保留，不写入发布包。
