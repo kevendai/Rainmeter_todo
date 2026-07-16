@@ -28,14 +28,12 @@ Copy the generated release files into the versioned release folder:
 New-Item -ItemType Directory -Path .\releases\vX.Y.Z -Force | Out-Null
 Copy-Item .\release-build\rainmeter-desktop-widgets-X.Y.Z.zip .\releases\vX.Y.Z\ -Force
 Copy-Item .\release-build\rainmeter-desktop-widgets-X.Y.Z.rmskin .\releases\vX.Y.Z\ -Force
-# Transitional aliases for old full/lite updaters:
+# Small updater bootstraps for old full/lite clients:
 Copy-Item .\release-build\rainmeter-desktop-widgets-full-X.Y.Z.zip .\releases\vX.Y.Z\ -Force
 Copy-Item .\release-build\rainmeter-desktop-widgets-lite-X.Y.Z.zip .\releases\vX.Y.Z\ -Force
-Copy-Item .\release-build\rainmeter-desktop-widgets-full-X.Y.Z.rmskin .\releases\vX.Y.Z\ -Force
-Copy-Item .\release-build\rainmeter-desktop-widgets-lite-X.Y.Z.rmskin .\releases\vX.Y.Z\ -Force
 ```
 
-Before committing, inspect the unified zip manifest, app version, runtime feature flag, user-data exclusions, and compatibility alias hashes:
+Before committing, inspect the unified zip manifest, app version, runtime feature flag, user-data exclusions, and legacy bootstrap packages:
 
 ```powershell
 $version = 'X.Y.Z'
@@ -69,18 +67,24 @@ try {
 }
 finally { $archive.Dispose() }
 
-Get-FileHash .\release-build\rainmeter-desktop-widgets-$version.zip,
-  .\release-build\rainmeter-desktop-widgets-full-$version.zip,
-  .\release-build\rainmeter-desktop-widgets-lite-$version.zip
-Get-FileHash .\release-build\rainmeter-desktop-widgets-$version.rmskin,
-  .\release-build\rainmeter-desktop-widgets-full-$version.rmskin,
-  .\release-build\rainmeter-desktop-widgets-lite-$version.rmskin
+foreach ($flavor in 'full','lite') {
+  $bootstrap = ".\release-build\rainmeter-desktop-widgets-$flavor-$version.zip"
+  $extract = Join-Path $env:TEMP "rainmeter-bootstrap-$flavor-$version"
+  Expand-Archive $bootstrap $extract -Force
+  try {
+    if (-not (Test-Path "$extract\unified-bootstrap.json")) { throw "$flavor bootstrap marker missing" }
+    if (Test-Path "$extract\Skins") { throw "$flavor bootstrap unexpectedly contains Skins" }
+  } finally {
+    Remove-Item $extract -Recurse -Force
+  }
+}
 ```
 
 Expected values:
 
 - Unified package: `Version = X.Y.Z`, `AppVersion = X.Y.Z`, `PaperFeatures = True`, `RuntimeSwitch = True`, `BadEntries` empty.
-- Unified, full, and lite compatibility zip hashes must be identical; the three `.rmskin` hashes must also be identical.
+- Unified zip contains the complete product. full/lite zips contain only `Install-Skins.ps1`, the updater, and `unified-bootstrap.json`.
+- Only the unified `.rmskin` is published.
 
 Zip entries use Windows-style `\` separators because `Compress-Archive` preserves the PowerShell source path style; use `Skins\Todo\@Resources\app-version.txt`, not `Skins/Todo/@Resources/app-version.txt`, when reading entries.
 
@@ -131,8 +135,6 @@ gh release create "v$version" `
   ".\releases\v$version\rainmeter-desktop-widgets-$version.rmskin" `
   ".\releases\v$version\rainmeter-desktop-widgets-full-$version.zip" `
   ".\releases\v$version\rainmeter-desktop-widgets-lite-$version.zip" `
-  ".\releases\v$version\rainmeter-desktop-widgets-full-$version.rmskin" `
-  ".\releases\v$version\rainmeter-desktop-widgets-lite-$version.rmskin" `
   --repo kevendai/Rainmeter_todo `
   --title "Rainmeter Desktop Widgets $version" `
   --notes-file $notesPath
@@ -163,8 +165,6 @@ Check the direct release asset redirects:
 curl.exe -I https://github.com/kevendai/Rainmeter_todo/releases/download/vX.Y.Z/rainmeter-desktop-widgets-full-X.Y.Z.zip
 curl.exe -I https://github.com/kevendai/Rainmeter_todo/releases/download/vX.Y.Z/rainmeter-desktop-widgets-lite-X.Y.Z.zip
 curl.exe -I https://github.com/kevendai/Rainmeter_todo/releases/download/vX.Y.Z/rainmeter-desktop-widgets-X.Y.Z.zip
-curl.exe -I https://github.com/kevendai/Rainmeter_todo/releases/download/vX.Y.Z/rainmeter-desktop-widgets-full-X.Y.Z.rmskin
-curl.exe -I https://github.com/kevendai/Rainmeter_todo/releases/download/vX.Y.Z/rainmeter-desktop-widgets-lite-X.Y.Z.rmskin
 ```
 
 Check the newer raw updater path:
@@ -172,8 +172,6 @@ Check the newer raw updater path:
 ```powershell
 curl.exe -I https://raw.githubusercontent.com/kevendai/Rainmeter_todo/vX.Y.Z/releases/vX.Y.Z/rainmeter-desktop-widgets-full-X.Y.Z.zip
 curl.exe -I https://raw.githubusercontent.com/kevendai/Rainmeter_todo/vX.Y.Z/releases/vX.Y.Z/rainmeter-desktop-widgets-lite-X.Y.Z.zip
-curl.exe -I https://raw.githubusercontent.com/kevendai/Rainmeter_todo/vX.Y.Z/releases/vX.Y.Z/rainmeter-desktop-widgets-full-X.Y.Z.rmskin
-curl.exe -I https://raw.githubusercontent.com/kevendai/Rainmeter_todo/vX.Y.Z/releases/vX.Y.Z/rainmeter-desktop-widgets-lite-X.Y.Z.rmskin
 ```
 
 The raw domain can occasionally return `429 Too Many Requests` during repeated checks. If that happens, verify the same asset through GitHub Release assets and the tag tree before treating it as missing:

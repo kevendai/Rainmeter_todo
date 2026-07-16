@@ -173,6 +173,29 @@ namespace RainmeterBackend
             }
         }
 
+        public static void SetMeterText(string config, string meter, string text)
+        {
+            string exe = FindRainmeter();
+            if (!File.Exists(exe)) return;
+            string safe = CleanRainmeter(text);
+            RunRainmeterBang(exe, "!SetOption \"" + meter + "\" \"Text\" \"" + safe + "\" \"" + config + "\"");
+            RunRainmeterBang(exe, "!UpdateMeter \"" + meter + "\" \"" + config + "\"");
+            RunRainmeterBang(exe, "!Redraw \"" + config + "\"");
+        }
+
+        private static void RunRainmeterBang(string exe, string arguments)
+        {
+            try
+            {
+                Process process = Process.Start(new ProcessStartInfo(exe, arguments) { UseShellExecute = false, CreateNoWindow = true });
+                if (process != null && !process.WaitForExit(1500))
+                {
+                    try { process.Kill(); } catch { }
+                }
+            }
+            catch { }
+        }
+
         public static string Sha256Hex(string value)
         {
             using (SHA256 sha = SHA256.Create())

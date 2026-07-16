@@ -221,10 +221,29 @@ function New-Package {
 
 New-Package -DisplayName 'Rainmeter Desktop Widgets'
 
-$canonicalZip = Join-Path $OutputRoot "rainmeter-desktop-widgets-$Version.zip"
-$canonicalRmskin = Join-Path $OutputRoot "rainmeter-desktop-widgets-$Version.rmskin"
-foreach ($legacyFlavor in @('full','lite')) {
-    Copy-Item -LiteralPath $canonicalZip -Destination (Join-Path $OutputRoot "rainmeter-desktop-widgets-$legacyFlavor-$Version.zip") -Force
-    Copy-Item -LiteralPath $canonicalRmskin -Destination (Join-Path $OutputRoot "rainmeter-desktop-widgets-$legacyFlavor-$Version.rmskin") -Force
+function New-LegacyBootstrapPackages {
+    $bootstrapRoot = Join-Path $OutputRoot ("legacy-updater-bootstrap-$Version")
+    New-Item -ItemType Directory -Path $bootstrapRoot -Force | Out-Null
+    $updaterRoot = Join-Path $bootstrapRoot 'Updater'
+    New-Item -ItemType Directory -Path $updaterRoot -Force | Out-Null
+    New-UpdaterScript (Join-Path $updaterRoot 'RainmeterDesktopWidgetsUpdater.ps1')
+    New-InstallScript (Join-Path $bootstrapRoot 'Install-Skins.ps1')
+    $bootstrap = [ordered]@{
+        repository = 'kevendai/Rainmeter_todo'
+        tag = "v$Version"
+        version = $Version
+        asset = "rainmeter-desktop-widgets-$Version.zip"
+    } | ConvertTo-Json
+    [IO.File]::WriteAllText((Join-Path $bootstrapRoot 'unified-bootstrap.json'), $bootstrap, [Text.UTF8Encoding]::new($false))
+
+    $bootstrapZip = Join-Path $OutputRoot (".legacy-updater-bootstrap-$Version.zip")
+    Compress-Archive -Path (Join-Path $bootstrapRoot '*') -DestinationPath $bootstrapZip -Force
+    foreach ($legacyFlavor in @('full','lite')) {
+        $target = Join-Path $OutputRoot "rainmeter-desktop-widgets-$legacyFlavor-$Version.zip"
+        Copy-Item -LiteralPath $bootstrapZip -Destination $target -Force
+        Write-Host "Created legacy updater bootstrap $target"
+    }
+    Remove-Item -LiteralPath $bootstrapZip -Force
 }
-Write-Host 'Created full/lite compatibility aliases from the unified package.'
+
+New-LegacyBootstrapPackages

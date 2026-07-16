@@ -98,6 +98,35 @@ function Install-Package {
         $SourcePackageRoot = Split-Path $PSScriptRoot -Parent
     }
     $SourcePackageRoot = (Resolve-Path -LiteralPath $SourcePackageRoot).Path
+    $bootstrapPath = Join-Path $SourcePackageRoot 'unified-bootstrap.json'
+    if (Test-Path -LiteralPath $bootstrapPath) {
+        $bootstrap = Get-Content -LiteralPath $bootstrapPath -Raw -Encoding UTF8 | ConvertFrom-Json
+        $bootstrapRepository = [string]$bootstrap.repository
+        $bootstrapTag = [string]$bootstrap.tag
+        $bootstrapAsset = [string]$bootstrap.asset
+        if ([string]::IsNullOrWhiteSpace($bootstrapRepository) -or [string]::IsNullOrWhiteSpace($bootstrapTag) -or [string]::IsNullOrWhiteSpace($bootstrapAsset)) {
+            throw 'Unified bootstrap metadata is incomplete.'
+        }
+        $bootstrapUrl = "https://raw.githubusercontent.com/$bootstrapRepository/$([Uri]::EscapeDataString($bootstrapTag))/releases/$([Uri]::EscapeDataString($bootstrapTag))/$([Uri]::EscapeDataString($bootstrapAsset))"
+        $bootstrapDownload = Join-Path ([IO.Path]::GetTempPath()) $bootstrapAsset
+        $bootstrapExtract = Join-Path ([IO.Path]::GetTempPath()) ('RainmeterUnifiedUpdate-' + [guid]::NewGuid().ToString('N'))
+        try {
+            Invoke-WebRequestCompat -Uri $bootstrapUrl -OutFile $bootstrapDownload -Headers @{ 'User-Agent' = $UserAgent } -TimeoutSec 120
+            New-Item -ItemType Directory -Path $bootstrapExtract -Force | Out-Null
+            Unblock-File -LiteralPath $bootstrapDownload -ErrorAction SilentlyContinue
+            Expand-Archive -LiteralPath $bootstrapDownload -DestinationPath $bootstrapExtract -Force
+            Get-ChildItem -LiteralPath $bootstrapExtract -Recurse -File | Unblock-File -ErrorAction SilentlyContinue
+            $unifiedRoot = Find-PackageRoot $bootstrapExtract
+            Install-Package -SourcePackageRoot $unifiedRoot -Root $Root -ShouldActivate:$ShouldActivate -WaitPid $WaitPid
+            return
+        }
+        finally {
+            Remove-Item -LiteralPath $bootstrapExtract -Recurse -Force -ErrorAction SilentlyContinue
+            if ((Split-Path -Leaf $bootstrapDownload) -like 'rainmeter-desktop-widgets-*.zip') {
+                Remove-Item -LiteralPath $bootstrapDownload -Force -ErrorAction SilentlyContinue
+            }
+        }
+    }
     $sourceSkins = Join-Path $SourcePackageRoot 'Skins'
     if (-not (Test-Path -LiteralPath $sourceSkins)) { throw 'Package Skins folder not found.' }
 
@@ -255,21 +284,12 @@ function Check-And-Install {
         return
     }
 
-    $candidateNames = @("rainmeter-desktop-widgets-$latestVersion.zip")
-    if (-not [string]::IsNullOrWhiteSpace($Flavor)) { $candidateNames += "rainmeter-desktop-widgets-$Flavor-$latestVersion.zip" }
-    $candidateNames += @("rainmeter-desktop-widgets-full-$latestVersion.zip","rainmeter-desktop-widgets-lite-$latestVersion.zip")
-    $assetName = ''
-    $assetUrl = ''
-    foreach ($candidate in @($candidateNames | Select-Object -Unique)) {
-        $candidateUrl = "https://raw.githubusercontent.com/$Repository/$([Uri]::EscapeDataString($latestTag))/releases/$([Uri]::EscapeDataString($latestTag))/$([Uri]::EscapeDataString($candidate))"
-        try {
-            Invoke-WebRequestCompat -Uri $candidateUrl -Method Head -Headers @{ 'User-Agent' = $UserAgent } -TimeoutSec 20 | Out-Null
-            $assetName = $candidate
-            $assetUrl = $candidateUrl
-            break
-        } catch {}
-    }
-    if ([string]::IsNullOrWhiteSpace($assetUrl)) { throw "No compatible update package was found for $latestTag." }
+    # Flavor is retained only as a command-line compatibility parameter for
+    # older TodoHost builds. Every installed edition now downloads the same
+    # canonical package.
+    $assetName = "rainmeter-desktop-widgets-$latestVersion.zip"
+    $assetUrl = "https://raw.githubusercontent.com/$Repository/$([Uri]::EscapeDataString($latestTag))/releases/$([Uri]::EscapeDataString($latestTag))/$([Uri]::EscapeDataString($assetName))"
+    Invoke-WebRequestCompat -Uri $assetUrl -Method Head -Headers @{ 'User-Agent' = $UserAgent } -TimeoutSec 20 | Out-Null
 
     $downloads = Join-Path ([Environment]::GetFolderPath([Environment+SpecialFolder]::UserProfile)) 'Downloads'
     New-Item -ItemType Directory -Path $downloads -Force | Out-Null

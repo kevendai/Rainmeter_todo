@@ -4,7 +4,8 @@
 
 - `rainmeter-desktop-widgets-*.rmskin`：已有 Rainmeter 的统一初始安装包。
 - `rainmeter-desktop-widgets-*.zip`：统一部署/更新包，包含待办、日程、CalDAV 和可选的论文推荐功能。
-- 构建脚本暂时还会复制出同内容、同哈希的 `full` / `lite` 文件名别名，仅用于兼容旧升级器。
+- `rainmeter-desktop-widgets-full-*.zip` / `lite-*.zip`：仅供旧升级器使用的轻量引导包。旧升级器先从其中更新自身，随后新版升级器下载上面的统一 zip；引导包不包含 Skins、Rainmeter 安装器或重复编译的后端。
+- full/lite `.rmskin` 不再生成。
 
 ## 已有 Rainmeter 的初始安装
 
@@ -44,4 +45,4 @@
 powershell -ExecutionPolicy Bypass -File .\scripts\Build-ReleasePackages.ps1
 ```
 
-脚本会生成统一 zip / `.rmskin` 以及 full/lite 兼容别名，并自动下载官方 Rainmeter 4.5.26 安装器到 `.release-cache`。
+脚本会生成统一 zip / `.rmskin` 和两个轻量 full/lite 升级引导 zip，并自动下载官方 Rainmeter 4.5.26 安装器到 `.release-cache`。

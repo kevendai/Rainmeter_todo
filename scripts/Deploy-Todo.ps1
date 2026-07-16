@@ -3,6 +3,9 @@ $ErrorActionPreference = 'Stop'
 $projectRoot = Split-Path $PSScriptRoot -Parent
 $source = Join-Path $projectRoot 'skins\Todo'
 $version = [IO.File]::ReadAllText((Join-Path $projectRoot 'VERSION'), [Text.UTF8Encoding]::new($false)).Trim()
+if (-not [string]::IsNullOrWhiteSpace($env:RAINMETER_DEPLOY_VERSION_OVERRIDE)) {
+    $version = $env:RAINMETER_DEPLOY_VERSION_OVERRIDE.Trim()
+}
 $rainmeterRoot = 'D:\Program Files (x86)\Rainmeter'
 $target = Join-Path $rainmeterRoot 'Skins\Todo'
 $exe = Join-Path $rainmeterRoot 'Rainmeter.exe'

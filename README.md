@@ -52,7 +52,7 @@ powershell -ExecutionPolicy Bypass -File scripts/Build-ReleasePackages.ps1
 
 - `rainmeter-desktop-widgets-*.rmskin`：已有 Rainmeter 的统一初始安装包，论文功能由 Todo 设置页运行时开关控制。
 - `rainmeter-desktop-widgets-*.zip`：统一 zip，包含 Rainmeter 官方安装器、部署脚本和自动更新器。
-- 过渡版本仍生成内容完全相同的 `full` / `lite` 文件名别名，供旧升级器继续下载；它们不再代表不同功能。
+- 为兼容旧 full/lite 升级器，构建时会额外生成两个很小的 flavor 引导 zip；它们只负责更新升级器并转到统一 zip，不包含重复编译的皮肤。`.rmskin` 只生成统一版。
 
 `.rmskin` 面向初始安装，不迁移旧数据；已有数据或从旧版本更新时继续使用应用内“检查更新”或 zip 里的 `Install-Skins.ps1`，以保留 `tasks.json`、缓存和 DPAPI 密钥。zip 部署详情见 `docs/RELEASE-DEPLOY.md`。
 

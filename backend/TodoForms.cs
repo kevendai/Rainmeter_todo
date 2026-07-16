@@ -6,6 +6,7 @@ using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Net;
+using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.RegularExpressions;
 using System.Threading;
@@ -14,6 +15,12 @@ using RainmeterBackend;
 
 internal static partial class TodoApp
 {
+    private const int EmGetFirstVisibleLine = 0x00CE;
+    private const int EmGetLineCount = 0x00BA;
+
+    [DllImport("user32.dll")]
+    private static extern IntPtr SendMessage(IntPtr handle, int message, IntPtr wParam, IntPtr lParam);
+
     private sealed class EditorResult { public string Title, Target, Note, Available, Due; public List<string> Labels; }
     private static EditorResult ShowEditor(Dictionary<string, object> task)
     {
@@ -63,8 +70,7 @@ internal static partial class TodoApp
         f.Controls.Add(close);
 
         CheckBox enabled = new CheckBox { Left = 28, Top = 102, Width = 220, Height = 28, Text = "启用论文推荐", Checked = settings.Enabled, ForeColor = LightUi.Text, BackColor = Color.Transparent, Font = new Font("Microsoft YaHei UI", 10F, FontStyle.Bold) };
-        Label masterHint = LightUi.Label("关闭后启动和刷新都不会访问论文服务。", 250, 106, 500);
-        f.Controls.AddRange(new Control[] { enabled, masterHint });
+        f.Controls.Add(enabled);
 
         string[] pageNames = { "论文推荐", "DeepSeek API", "筛选与评分", "文件同步", "标题翻译", "关于" };
         Panel navigation = new Panel { Left = 28, Top = 148, Width = 150, Height = 492, BackColor = Color.FromArgb(235, 245, 253) };
@@ -85,11 +91,24 @@ internal static partial class TodoApp
         int w = 660;
         TextBox importCount = Field(pages[0], "每天导入论文数量（1-20）", 12, 12, 310, settings.ImportCount.ToString(CultureInfo.InvariantCulture));
         TextBox cacheDays = Field(pages[0], "缓存保留天数（1-90）", 342, 12, 306, settings.CacheDays.ToString(CultureInfo.InvariantCulture));
-        Label jobState = new Label { Left = 12, Top = 126, Width = 636, Height = 76, Text = "当前状态：" + ReadPaperJobMessage("暂无后台评分任务"), ForeColor = LightUi.Text, BackColor = LightUi.Surface, Padding = new Padding(14), Font = new Font("Microsoft YaHei UI", 10F) };
-        LightUi.Round(jobState, 10);
-        Label generalHint = LightUi.Label("启动时仅在 08:00–20:00 读取本地或远端完整文件；只有手动刷新并确认后才会调用 DeepSeek。", 12, 222, 636);
+        Panel jobCard = new Panel { Left = 12, Top = 126, Width = 636, Height = 104, BackColor = LightUi.Surface };
+        LightUi.Round(jobCard, 10);
+        Label jobState = new Label { Left = 14, Top = 10, Width = 522, Height = 44, Text = "当前状态：暂无后台评分任务", ForeColor = LightUi.Text, BackColor = Color.Transparent, Font = new Font("Microsoft YaHei UI", 10F) };
+        Label jobPercent = new Label { Left = 542, Top = 10, Width = 78, Height = 28, Text = "0%", TextAlign = ContentAlignment.TopRight, ForeColor = LightUi.Accent, BackColor = Color.Transparent, Font = new Font("Microsoft YaHei UI", 10F, FontStyle.Bold) };
+        Panel progressTrack = new Panel { Left = 14, Top = 72, Width = 608, Height = 12, BackColor = Color.FromArgb(211, 228, 242) };
+        Panel progressFill = new Panel { Left = 0, Top = 0, Width = 0, Height = 12, BackColor = LightUi.AccentFill };
+        LightUi.Round(progressTrack, 6);
+        LightUi.Round(progressFill, 6);
+        progressTrack.Controls.Add(progressFill);
+        jobCard.Controls.AddRange(new Control[] { jobState, jobPercent, progressTrack });
+        Label generalHint = LightUi.Label("启动时仅在 08:00–20:00 读取本地或远端完整文件；只有手动刷新并确认后才会调用 DeepSeek。", 12, 246, 636);
         generalHint.Height = 48;
-        pages[0].Controls.AddRange(new Control[] { jobState, generalHint });
+        Label defaultsHint = LightUi.Label("非敏感配置均有内置默认值；API Key 和服务器凭据需自行填写。更新与部署会保留已保存设置。", 12, 306, 636);
+        defaultsHint.Height = 42;
+        Label rescoreHint = LightUi.Label("修改筛选、阈值或提示词后，可按当前设置重新抓取并评分。", 12, 380, 430);
+        rescoreHint.Height = 40;
+        Button rescore = LightUi.PrimaryButton("重新爬取并打分", 472, 372, 176, DialogResult.None);
+        pages[0].Controls.AddRange(new Control[] { jobCard, generalHint, defaultsHint, rescoreHint, rescore });
 
         TextBox apiUrl = Field(pages[1], "Chat Completions 地址", 12, 12, w, settings.ApiBaseUrl);
         TextBox apiModel = Field(pages[1], "模型", 12, 106, w, settings.Model);
@@ -104,8 +123,8 @@ internal static partial class TodoApp
         TextBox threshold = Field(pages[2], "标题进入摘要评分阈值（0-10）", 12, 200, 206, settings.TitleThreshold.ToString(CultureInfo.InvariantCulture));
         TextBox titleBatch = Field(pages[2], "标题批大小（1-50）", 230, 200, 206, settings.TitleBatchSize.ToString(CultureInfo.InvariantCulture));
         TextBox abstractBatch = Field(pages[2], "摘要批大小（1-20）", 448, 200, 224, settings.AbstractBatchSize.ToString(CultureInfo.InvariantCulture));
-        TextBox titlePrompt = MultiLineField(pages[2], "标题评分提示词", 12, 294, w, 160, settings.TitlePrompt);
-        TextBox abstractPrompt = MultiLineField(pages[2], "摘要评分提示词", 12, 490, w, 190, settings.AbstractPrompt);
+        TextBox titlePrompt = PromptField(pages[2], "标题评分提示词", 12, 294, w, 160, settings.TitlePrompt);
+        TextBox abstractPrompt = PromptField(pages[2], "摘要评分提示词", 12, 490, w, 190, settings.AbstractPrompt);
         pages[2].AutoScrollMinSize = new Size(0, 710);
 
         CheckBox fileEnabled = new CheckBox { Left = 12, Top = 12, Width = 220, Height = 26, Text = "启用文件服务器同步", Checked = settings.FileServerEnabled, ForeColor = LightUi.Text, BackColor = Color.Transparent, Font = new Font("Microsoft YaHei UI", 10F, FontStyle.Bold) };
@@ -129,11 +148,10 @@ internal static partial class TodoApp
         Button checkUpdate = LightUi.PrimaryButton("检查更新", 502, 146, 146, DialogResult.None);
         pages[5].Controls.AddRange(new Control[] { aboutTitle, aboutVersion, aboutRepo, updateStatus, checkUpdate });
 
-        Label saveStatus = LightUi.Label(File.Exists(PaperSyncSecret) ? "论文配置已加密保存" : "尚未保存论文配置", 194, 666, 470);
+        Label saveStatus = LightUi.Label(File.Exists(PaperSyncSecret) ? "已保存设置" : "尚未保存设置", 194, 666, 580);
         saveStatus.Font = new Font("Microsoft YaHei UI", 10F, FontStyle.Bold);
-        Button clearPaper = LightUi.DangerButton("清除论文配置", 666, 654, 112, DialogResult.None);
         Button saveAll = LightUi.PrimaryButton("保存设置", 790, 654, 112, DialogResult.None);
-        f.Controls.AddRange(new Control[] { saveStatus, clearPaper, saveAll });
+        f.Controls.AddRange(new Control[] { saveStatus, saveAll });
 
         Action<int> showPage = delegate(int selected) {
             for (int i = 0; i < pages.Count; i++) { pages[i].Visible = i == selected; PaintTabButton(tabs[i], i == selected); }
@@ -141,9 +159,42 @@ internal static partial class TodoApp
         for (int i = 0; i < tabs.Count; i++) { int selected = i; tabs[i].Click += delegate { showPage(selected); }; }
         showPage(0);
 
+        Action refreshPaperProgress = delegate {
+            string message = "暂无后台评分任务";
+            string state = "";
+            int completed = 0;
+            int total = 0;
+            try
+            {
+                if (File.Exists(PaperJobPath))
+                {
+                    Dictionary<string, object> job = JsonUtil.LoadObject(PaperJobPath);
+                    message = JsonUtil.String(job, "message", message);
+                    state = JsonUtil.String(job, "state", "");
+                    completed = Math.Max(0, JsonUtil.Int(job, "completed", 0));
+                    total = Math.Max(0, JsonUtil.Int(job, "total", 0));
+                }
+            }
+            catch { }
+            int percent = total > 0 ? Math.Max(0, Math.Min(100, (int)Math.Round(completed * 100D / total))) : 0;
+            if (state == "completed") percent = 100;
+            jobState.Text = "当前状态：" + message;
+            jobPercent.Text = percent.ToString(CultureInfo.InvariantCulture) + "%";
+            progressFill.Width = Math.Max(0, Math.Min(progressTrack.ClientSize.Width, progressTrack.ClientSize.Width * percent / 100));
+            Color progressColor = state == "failed" ? LightUi.Danger : state == "completed" ? Color.FromArgb(63, 178, 119) : LightUi.AccentFill;
+            progressFill.BackColor = progressColor;
+            jobPercent.ForeColor = progressColor;
+            rescore.Enabled = enabled.Checked && !IsPaperJobRunning();
+        };
+        refreshPaperProgress();
+        System.Windows.Forms.Timer paperProgressTimer = new System.Windows.Forms.Timer { Interval = 500 };
+        paperProgressTimer.Tick += delegate { refreshPaperProgress(); };
+        paperProgressTimer.Start();
+
         Action updatePaperEnabled = delegate {
             for (int i = 0; i < 4; i++) SetChildrenEnabled(pages[i], enabled.Checked);
             enabled.Enabled = true;
+            refreshPaperProgress();
         };
         enabled.CheckedChanged += delegate { updatePaperEnabled(); };
         updatePaperEnabled();
@@ -179,20 +230,30 @@ internal static partial class TodoApp
                 SavePaperSettings(value);
                 if (!String.IsNullOrWhiteSpace(secretId.Text) || !String.IsNullOrWhiteSpace(secretKey.Text))
                     SaveTranslationCredentials(secretId.Text, secretKey.Text);
-                saveStatus.Text = "设置已保存；论文凭据使用 Windows DPAPI CurrentUser 加密";
+                saveStatus.Text = "设置已保存";
                 saveStatus.ForeColor = Color.FromArgb(63, 178, 119);
             }
             catch (Exception ex) { saveStatus.Text = "保存失败"; saveStatus.ForeColor = LightUi.Danger; LightUi.Error(ex.Message); }
         };
-        clearPaper.Click += delegate {
+        rescore.Click += delegate {
             try
             {
-                if (File.Exists(PaperSyncSecret)) File.Delete(PaperSyncSecret);
-                enabled.Checked = false; apiKey.Text = ""; fileUrl.Text = ""; fileAccount.Text = ""; filePassword.Text = ""; fileEnabled.Checked = false;
-                saveStatus.Text = "论文配置已清除";
-                saveStatus.ForeColor = LightUi.Muted;
+                rescore.Enabled = false;
+                PaperSettings value = collect();
+                if (StartPaperRescore(value))
+                {
+                    saveStatus.Text = "设置已保存，已开始重新评分";
+                    saveStatus.ForeColor = Color.FromArgb(63, 178, 119);
+                    refreshPaperProgress();
+                }
             }
-            catch (Exception ex) { LightUi.Error(ex.Message); }
+            catch (Exception ex)
+            {
+                saveStatus.Text = "重新评分未启动";
+                saveStatus.ForeColor = LightUi.Danger;
+                LightUi.Error(ex.Message);
+            }
+            finally { refreshPaperProgress(); }
         };
         testApi.Click += delegate {
             try { testApi.Enabled = false; testApi.Text = "测试中..."; Application.DoEvents(); TestDeepSeekConnection(collect()); saveStatus.Text = "DeepSeek 测试成功"; saveStatus.ForeColor = Color.FromArgb(63, 178, 119); }
@@ -267,6 +328,81 @@ internal static partial class TodoApp
 
         f.CancelButton = close;
         f.ShowDialog();
+        paperProgressTimer.Stop();
+        paperProgressTimer.Dispose();
+    }
+
+    private static string ShowPaperScoringConsent(string message)
+    {
+        Form form = LightUi.Form("本地论文评分", 560, 300);
+        LightUi.Heading(form, "是否使用 DeepSeek 评分？", "", "ai-score.svg");
+        Label detail = new Label {
+            Left = 28, Top = 86, Width = 504, Height = 118,
+            Text = message, ForeColor = LightUi.Text, BackColor = LightUi.Surface,
+            Padding = new Padding(14), Font = new Font("Microsoft YaHei UI", 9.5F)
+        };
+        LightUi.Round(detail, 10);
+        Button skipToday = LightUi.Button("今日不再提醒", 188, 226, 140, DialogResult.None);
+        Button cancel = LightUi.Button("取消", 340, 226, 80, DialogResult.None);
+        Button use = LightUi.PrimaryButton("使用", 432, 226, 100, DialogResult.None);
+        use.TextAlign = ContentAlignment.MiddleCenter;
+        use.Padding = new Padding(0, 3, 0, 0);
+        string result = "cancel";
+        skipToday.Click += delegate { result = "skip_today"; form.Close(); };
+        cancel.Click += delegate { result = "cancel"; form.Close(); };
+        use.Click += delegate { result = "use"; form.Close(); };
+        form.Controls.AddRange(new Control[] { detail, skipToday, cancel, use });
+        form.CancelButton = cancel;
+        form.ShowDialog();
+        return result;
+    }
+
+    private static bool ShowPaperRescoreConsent()
+    {
+        Form form = LightUi.Form("重新爬取并评分", 560, 300);
+        LightUi.Heading(form, "重新爬取并评分？", "", "ai-score.svg");
+        Label detail = new Label {
+            Left = 28, Top = 86, Width = 504, Height = 118,
+            Text = "将保存当前论文设置，清除今天的本地论文缓存并重新调用 DeepSeek，可能产生费用。\r\n\r\n新评分完整成功后，今天原有的论文推荐才会替换为新结果。",
+            ForeColor = LightUi.Text, BackColor = LightUi.Surface,
+            Padding = new Padding(14), Font = new Font("Microsoft YaHei UI", 9.5F)
+        };
+        LightUi.Round(detail, 10);
+        Button cancel = LightUi.Button("取消", 340, 226, 80, DialogResult.None);
+        Button start = LightUi.PrimaryButton("重新评分", 432, 226, 100, DialogResult.None);
+        start.TextAlign = ContentAlignment.MiddleCenter;
+        start.Padding = new Padding(0, 3, 0, 0);
+        bool confirmed = false;
+        cancel.Click += delegate { form.Close(); };
+        start.Click += delegate { confirmed = true; form.Close(); };
+        form.Controls.AddRange(new Control[] { detail, cancel, start });
+        form.CancelButton = cancel;
+        form.ShowDialog();
+        return confirmed;
+    }
+
+    private static bool ShowPaperOverwriteConsent(string fileName)
+    {
+        Form form = LightUi.Form("远端论文文件已存在", 560, 300);
+        LightUi.Heading(form, "是否覆盖远端文件？", "", "ai-score.svg");
+        Label detail = new Label {
+            Left = 28, Top = 86, Width = 504, Height = 118,
+            Text = "文件服务器中已经存在：\r\n" + fileName + "\r\n\r\n是否使用本次本地评分结果覆盖远端文件？",
+            ForeColor = LightUi.Text, BackColor = LightUi.Surface,
+            Padding = new Padding(14), Font = new Font("Microsoft YaHei UI", 9.5F)
+        };
+        LightUi.Round(detail, 10);
+        Button keep = LightUi.Button("不覆盖", 340, 226, 80, DialogResult.None);
+        Button overwrite = LightUi.PrimaryButton("覆盖", 432, 226, 100, DialogResult.None);
+        overwrite.TextAlign = ContentAlignment.MiddleCenter;
+        overwrite.Padding = new Padding(0, 3, 0, 0);
+        bool confirmed = false;
+        keep.Click += delegate { form.Close(); };
+        overwrite.Click += delegate { confirmed = true; form.Close(); };
+        form.Controls.AddRange(new Control[] { detail, keep, overwrite });
+        form.CancelButton = keep;
+        form.ShowDialog();
+        return confirmed;
     }
 
     private static int ParseSettingInt(string text, int minimum, int maximum, string name)
@@ -286,13 +422,45 @@ internal static partial class TodoApp
         }
     }
 
-    private static TextBox MultiLineField(Control parent, string label, int x, int y, int width, int height, string text)
+    private static TextBox PromptField(ScrollableControl parent, string label, int x, int y, int width, int height, string text)
     {
         parent.Controls.Add(LightUi.Label(label, x, y, width));
+        Button insert = LightUi.PrimaryButton("在光标处插入论文", x + width - 164, y - 4, 164, DialogResult.None);
+        insert.Height = 30;
         Panel surface = new Panel { Left = x, Top = y + 26, Width = width, Height = height, BackColor = LightUi.Panel };
         LightUi.Round(surface, 10);
         TextBox box = new TextBox { Left = 14, Top = 12, Width = width - 28, Height = height - 24, Text = text ?? "", Multiline = true, ScrollBars = ScrollBars.Vertical, AcceptsReturn = true, BorderStyle = BorderStyle.None, BackColor = LightUi.Panel, ForeColor = LightUi.Text, Font = new Font("Microsoft YaHei UI", 9F) };
-        surface.Controls.Add(box); parent.Controls.Add(surface);
+        insert.Click += delegate {
+            int caret = Math.Max(0, Math.Min(box.SelectionStart, box.TextLength));
+            string value = box.Text;
+            int found;
+            while ((found = value.IndexOf(PaperListPlaceholder, StringComparison.Ordinal)) >= 0)
+            {
+                value = value.Remove(found, PaperListPlaceholder.Length);
+                if (found < caret) caret = Math.Max(found, caret - PaperListPlaceholder.Length);
+            }
+            box.Text = value.Insert(caret, PaperListPlaceholder);
+            box.SelectionStart = caret + PaperListPlaceholder.Length;
+            box.SelectionLength = 0;
+            box.Focus();
+        };
+        box.MouseWheel += delegate(object sender, MouseEventArgs e) {
+            HandledMouseEventArgs handled = e as HandledMouseEventArgs;
+            int firstVisibleLine = SendMessage(box.Handle, EmGetFirstVisibleLine, IntPtr.Zero, IntPtr.Zero).ToInt32();
+            int lineCount = Math.Max(1, SendMessage(box.Handle, EmGetLineCount, IntPtr.Zero, IntPtr.Zero).ToInt32());
+            int visibleLines = Math.Max(1, box.ClientSize.Height / Math.Max(1, box.Font.Height));
+            bool atTop = firstVisibleLine <= 0;
+            bool atBottom = firstVisibleLine + visibleLines >= lineCount;
+            bool forwardToOuter = (e.Delta > 0 && atTop) || (e.Delta < 0 && atBottom);
+            if (!forwardToOuter) return;
+            if (handled != null) handled.Handled = true;
+            int current = Math.Max(0, -parent.AutoScrollPosition.Y);
+            int maximum = Math.Max(0, parent.DisplayRectangle.Height - parent.ClientSize.Height);
+            int target = Math.Max(0, Math.Min(maximum, current - e.Delta));
+            parent.AutoScrollPosition = new Point(0, target);
+        };
+        surface.Controls.Add(box); parent.Controls.Add(surface); parent.Controls.Add(insert);
+        insert.BringToFront();
         return box;
     }
 
