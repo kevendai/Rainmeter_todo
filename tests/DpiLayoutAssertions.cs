@@ -21,6 +21,14 @@ internal static class DpiLayoutAssertions
             throw new Exception("Form still enables WinForms DPI autoscaling: " + form.Text);
     }
 
+    public static void AssertWindowDpiCompensation()
+    {
+        float at125 = RainmeterBackend.UiScale.WindowScaleForDpi(0.75F, 120F);
+        float at200 = RainmeterBackend.UiScale.WindowScaleForDpi(0.75F, 192F);
+        if (Math.Abs(at125 - 0.75F) > 0.001F || Math.Abs(at200 - 1.20F) > 0.001F)
+            throw new Exception("Window DPI compensation is incorrect: 125%=" + at125 + ", 200%=" + at200);
+    }
+
     public static void AssertPixelFonts(Form form)
     {
         foreach (Control control in SelfAndDescendants(form))

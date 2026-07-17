@@ -155,7 +155,7 @@ internal static partial class TodoApp
         int currentUiScaleIndex = Array.FindIndex(uiScaleValues, value => String.Equals(value, currentUiScaleMode, StringComparison.OrdinalIgnoreCase));
         uiScale.SelectedIndex = currentUiScaleIndex < 0 ? 0 : currentUiScaleIndex;
         Button applyUiScale = LightUi.PrimaryButton("应用缩放", 292, 242, 128, DialogResult.None);
-        Label uiScaleHint = LightUi.Label("自动模式以 2560×1440 为 100%，1920×1080 会使用约 75%。应用后磁贴立即刷新，新打开的窗口使用新比例。", 12, 296, 620);
+        Label uiScaleHint = LightUi.Label("比例同时控制磁贴和窗口；窗口会额外适配 Windows 显示缩放。应用后请重新打开窗口。", 12, 296, 620);
         uiScaleHint.Height = 48;
         pages[5].Controls.AddRange(new Control[] { aboutTitle, aboutVersion, aboutRepo, updateStatus, checkUpdate, uiScaleLabel, uiScale, applyUiScale, uiScaleHint });
 
@@ -380,8 +380,9 @@ internal static partial class TodoApp
                 if (calendar != null && calendar.ExitCode != 0) throw new Exception("日程磁贴刷新失败");
             }
         }
-        RuntimeUtil.Refresh("Todo");
-        RuntimeUtil.Refresh("Calendar");
+        // Both generated includes are ready at this point. Refresh the Rainmeter
+        // app once so the two tiles cannot remain on different/previous scales.
+        RuntimeUtil.RefreshAll();
     }
 
     private static string ShowPaperScoringConsent(string message)

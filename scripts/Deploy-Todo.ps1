@@ -75,8 +75,12 @@ if (-not $moved) { throw 'TodoHost.exe remained in use during deployment' }
 Remove-Item -LiteralPath (Join-Path $target '@Resources\Todo.ps1') -Force -ErrorAction SilentlyContinue
 Remove-Item -LiteralPath (Join-Path $target '@Resources\TodoHost.cs') -Force -ErrorAction SilentlyContinue
 
-& $hostExe Render
-if ($LASTEXITCODE -ne 0) { throw 'TodoHost Render failed' }
+$renderProcess = Start-Process -FilePath $hostExe -ArgumentList 'Render' -WindowStyle Hidden -PassThru
+if (-not $renderProcess.WaitForExit(20000)) {
+    try { $renderProcess.Kill() } catch {}
+    throw 'TodoHost Render timed out'
+}
+if ($renderProcess.ExitCode -ne 0) { throw 'TodoHost Render failed' }
 & $exe '!RefreshApp'
 if ($Activate) {
     Start-Sleep -Milliseconds 800

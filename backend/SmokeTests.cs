@@ -61,6 +61,13 @@ internal static class SmokeTests
                 RunUi(Path.Combine(calendarDir,"CalendarHost.exe"),"Manage");
                 RunUi(Path.Combine(calendarDir,"CalendarHost.exe"),"Detail aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
             } finally { Environment.SetEnvironmentVariable("RAINMETER_UI_SMOKE",null); }
+            Run(Path.Combine(todoDir,"TodoHost.exe"),"Refresh");
+            string refreshedTodo=File.ReadAllText(Path.Combine(todoDir,"Generated.inc"),Encoding.Unicode);
+            Check(!refreshedTodo.Contains("!SetOption Status Text"),"Todo refresh action can leave a transient status stuck");
+            Run(Path.Combine(calendarDir,"CalendarHost.exe"),"Sync");
+            string noCalDav=File.ReadAllText(Path.Combine(calendarDir,"Generated.inc"),Encoding.Unicode);
+            Check(noCalDav.Contains("CalDAV 未连接"),"Calendar without credentials did not settle on disconnected status");
+            Check(!noCalDav.Contains("!SetOption CalendarStatus Text"),"Calendar sync action can leave a transient status stuck");
             Console.WriteLine("PASS: Todo paper self-tests, settings, migration/toggle/render and Calendar compatibility");
         }
         finally { try { Directory.Delete(root,true); } catch { } }

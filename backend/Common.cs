@@ -34,6 +34,9 @@ namespace RainmeterBackend
         [DllImport("user32.dll")]
         private static extern bool SetProcessDPIAware();
 
+        [DllImport("user32.dll")]
+        private static extern uint GetDpiForWindow(IntPtr window);
+
         public static void EnableDpiAwareness()
         {
             try { SetProcessDPIAware(); }
@@ -141,7 +144,7 @@ namespace RainmeterBackend
 
         public static void ApplyTo(Form form)
         {
-            float scale = Current;
+            float scale = WindowScaleForDpi(Current, WindowDpi(form));
             FormScaleState formState = FormScales.GetOrCreateValue(form);
             if (formState.Applied) return;
             formState.Scale = scale;
@@ -161,6 +164,36 @@ namespace RainmeterBackend
                 form.Left = area.Left + Math.Max(0, (area.Width - form.Width) / 2);
                 form.Top = area.Top + Math.Max(0, (area.Height - form.Height) / 2);
             }
+        }
+
+        internal static float WindowScaleForDpi(float interfaceScale, float dpi)
+        {
+            // The UI was designed on a 125% (120 DPI) desktop. Lower DPI
+            // displays keep the existing project scale; higher DPI displays
+            // need an extra geometry/font multiplier because WinForms
+            // autoscaling is intentionally disabled.
+            float dpiFactor = Math.Max(1F, dpi / DesignDpi);
+            return interfaceScale * dpiFactor;
+        }
+
+        private static float WindowDpi(Form form)
+        {
+            string overrideText = Environment.GetEnvironmentVariable("RAINMETER_UI_DPI_OVERRIDE");
+            float overrideDpi;
+            if (!String.IsNullOrWhiteSpace(overrideText) && Single.TryParse(overrideText, NumberStyles.Float, CultureInfo.InvariantCulture, out overrideDpi) && overrideDpi > 0F)
+                return overrideDpi;
+            try
+            {
+                uint dpi = GetDpiForWindow(form.Handle);
+                if (dpi > 0) return dpi;
+            }
+            catch { }
+            try
+            {
+                using (Graphics graphics = form.CreateGraphics())
+                    return graphics.DpiX > 0F ? graphics.DpiX : DesignDpi;
+            }
+            catch { return DesignDpi; }
         }
 
         public static float For(Control control)
@@ -413,7 +446,19 @@ namespace RainmeterBackend
 
         public static string FindRainmeter()
         {
+            foreach (Process process in Process.GetProcessesByName("Rainmeter"))
+            {
+                try
+                {
+                    string running = process.MainModule == null ? "" : process.MainModule.FileName;
+                    if (File.Exists(running)) return running;
+                }
+                catch { }
+                finally { process.Dispose(); }
+            }
+            string besidePortableSkins = Path.GetFullPath(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "..", "..", "..", "Rainmeter.exe"));
             string[] candidates = {
+                besidePortableSkins,
                 @"D:\Program Files (x86)\Rainmeter\Rainmeter.exe",
                 Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "Rainmeter", "Rainmeter.exe"),
                 Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86), "Rainmeter", "Rainmeter.exe")
@@ -430,6 +475,7 @@ namespace RainmeterBackend
 
         public static void Refresh(string config)
         {
+            if (Environment.GetEnvironmentVariable("RAINMETER_COMMANDS_DISABLED") == "1") return;
             string exe = FindRainmeter();
             if (!File.Exists(exe)) return;
             // Rainmeter parses the bang from the raw command line. Quoting the
@@ -445,8 +491,21 @@ namespace RainmeterBackend
             }
         }
 
+        public static void RefreshAll()
+        {
+            if (Environment.GetEnvironmentVariable("RAINMETER_COMMANDS_DISABLED") == "1") return;
+            string exe = FindRainmeter();
+            if (!File.Exists(exe)) return;
+            Process process = Process.Start(new ProcessStartInfo(exe, "!RefreshApp") { UseShellExecute = false, CreateNoWindow = true });
+            if (process != null && !process.WaitForExit(3000))
+            {
+                try { process.Kill(); } catch { }
+            }
+        }
+
         public static void SetMeterText(string config, string meter, string text)
         {
+            if (Environment.GetEnvironmentVariable("RAINMETER_COMMANDS_DISABLED") == "1") return;
             string exe = FindRainmeter();
             if (!File.Exists(exe)) return;
             string safe = CleanRainmeter(text);
@@ -661,7 +720,7 @@ namespace RainmeterBackend
                 icon = new Label { Text = glyph, Left = 24, Top = 22, Width = 34, Height = 34, ForeColor = Color.White, BackColor = AccentFill, Font = iconFont, TextAlign = ContentAlignment.MiddleCenter };
                 Round(icon, 9);
             }
-            Label heading = new Label { Text = title, Left = 68, Top = 22, Width = form.ClientSize.Width - 120, Height = 30, ForeColor = Text, BackColor = Color.Transparent, Font = new Font("Microsoft YaHei UI", 15F, FontStyle.Bold) };
+            Label heading = new Label { Text = title, Left = 68, Top = 22, Width = form.ClientSize.Width - 120, Height = 32, ForeColor = Text, BackColor = Color.Transparent, Font = new Font("Microsoft YaHei UI", 15F, FontStyle.Bold) };
             Label sub = new Label { Text = subtitle, Left = 25, Top = 62, Width = form.ClientSize.Width - 50, Height = 22, ForeColor = Muted, BackColor = Color.Transparent, Font = new Font("Microsoft YaHei UI", 9F) };
             icon.MouseDown += delegate(object sender, MouseEventArgs e) { if (e.Button == MouseButtons.Left) BeginDrag(form); };
             heading.MouseDown += delegate(object sender, MouseEventArgs e) { if (e.Button == MouseButtons.Left) BeginDrag(form); };

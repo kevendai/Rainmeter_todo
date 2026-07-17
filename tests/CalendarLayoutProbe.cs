@@ -14,6 +14,7 @@ internal static class CalendarLayoutProbe
     private static void Main(string[] args)
     {
         RainmeterBackend.UiScale.EnableDpiAwareness();
+        DpiLayoutAssertions.AssertWindowDpiCompensation();
         Application.EnableVisualStyles();
         Application.SetCompatibleTextRenderingDefault(false);
         string scenario = args.Length == 0 ? "manager" : args[0];

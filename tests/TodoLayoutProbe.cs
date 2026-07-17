@@ -13,6 +13,7 @@ internal static class TodoLayoutProbe
     private static void Main(string[] args)
     {
         RainmeterBackend.UiScale.EnableDpiAwareness();
+        DpiLayoutAssertions.AssertWindowDpiCompensation();
         Application.EnableVisualStyles();
         Application.SetCompatibleTextRenderingDefault(false);
         string scenario = args.Length == 0 ? "editor" : args[0];

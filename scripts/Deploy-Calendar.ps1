@@ -3,6 +3,9 @@ $ErrorActionPreference = 'Stop'
 $projectRoot = Split-Path $PSScriptRoot -Parent
 $source = Join-Path $projectRoot 'skins\Calendar'
 $version = [IO.File]::ReadAllText((Join-Path $projectRoot 'VERSION'), [Text.UTF8Encoding]::new($false)).Trim()
+if (-not [string]::IsNullOrWhiteSpace($env:RAINMETER_DEPLOY_VERSION_OVERRIDE)) {
+    $version = $env:RAINMETER_DEPLOY_VERSION_OVERRIDE.Trim()
+}
 $rainmeterRoot = 'D:\Program Files (x86)\Rainmeter'
 $target = Join-Path $rainmeterRoot 'Skins\Calendar'
 $exe = Join-Path $rainmeterRoot 'Rainmeter.exe'
@@ -66,8 +69,12 @@ try {
 Remove-Item -LiteralPath (Join-Path $target '@Resources\Calendar.ps1') -Force -ErrorAction SilentlyContinue
 Remove-Item -LiteralPath (Join-Path $target '@Resources\CalendarHost.cs') -Force -ErrorAction SilentlyContinue
 
-& $hostExe Render
-if ($LASTEXITCODE -ne 0) { throw 'CalendarHost Render failed' }
+$renderProcess = Start-Process -FilePath $hostExe -ArgumentList 'Render' -WindowStyle Hidden -PassThru
+if (-not $renderProcess.WaitForExit(20000)) {
+    try { $renderProcess.Kill() } catch {}
+    throw 'CalendarHost Render timed out'
+}
+if ($renderProcess.ExitCode -ne 0) { throw 'CalendarHost Render failed' }
 & $exe '!RefreshApp'
 if ($Activate) {
     Start-Sleep -Milliseconds 800

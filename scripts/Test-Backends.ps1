@@ -28,12 +28,38 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'Todo layout probe compilation failed' }
     & $csc /nologo /target:exe /main:CalendarLayoutProbe /optimize+ @refs "/out:$calendarLayout" (Join-Path $backend 'Common.cs') @calendarSources $dpiAssertions (Join-Path $tests 'CalendarLayoutProbe.cs')
     if ($LASTEXITCODE -ne 0) { throw 'Calendar layout probe compilation failed' }
-    & $smoke $todo $calendar
-    if ($LASTEXITCODE -ne 0) { throw 'Backend smoke tests failed' }
+    $previousCommandDisable = $env:RAINMETER_COMMANDS_DISABLED
+    try {
+        $env:RAINMETER_COMMANDS_DISABLED = '1'
+        & $smoke $todo $calendar
+        if ($LASTEXITCODE -ne 0) { throw 'Backend smoke tests failed' }
+    } finally {
+        if ($null -eq $previousCommandDisable) { Remove-Item Env:RAINMETER_COMMANDS_DISABLED -ErrorAction SilentlyContinue }
+        else { $env:RAINMETER_COMMANDS_DISABLED = $previousCommandDisable }
+    }
     $previousScaleOverride = $env:RAINMETER_UI_SCALE_OVERRIDE
+    $previousDpiOverride = $env:RAINMETER_UI_DPI_OVERRIDE
     try {
         foreach ($scale in @('0.70','0.75','0.80','0.90','1.00','1.10','1.25')) {
             $env:RAINMETER_UI_SCALE_OVERRIDE = $scale
+            foreach ($hostExe in @($todo, $calendar)) {
+                $render = Start-Process -FilePath $hostExe -ArgumentList 'Render' -WindowStyle Hidden -PassThru
+                if (-not $render.WaitForExit(20000)) {
+                    try { $render.Kill() } catch {}
+                    throw "Rainmeter tile render timed out at $scale"
+                }
+                if ($render.ExitCode -ne 0) { throw "Rainmeter tile render failed at $scale with exit code $($render.ExitCode)" }
+            }
+            $expectedPanelWidth = (518 * [double]$scale).ToString('0.###', [Globalization.CultureInfo]::InvariantCulture)
+            foreach ($generated in @(
+                (Join-Path (Split-Path $todo -Parent) 'Generated.inc'),
+                (Join-Path (Split-Path $calendar -Parent) 'Generated.inc')
+            )) {
+                $generatedText = [IO.File]::ReadAllText($generated, [Text.Encoding]::Unicode)
+                if ($generatedText -notmatch ('(?m)^Shape=Rectangle [^,]+,[^,]+,' + [regex]::Escape($expectedPanelWidth) + ',')) {
+                    throw "Rainmeter tile width did not scale to $expectedPanelWidth at $scale in $generated"
+                }
+            }
             foreach ($probe in @(
                 @{ File = $todoLayout; Argument = 'editor'; Name = 'Todo editor' },
                 @{ File = $todoLayout; Argument = 'manager'; Name = 'Todo manager' },
@@ -47,11 +73,29 @@ try {
                 }
                 if ($process.ExitCode -ne 0) { throw "$($probe.Name) layout probe failed at $scale with exit code $($process.ExitCode)" }
             }
-            Write-Host "UI scale layout probes passed at $([int]([double]$scale * 100))%"
+            Write-Host "Tile and window scale probes passed at $([int]([double]$scale * 100))%"
         }
+        $env:RAINMETER_UI_SCALE_OVERRIDE = '0.75'
+        $env:RAINMETER_UI_DPI_OVERRIDE = '192'
+        foreach ($probe in @(
+            @{ File = $todoLayout; Argument = 'editor'; Name = 'Todo editor' },
+            @{ File = $todoLayout; Argument = 'manager'; Name = 'Todo manager' },
+            @{ File = $calendarLayout; Argument = 'manager'; Name = 'Calendar manager' },
+            @{ File = $calendarLayout; Argument = 'settings'; Name = 'Calendar settings' }
+        )) {
+            $process = Start-Process -FilePath $probe.File -ArgumentList $probe.Argument -WindowStyle Hidden -PassThru
+            if (-not $process.WaitForExit(20000)) {
+                try { $process.Kill() } catch {}
+                throw "$($probe.Name) high-DPI layout probe timed out"
+            }
+            if ($process.ExitCode -ne 0) { throw "$($probe.Name) high-DPI layout probe failed with exit code $($process.ExitCode)" }
+        }
+        Write-Host 'Window DPI compensation probe passed at UI 75% / Windows 200% (effective 120%)'
     } finally {
         if ($null -eq $previousScaleOverride) { Remove-Item Env:RAINMETER_UI_SCALE_OVERRIDE -ErrorAction SilentlyContinue }
         else { $env:RAINMETER_UI_SCALE_OVERRIDE = $previousScaleOverride }
+        if ($null -eq $previousDpiOverride) { Remove-Item Env:RAINMETER_UI_DPI_OVERRIDE -ErrorAction SilentlyContinue }
+        else { $env:RAINMETER_UI_DPI_OVERRIDE = $previousDpiOverride }
     }
 } finally {
     Remove-Item -LiteralPath $build -Recurse -Force -ErrorAction SilentlyContinue
