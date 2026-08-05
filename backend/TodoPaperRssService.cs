@@ -17,6 +17,8 @@ internal static partial class TodoApp
 {
     private const string PaperRssServerMutexName = @"Global\RainmeterTodoPaperRssServer";
     private const int PaperRssPort = 8891;
+    private const string PaperRssNamespace = "https://example.com/rss/paper/1.0";
+    private const string DublinCoreNamespace = "http://purl.org/dc/elements/1.1/";
     private static readonly TimeSpan PaperRssStart = TimeSpan.FromHours(8);
     private static readonly TimeSpan PaperRssEnd = TimeSpan.FromHours(20);
     private static readonly TimeSpan PaperRssSyncInterval = TimeSpan.FromMinutes(10);
@@ -29,6 +31,14 @@ internal static partial class TodoApp
         public string Title;
         public string Link;
         public string Description;
+        public string OriginalTitle;
+        public List<string> Authors = new List<string>();
+        public string ArxivId;
+        public int TitleScore;
+        public int AbstractScore;
+        public string Abstract;
+        public string AbstractUrl;
+        public string PdfUrl;
         public int Score;
         public DateTimeOffset Published;
         public List<string> Categories = new List<string>();
@@ -315,23 +325,26 @@ internal static partial class TodoApp
             List<string> categories = JsonUtil.Array(JsonUtil.Get(paper, "all_categories")).Select(Convert.ToString).Where(value => !String.IsNullOrWhiteSpace(value)).Distinct().ToList();
             if (categories.Count == 0) categories = JsonUtil.Array(JsonUtil.Get(paper, "category")).Select(Convert.ToString).Where(value => !String.IsNullOrWhiteSpace(value)).Distinct().ToList();
             int titleScore = Convert.ToInt32(JsonUtil.Get(score, "title") ?? 0, CultureInfo.InvariantCulture);
-            List<string> details = new List<string> { "title: " + S(paper, "title") };
-            string authors = S(paper, "authors").Trim();
-            if (authors != "") details.Add("authors: " + authors);
-            details.Add("arXiv ID: " + arxiv);
-            if (categories.Count > 0) details.Add("categories: " + String.Join(", ", categories));
-            details.Add("title score: " + titleScore.ToString(CultureInfo.InvariantCulture));
-            details.Add("abstract score: " + abstractScore.ToString(CultureInfo.InvariantCulture));
+            string originalTitle = S(paper, "title").Trim();
+            List<string> authors = S(paper, "authors").Split(new[] { ',' }, StringSplitOptions.RemoveEmptyEntries).Select(value => value.Trim()).Where(value => value != "").ToList();
             string abstractUrl = S(paper, "abs_link").Trim();
-            if (abstractUrl != "") details.Add("url: " + abstractUrl);
+            if (abstractUrl == "") abstractUrl = "https://arxiv.org/abs/" + arxiv;
             string pdfUrl = S(paper, "pdf_link").Trim();
-            if (pdfUrl != "") details.Add("pdf: " + pdfUrl);
-            string description = String.Join("\r\n", details);
+            if (pdfUrl == "") pdfUrl = "https://arxiv.org/pdf/" + arxiv + ".pdf";
             string abstractText = S(paper, "abstract").Trim();
-            if (abstractText != "") description += "\r\n\r\nabstract:\r\n" + abstractText;
+            List<string> descriptionParts = new List<string>();
+            if (abstractText != "") descriptionParts.Add("<p>" + WebUtility.HtmlEncode(abstractText) + "</p>");
+            if (originalTitle != "") descriptionParts.Add("<p><strong>" + WebUtility.HtmlEncode(originalTitle) + "</strong></p>");
+            if (authors.Count > 0) descriptionParts.Add("<p>" + WebUtility.HtmlEncode(String.Join(", ", authors)) + "</p>");
+            descriptionParts.Add("<p><strong>Score:</strong> " + abstractScore.ToString(CultureInfo.InvariantCulture) + "</p>");
             string link = S(task, "target");
             if (link == "") link = "https://arxiv.org/html/" + arxiv;
-            result.Add(new PaperRssItem { Title = S(task, "title"), Link = link, Description = description, Score = abstractScore, Published = created.Value, Categories = categories });
+            result.Add(new PaperRssItem {
+                Title = S(task, "title"), Link = link, Description = String.Join("", descriptionParts),
+                OriginalTitle = originalTitle, Authors = authors, ArxivId = arxiv, TitleScore = titleScore,
+                AbstractScore = abstractScore, Abstract = abstractText, AbstractUrl = abstractUrl, PdfUrl = pdfUrl,
+                Score = abstractScore, Published = created.Value, Categories = categories
+            });
             if (result.Count >= limit) break;
         }
         return result;
@@ -353,10 +366,14 @@ internal static partial class TodoApp
             using (XmlWriter writer = XmlWriter.Create(buffer, settings))
             {
                 writer.WriteStartDocument();
-                writer.WriteStartElement("rss"); writer.WriteAttributeString("version", "2.0");
+                writer.WriteStartElement("rss");
+                writer.WriteAttributeString("version", "2.0");
+                writer.WriteAttributeString("xmlns", "paper", null, PaperRssNamespace);
+                writer.WriteAttributeString("xmlns", "dc", null, DublinCoreNamespace);
                 writer.WriteStartElement("channel");
                 writer.WriteElementString("title", "今日论文推荐");
                 writer.WriteElementString("link", "http://127.0.0.1:8891/paper/rss");
+                writer.WriteElementString("description", "长昼待办 · 今天的 arxiv 论文推荐");
                 if (items.Count > 0) writer.WriteElementString("pubDate", FormatRssDate(items.Max(item => item.Published)));
                 foreach (PaperRssItem item in items)
                 {
@@ -364,7 +381,15 @@ internal static partial class TodoApp
                     writer.WriteElementString("title", item.Title ?? "");
                     writer.WriteElementString("link", item.Link ?? "");
                     writer.WriteStartElement("guid"); writer.WriteAttributeString("isPermaLink", "true"); writer.WriteString(item.Link ?? ""); writer.WriteEndElement();
-                    writer.WriteElementString("description", item.Description ?? "");
+                    writer.WriteElementString("paper", "originalTitle", PaperRssNamespace, item.OriginalTitle ?? "");
+                    foreach (string author in item.Authors) writer.WriteElementString("paper", "author", PaperRssNamespace, author);
+                    writer.WriteElementString("paper", "arxivId", PaperRssNamespace, item.ArxivId ?? "");
+                    writer.WriteElementString("paper", "titleScore", PaperRssNamespace, item.TitleScore.ToString(CultureInfo.InvariantCulture));
+                    writer.WriteElementString("paper", "abstractScore", PaperRssNamespace, item.AbstractScore.ToString(CultureInfo.InvariantCulture));
+                    writer.WriteStartElement("paper", "abstract", PaperRssNamespace); WriteSafeCData(writer, item.Abstract); writer.WriteEndElement();
+                    writer.WriteElementString("paper", "abstractUrl", PaperRssNamespace, item.AbstractUrl ?? "");
+                    writer.WriteElementString("paper", "pdfUrl", PaperRssNamespace, item.PdfUrl ?? "");
+                    writer.WriteStartElement("description"); WriteSafeCData(writer, item.Description); writer.WriteEndElement();
                     writer.WriteElementString("pubDate", FormatRssDate(item.Published));
                     writer.WriteElementString("category", "论文");
                     foreach (string category in item.Categories) writer.WriteElementString("category", category);
@@ -374,6 +399,18 @@ internal static partial class TodoApp
             }
             return Encoding.UTF8.GetString(buffer.ToArray());
         }
+    }
+
+    private static void WriteSafeCData(XmlWriter writer, string value)
+    {
+        string remaining = value ?? "";
+        int marker;
+        while ((marker = remaining.IndexOf("]]>", StringComparison.Ordinal)) >= 0)
+        {
+            writer.WriteCData(remaining.Substring(0, marker + 2));
+            remaining = remaining.Substring(marker + 2);
+        }
+        writer.WriteCData(remaining);
     }
 
     private static string FormatRssDate(DateTimeOffset value)
@@ -399,7 +436,7 @@ internal static partial class TodoApp
         {
             string date = "2026-08-05";
             List<Dictionary<string, object>> papers = new List<Dictionary<string, object>> {
-                new Dictionary<string, object>{{"arxiv_id","2608.00001"},{"title","A & B"},{"authors","Alice, Bob"},{"abstract","x < y & z"},{"pdf_link","https://arxiv.org/pdf/2608.00001.pdf"},{"abs_link","https://arxiv.org/abs/2608.00001"},{"all_categories",new List<object>{"cs.CV","cs.AI"}},{"score",new Dictionary<string,object>{{"title",8},{"abstract",44}}}},
+                new Dictionary<string, object>{{"arxiv_id","2608.00001"},{"title","A & B"},{"authors","Alice, Bob"},{"abstract","x < y & z ]]> tail"},{"pdf_link","https://arxiv.org/pdf/2608.00001.pdf"},{"abs_link","https://arxiv.org/abs/2608.00001"},{"all_categories",new List<object>{"cs.CV","cs.AI"}},{"score",new Dictionary<string,object>{{"title",8},{"abstract",44}}}},
                 new Dictionary<string, object>{{"arxiv_id","2608.00002"},{"title","Other"},{"abstract","Other abstract"},{"score",new Dictionary<string,object>{{"title",7},{"abstract",38}}}}
             };
             List<Dictionary<string, object>> tasks = new List<Dictionary<string, object>> {
@@ -410,14 +447,23 @@ internal static partial class TodoApp
             if (selected.Count != 1 || selected[0].Score != 44) return 61;
             string xml = BuildPaperRssXml(selected);
             XmlDocument document = new XmlDocument(); document.LoadXml(xml);
+            XmlNamespaceManager namespaces = new XmlNamespaceManager(document.NameTable); namespaces.AddNamespace("paper", PaperRssNamespace);
+            if (document.DocumentElement.GetAttribute("xmlns") != "" || document.DocumentElement.GetAttribute("xmlns:paper") != PaperRssNamespace || document.DocumentElement.GetAttribute("xmlns:dc") != DublinCoreNamespace) return 62;
             if (document.SelectNodes("/rss/channel/item").Count != 1) return 62;
             if (document.SelectSingleNode("/rss/channel/item/title").InnerText != "(44) A & B < C") return 63;
-            if (!document.SelectSingleNode("/rss/channel/item/description").InnerText.Contains("x < y & z")) return 64;
             string description = document.SelectSingleNode("/rss/channel/item/description").InnerText;
-            if (!description.StartsWith("title: A & B\r\nauthors: Alice, Bob\r\narXiv ID: 2608.00001\r\ncategories: cs.CV, cs.AI\r\ntitle score: 8\r\nabstract score: 44")) return 65;
-            if (!description.Contains("pdf: https://arxiv.org/pdf/2608.00001.pdf\r\n\r\nabstract:\r\n")) return 66;
+            if (!description.StartsWith("<p>x &lt; y &amp; z ]]&gt; tail</p>")) return 64;
+            if (!description.Contains("<p><strong>A &amp; B</strong></p><p>Alice, Bob</p><p><strong>Score:</strong> 44</p>")) return 65;
+            if (description.Contains("arXiv ID:") || description.Contains("abstract score:")) return 66;
+            if (document.SelectSingleNode("/rss/channel/item/paper:originalTitle", namespaces).InnerText != "A & B") return 74;
+            XmlNodeList authorNodes = document.SelectNodes("/rss/channel/item/paper:author", namespaces);
+            if (authorNodes.Count != 2 || authorNodes[0].InnerText != "Alice" || authorNodes[1].InnerText != "Bob") return 75;
+            if (document.SelectSingleNode("/rss/channel/item/paper:arxivId", namespaces).InnerText != "2608.00001") return 76;
+            if (document.SelectSingleNode("/rss/channel/item/paper:titleScore", namespaces).InnerText != "8" || document.SelectSingleNode("/rss/channel/item/paper:abstractScore", namespaces).InnerText != "44") return 77;
+            if (document.SelectSingleNode("/rss/channel/item/paper:abstract", namespaces).InnerText != "x < y & z ]]> tail") return 78;
+            if (document.SelectSingleNode("/rss/channel/item/paper:abstractUrl", namespaces).InnerText != "https://arxiv.org/abs/2608.00001" || document.SelectSingleNode("/rss/channel/item/paper:pdfUrl", namespaces).InnerText != "https://arxiv.org/pdf/2608.00001.pdf") return 79;
             if (document.SelectNodes("/rss/channel/item/category").Count != 3) return 67;
-            if (document.SelectSingleNode("/rss/channel/description") != null) return 68;
+            if (document.SelectSingleNode("/rss/channel/description").InnerText != "长昼待办 · 今天的 arxiv 论文推荐") return 68;
             if (document.SelectSingleNode("/rss/channel/item/pubDate").InnerText != "Wed, 05 Aug 2026 13:38:47 +0800") return 69;
             tasks[0]["completed"] = true;
             if (SelectPaperRssItems(tasks, papers, 5, date, 0, 10).Count != 0) return 70;
