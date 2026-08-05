@@ -91,7 +91,15 @@ internal static partial class TodoApp
         int w = 660;
         TextBox importCount = Field(pages[0], "每天导入论文数量（1-20）", 12, 12, 310, settings.ImportCount.ToString(CultureInfo.InvariantCulture));
         TextBox cacheDays = Field(pages[0], "缓存保留天数（1-90）", 342, 12, 306, settings.CacheDays.ToString(CultureInfo.InvariantCulture));
-        Panel jobCard = new Panel { Left = 12, Top = 126, Width = 636, Height = 104, BackColor = LightUi.Surface };
+        CheckBox rssEnabled = new CheckBox { Left = 12, Top = 104, Width = 420, Height = 26, Text = "启用本地论文 RSS（127.0.0.1:8891）", Checked = settings.RssEnabled, ForeColor = LightUi.Text, BackColor = Color.Transparent, Font = new Font("Microsoft YaHei UI", 10F, FontStyle.Bold) };
+        Label rssState = LightUi.Label(settings.RssEnabled ? "服务状态：正在检查" : "服务状态：已关闭", 438, 106, 210);
+        if (settings.RssEnabled)
+        {
+            bool rssHealthy = IsPaperRssHealthy();
+            rssState.Text = rssHealthy ? "服务状态：运行中" : "服务状态：尚未运行";
+            rssState.ForeColor = rssHealthy ? Color.FromArgb(63, 178, 119) : LightUi.Danger;
+        }
+        Panel jobCard = new Panel { Left = 12, Top = 144, Width = 636, Height = 104, BackColor = LightUi.Surface };
         LightUi.Round(jobCard, 10);
         Label jobState = new Label { Left = 14, Top = 10, Width = 522, Height = 44, Text = "当前状态：暂无后台评分任务", ForeColor = LightUi.Text, BackColor = Color.Transparent, Font = new Font("Microsoft YaHei UI", 10F) };
         Label jobPercent = new Label { Left = 542, Top = 10, Width = 78, Height = 28, Text = "0%", TextAlign = ContentAlignment.TopRight, ForeColor = LightUi.Accent, BackColor = Color.Transparent, Font = new Font("Microsoft YaHei UI", 10F, FontStyle.Bold) };
@@ -101,14 +109,14 @@ internal static partial class TodoApp
         LightUi.Round(progressFill, 6);
         progressTrack.Controls.Add(progressFill);
         jobCard.Controls.AddRange(new Control[] { jobState, jobPercent, progressTrack });
-        Label generalHint = LightUi.Label("启动时仅在 08:00–20:00 读取本地或远端完整文件；只有手动刷新并确认后才会调用 DeepSeek。", 12, 246, 636);
+        Label generalHint = LightUi.Label("RSS 仅在 08:00–20:00 发布今日推荐；本地缺失时只查询文件服务器，不会自动调用 DeepSeek。", 12, 260, 636);
         generalHint.Height = 48;
-        Label defaultsHint = LightUi.Label("非敏感配置均有内置默认值；API Key 和服务器凭据需自行填写。更新与部署会保留已保存设置。", 12, 306, 636);
+        Label defaultsHint = LightUi.Label("非敏感配置均有内置默认值；API Key 和服务器凭据需自行填写。更新与部署会保留已保存设置。", 12, 316, 636);
         defaultsHint.Height = 42;
-        Label rescoreHint = LightUi.Label("修改筛选、阈值或提示词后，可按当前设置重新抓取并评分。", 12, 380, 430);
+        Label rescoreHint = LightUi.Label("修改筛选、阈值或提示词后，可按当前设置重新抓取并评分。", 12, 394, 430);
         rescoreHint.Height = 40;
-        Button rescore = LightUi.PrimaryButton("重新爬取并打分", 472, 372, 176, DialogResult.None);
-        pages[0].Controls.AddRange(new Control[] { jobCard, generalHint, defaultsHint, rescoreHint, rescore });
+        Button rescore = LightUi.PrimaryButton("重新爬取并打分", 472, 386, 176, DialogResult.None);
+        pages[0].Controls.AddRange(new Control[] { rssEnabled, rssState, jobCard, generalHint, defaultsHint, rescoreHint, rescore });
 
         TextBox apiUrl = Field(pages[1], "Chat Completions 地址", 12, 12, w, settings.ApiBaseUrl);
         TextBox apiModel = Field(pages[1], "模型", 12, 106, w, settings.Model);
@@ -157,7 +165,12 @@ internal static partial class TodoApp
         Button applyUiScale = LightUi.PrimaryButton("应用缩放", 292, 242, 128, DialogResult.None);
         Label uiScaleHint = LightUi.Label("比例同时控制磁贴和窗口；窗口会额外适配 Windows 显示缩放。应用后请重新打开窗口。", 12, 296, 620);
         uiScaleHint.Height = 48;
-        pages[5].Controls.AddRange(new Control[] { aboutTitle, aboutVersion, aboutRepo, updateStatus, checkUpdate, uiScaleLabel, uiScale, applyUiScale, uiScaleHint });
+        Label backupLabel = LightUi.Label("用户配置备份（跨电脑加密导入）", 12, 350, 320);
+        Button exportBackup = LightUi.PrimaryButton("导出用户配置", 12, 382, 164, DialogResult.None);
+        Button importBackup = LightUi.Button("导入用户配置", 190, 382, 164, DialogResult.None);
+        Label backupHint = LightUi.Label("导出使用独立备份密码加密；默认仅包含已保存的配置，可选同时备份待办和本地日程。", 12, 434, 636);
+        backupHint.Height = 48;
+        pages[5].Controls.AddRange(new Control[] { aboutTitle, aboutVersion, aboutRepo, updateStatus, checkUpdate, uiScaleLabel, uiScale, applyUiScale, uiScaleHint, backupLabel, exportBackup, importBackup, backupHint });
 
         Label saveStatus = LightUi.Label(File.Exists(PaperSyncSecret) ? "已保存设置" : "尚未保存设置", 194, 666, 580);
         saveStatus.Font = new Font("Microsoft YaHei UI", 10F, FontStyle.Bold);
@@ -251,6 +264,7 @@ internal static partial class TodoApp
             value.AbstractPrompt = abstractPrompt.Text;
             value.ImportCount = ParseSettingInt(importCount.Text, 1, 20, "导入数量");
             value.CacheDays = ParseSettingInt(cacheDays.Text, 1, 90, "缓存天数");
+            value.RssEnabled = enabled.Checked && rssEnabled.Checked;
             return value;
         };
 
@@ -259,6 +273,26 @@ internal static partial class TodoApp
             {
                 PaperSettings value = collect();
                 SavePaperSettings(value);
+                if (value.RssEnabled)
+                {
+                    try { EnsurePaperRssServer(true); }
+                    catch
+                    {
+                        value.RssEnabled = false;
+                        SavePaperSettings(value);
+                        rssEnabled.Checked = false;
+                        rssState.Text = "服务状态：启用失败";
+                        rssState.ForeColor = LightUi.Danger;
+                        throw;
+                    }
+                    rssState.Text = "服务状态：运行中";
+                    rssState.ForeColor = Color.FromArgb(63, 178, 119);
+                }
+                else
+                {
+                    rssState.Text = "服务状态：已关闭";
+                    rssState.ForeColor = LightUi.Muted;
+                }
                 if (!String.IsNullOrWhiteSpace(secretId.Text) || !String.IsNullOrWhiteSpace(secretKey.Text))
                     SaveTranslationCredentials(secretId.Text, secretKey.Text);
                 saveStatus.Text = "设置已保存";
@@ -309,6 +343,51 @@ internal static partial class TodoApp
                 translationStatus.ForeColor = LightUi.Muted;
             }
             catch (Exception ex) { LightUi.Error(ex.Message); }
+        };
+
+        exportBackup.Click += delegate {
+            try
+            {
+                exportBackup.Enabled = false;
+                string exported = ExportUserBackupInteractive();
+                if (exported != "")
+                {
+                    saveStatus.Text = "用户配置已加密导出";
+                    saveStatus.ForeColor = Color.FromArgb(63, 178, 119);
+                    MessageBox.Show("备份已保存：\r\n" + exported + "\r\n\r\n请妥善保管备份密码；密码无法找回。", "导出完成", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                }
+            }
+            catch (Exception ex)
+            {
+                saveStatus.Text = "用户配置导出失败";
+                saveStatus.ForeColor = LightUi.Danger;
+                LightUi.Error(ex.Message);
+            }
+            finally { exportBackup.Enabled = true; }
+        };
+
+        importBackup.Click += delegate {
+            try
+            {
+                importBackup.Enabled = false;
+                string result = ImportUserBackupInteractive();
+                if (result != "")
+                {
+                    saveStatus.Text = "用户配置已导入";
+                    saveStatus.ForeColor = Color.FromArgb(63, 178, 119);
+                    try { RenderUiScaleSkins(); }
+                    catch (Exception renderError) { MessageBox.Show(result + "\r\n\r\n配置已导入，但磁贴刷新失败：" + renderError.Message, "导入完成", MessageBoxButtons.OK, MessageBoxIcon.Warning); return; }
+                    MessageBox.Show(result, "导入完成", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    f.BeginInvoke(new Action(f.Close));
+                }
+            }
+            catch (Exception ex)
+            {
+                saveStatus.Text = "用户配置导入失败";
+                saveStatus.ForeColor = LightUi.Danger;
+                LightUi.Error(ex.Message);
+            }
+            finally { importBackup.Enabled = true; }
         };
 
         checkUpdate.Click += delegate {

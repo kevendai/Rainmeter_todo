@@ -19,6 +19,7 @@ internal static class TodoLayoutProbe
         string scenario = args.Length == 0 ? "editor" : args[0];
         if (scenario == "editor") ProbeEditor();
         else if (scenario == "manager") ProbeManager();
+        else if (scenario == "settings") ProbeSettings();
         else throw new ArgumentException("Unknown scenario: " + scenario);
         if (failure != null) { Console.Error.WriteLine(scenario + ": " + failure.Message); Environment.ExitCode = 1; return; }
         Console.WriteLine("PASS " + scenario);
@@ -149,6 +150,47 @@ internal static class TodoLayoutProbe
         timer.Start();
         object[] parameters = { state, false };
         try { Method("Manage").Invoke(null, parameters); }
+        catch (TargetInvocationException ex) { failure = ex.InnerException ?? ex; }
+        timer.Dispose();
+    }
+
+    private static void ProbeSettings()
+    {
+        int stage = 0;
+        Timer timer = new Timer { Interval = 80 };
+        timer.Tick += delegate {
+            Form form = Application.OpenForms.Cast<Form>().FirstOrDefault(candidate => candidate.Text == "待办设置");
+            if (form == null) return;
+            try
+            {
+                DpiLayoutAssertions.AssertManualScaling(form);
+                DpiLayoutAssertions.AssertPixelFonts(form);
+                if (stage == 0)
+                {
+                    Button about = Descendants(form).OfType<Button>().First(button => button.Text == "关于");
+                    about.PerformClick();
+                    stage = 1;
+                    return;
+                }
+                Button export = Descendants(form).OfType<Button>().First(button => button.Text == "导出用户配置");
+                Button import = Descendants(form).OfType<Button>().First(button => button.Text == "导入用户配置");
+                if (!export.Visible || !import.Visible) throw new Exception("Backup controls are not visible on About page");
+                DpiLayoutAssertions.AssertFitsAt200Percent(export, true, "Export backup button");
+                DpiLayoutAssertions.AssertFitsAt200Percent(import, true, "Import backup button");
+                if (export.Parent == null || export.Bottom > export.Parent.ClientSize.Height) throw new Exception("Export backup button is clipped");
+                if (import.Parent == null || import.Bottom > import.Parent.ClientSize.Height) throw new Exception("Import backup button is clipped");
+                timer.Stop();
+                form.Close();
+            }
+            catch (Exception ex)
+            {
+                failure = ex;
+                timer.Stop();
+                form.Close();
+            }
+        };
+        timer.Start();
+        try { Method("ShowSettings").Invoke(null, null); }
         catch (TargetInvocationException ex) { failure = ex.InnerException ?? ex; }
         timer.Dispose();
     }

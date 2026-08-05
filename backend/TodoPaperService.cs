@@ -76,6 +76,7 @@ internal static partial class TodoApp
         public int AbstractBatchSize = 3;
         public int ImportCount = 5;
         public int CacheDays = 14;
+        public bool RssEnabled;
     }
 
     private sealed class RemotePaperResult
@@ -103,6 +104,7 @@ internal static partial class TodoApp
             Dictionary<string, object> api = JsonUtil.Object(JsonUtil.Get(root, "DeepSeek"));
             Dictionary<string, object> file = JsonUtil.Object(JsonUtil.Get(root, "FileServer"));
             Dictionary<string, object> scoring = JsonUtil.Object(JsonUtil.Get(root, "Scoring"));
+            Dictionary<string, object> rss = JsonUtil.Object(JsonUtil.Get(root, "Rss"));
             bool legacy = api.Count == 0 && file.Count == 0 && scoring.Count == 0;
             settings.Enabled = JsonUtil.Bool(root, "Enabled", legacy);
             if (legacy)
@@ -131,6 +133,7 @@ internal static partial class TodoApp
             settings.AbstractBatchSize = Clamp(JsonUtil.Int(scoring, "AbstractBatchSize", settings.AbstractBatchSize), 1, 20);
             settings.ImportCount = Clamp(JsonUtil.Int(scoring, "ImportCount", settings.ImportCount), 1, 20);
             settings.CacheDays = Clamp(JsonUtil.Int(scoring, "CacheDays", settings.CacheDays), 1, 90);
+            settings.RssEnabled = JsonUtil.Bool(rss, "Enabled", false);
         }
         catch { }
         return settings;
@@ -165,6 +168,11 @@ internal static partial class TodoApp
                 {"AbstractBatchSize", Clamp(settings.AbstractBatchSize, 1, 20)},
                 {"ImportCount", Clamp(settings.ImportCount, 1, 20)},
                 {"CacheDays", Clamp(settings.CacheDays, 1, 90)}
+            }},
+            {"Rss", new Dictionary<string, object> {
+                {"Enabled", settings.RssEnabled},
+                {"Address", "127.0.0.1"},
+                {"Port", 8891}
             }}
         };
         JsonUtil.WriteDpapiJson(PaperSyncSecret, root);

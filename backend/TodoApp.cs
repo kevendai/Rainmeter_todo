@@ -51,7 +51,10 @@ internal static partial class TodoApp
         if (action == "Manage") return ManageInteractive();
         if (action == "Settings") return SettingsInteractive();
         if (action == "PaperWorker") return RunPaperWorker(id);
+        if (action == "PaperRssServer") return RunPaperRssServer();
+        if (action == "PaperRssSelfTest") return RunPaperRssSelfTests();
         if (action == "PaperSelfTest") return RunPaperSelfTests();
+        if (action == "BackupSelfTest") return RunBackupSelfTests();
         using (Mutex mutex = new Mutex(false, @"Global\RainmeterTodoState"))
         {
             bool held = false;
@@ -71,6 +74,7 @@ internal static partial class TodoApp
                         SyncArxiv(state, false, "");
                         Save(state);
                         refresh |= Render(state) && !guarded;
+                        EnsurePaperRssServer(false);
                         break;
                     case "Rollover": refresh |= Render(state); break;
                     case "Refresh":

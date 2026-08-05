@@ -20,6 +20,7 @@ internal static class CalendarLayoutProbe
         string scenario = args.Length == 0 ? "manager" : args[0];
         if (scenario == "manager") ProbeManager();
         else if (scenario == "settings") ProbeSettings();
+        else if (scenario == "detail-restore") ProbeRestoreRuleDetail();
         else throw new ArgumentException("Unknown scenario: " + scenario);
         if (failure != null) { Console.Error.WriteLine(scenario + ": " + failure.Message); Environment.ExitCode = 1; return; }
         Console.WriteLine("PASS " + scenario);
@@ -190,6 +191,36 @@ internal static class CalendarLayoutProbe
         timer.Start();
         object[] parameters = { state, cache, false };
         try { Method("Settings").Invoke(null, parameters); }
+        catch (TargetInvocationException ex) { failure = ex.InnerException ?? ex; }
+        timer.Dispose();
+    }
+
+    private static void ProbeRestoreRuleDetail()
+    {
+        Dictionary<string, object> calendar = Cache();
+        Dictionary<string, object> recurring = (Dictionary<string, object>)((List<object>)calendar["events"])[0];
+        recurring["recurring"] = true;
+        Timer timer = new Timer { Interval = 100 };
+        timer.Tick += delegate {
+            Form form = Application.OpenForms.Cast<Form>().FirstOrDefault(candidate => candidate.Text == "日程详情");
+            if (form == null) return;
+            try
+            {
+                Button restore = Descendants(form).OfType<Button>().FirstOrDefault(button => button.Text == "恢复自动转入");
+                if (restore == null || !restore.Visible) throw new Exception("Restore auto-import button is missing for a converted occurrence without a series rule");
+                DpiLayoutAssertions.AssertFitsAt200Percent(restore, true, "Restore auto-import button");
+                timer.Stop();
+                form.Close();
+            }
+            catch (Exception ex)
+            {
+                failure = ex;
+                timer.Stop();
+                form.Close();
+            }
+        };
+        timer.Start();
+        try { Method("ShowDetails").Invoke(null, new object[] { recurring, true, false }); }
         catch (TargetInvocationException ex) { failure = ex.InnerException ?? ex; }
         timer.Dispose();
     }

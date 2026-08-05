@@ -409,7 +409,10 @@ namespace RainmeterBackend
             if (!System.String.IsNullOrEmpty(directory)) Directory.CreateDirectory(directory);
             byte[] plain = Encoding.UTF8.GetBytes(Serialize(value));
             byte[] cipher = ProtectedData.Protect(plain, null, DataProtectionScope.CurrentUser);
-            File.WriteAllText(path, Convert.ToBase64String(cipher), new UTF8Encoding(false));
+            string temporary = path + ".tmp";
+            File.WriteAllText(temporary, Convert.ToBase64String(cipher), new UTF8Encoding(false));
+            if (File.Exists(path)) File.Replace(temporary, path, null);
+            else File.Move(temporary, path);
         }
     }
 

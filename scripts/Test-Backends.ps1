@@ -33,6 +33,12 @@ try {
         $env:RAINMETER_COMMANDS_DISABLED = '1'
         & $smoke $todo $calendar
         if ($LASTEXITCODE -ne 0) { throw 'Backend smoke tests failed' }
+        & $todo BackupSelfTest
+        if ($LASTEXITCODE -ne 0) { throw "Encrypted backup self-tests failed with exit code $LASTEXITCODE" }
+        Write-Host 'Encrypted portable backup config v1.0 round-trip, DPAPI rewrap, rollback, wrong-password, and tamper tests passed'
+        & $todo PaperRssSelfTest
+        if ($LASTEXITCODE -ne 0) { throw "Paper RSS self-tests failed with exit code $LASTEXITCODE" }
+        Write-Host 'Paper RSS selection, completion filtering, score filtering, RFC 822 dates, empty feed, and XML escaping passed'
     } finally {
         if ($null -eq $previousCommandDisable) { Remove-Item Env:RAINMETER_COMMANDS_DISABLED -ErrorAction SilentlyContinue }
         else { $env:RAINMETER_COMMANDS_DISABLED = $previousCommandDisable }
@@ -63,8 +69,10 @@ try {
             foreach ($probe in @(
                 @{ File = $todoLayout; Argument = 'editor'; Name = 'Todo editor' },
                 @{ File = $todoLayout; Argument = 'manager'; Name = 'Todo manager' },
+                @{ File = $todoLayout; Argument = 'settings'; Name = 'Todo settings' },
                 @{ File = $calendarLayout; Argument = 'manager'; Name = 'Calendar manager' },
-                @{ File = $calendarLayout; Argument = 'settings'; Name = 'Calendar settings' }
+                @{ File = $calendarLayout; Argument = 'settings'; Name = 'Calendar settings' },
+                @{ File = $calendarLayout; Argument = 'detail-restore'; Name = 'Calendar restore-rule detail' }
             )) {
                 $process = Start-Process -FilePath $probe.File -ArgumentList $probe.Argument -WindowStyle Hidden -PassThru
                 if (-not $process.WaitForExit(20000)) {
@@ -80,8 +88,10 @@ try {
         foreach ($probe in @(
             @{ File = $todoLayout; Argument = 'editor'; Name = 'Todo editor' },
             @{ File = $todoLayout; Argument = 'manager'; Name = 'Todo manager' },
+            @{ File = $todoLayout; Argument = 'settings'; Name = 'Todo settings' },
             @{ File = $calendarLayout; Argument = 'manager'; Name = 'Calendar manager' },
-            @{ File = $calendarLayout; Argument = 'settings'; Name = 'Calendar settings' }
+            @{ File = $calendarLayout; Argument = 'settings'; Name = 'Calendar settings' },
+            @{ File = $calendarLayout; Argument = 'detail-restore'; Name = 'Calendar restore-rule detail' }
         )) {
             $process = Start-Process -FilePath $probe.File -ArgumentList $probe.Argument -WindowStyle Hidden -PassThru
             if (-not $process.WaitForExit(20000)) {

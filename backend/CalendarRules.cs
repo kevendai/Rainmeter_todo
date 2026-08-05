@@ -28,26 +28,28 @@ internal static partial class CalendarApp
     private static bool AutoConvertDue(Dictionary<string,object> e,DateTime today){DateTimeOffset? reminder=RuntimeUtil.Date(e,"reminder_at");return OccursOn(e,today)||(reminder.HasValue&&reminder.Value.Date<=today);}
     private static bool AutoConvert(Dictionary<string,object>cache,Dictionary<string,object>state){bool changed=false;DateTime today=DateTime.Now.Date;foreach(Dictionary<string,object>e in Events(cache).Where(e=>AutoConvertDue(e,today))){Dictionary<string,object>rule=Rules(state).FirstOrDefault(r=>S(r,"uid")==S(e,"uid"));if(Regex.IsMatch(S(e,"title"),@"^\s*\[(?:待办|代办)\]")&&rule==null){rule=new Dictionary<string,object>{{"uid",S(e,"uid")},{"title",CleanTitle(S(e,"title"))},{"effective_from",S(e,"start_at")},{"created_at",RuntimeUtil.Iso(DateTimeOffset.Now)},{"reason","title-tag"},{"hide_event",true}};Rules(state).Add(rule);changed=true;}if(rule!=null&&AddTask(e,state,"series",JsonUtil.Bool(rule,"hide_event",true)))changed=true;}return changed;}
     private sealed class Choice{public string Mode;public bool Hide;}
-    private static Choice Choose(Dictionary<string,object> e)
+    private static Choice Choose(Dictionary<string,object> e, bool seriesOnly)
     {
         Form f = LightUi.Form("转为待办", 540, 340);
-        LightUi.Heading(f, "转为带时间待办", B(e, "recurring") ? "选择仅转换这一期，或让后续周期自动进入待办。" : "开始、结束和提醒时间会一并带入待办。");
+        LightUi.Heading(f, seriesOnly ? "恢复自动转入" : "转为带时间待办", seriesOnly ? "本期已转为待办；恢复后续周期的自动转入规则。" : B(e, "recurring") ? "选择仅转换这一期，或让后续周期自动进入待办。" : "开始、结束和提醒时间会一并带入待办。");
         Label eventTitle = new Label { Text = CleanTitle(S(e, "title")), Left = 26, Top = 100, Width = 488, Height = 48, BackColor = LightUi.Surface, ForeColor = LightUi.Text, Font = new System.Drawing.Font("Microsoft YaHei UI", 11F, System.Drawing.FontStyle.Bold), Padding = new Padding(14, 13, 14, 8) };
         LightUi.Round(eventTitle, 10);
         f.Controls.Add(eventTitle);
         CheckBox hide = new CheckBox { Text = "转换后从今日日程磁贴隐藏", Checked = true, Left = 28, Top = 168, Width = 360, Height = 28, ForeColor = LightUi.Text, BackColor = Color.Transparent, FlatStyle = FlatStyle.Flat };
         f.Controls.Add(hide); f.Controls.Add(LightUi.Label("原事件仍保留在 CalDAV 和手机日历中。", 50, 199, 400));
-        Button cancel = LightUi.Button("取消", 222, 270, 86, DialogResult.Cancel);
+        Button cancel = LightUi.Button("取消", seriesOnly ? 318 : 222, 270, 86, DialogResult.Cancel);
         Button once = LightUi.Button("仅本次", 318, 270, 86, DialogResult.OK);
-        Button series = LightUi.PrimaryButton("本次及今后", 414, 270, 100, DialogResult.Yes);
+        Button series = LightUi.PrimaryButton(seriesOnly ? "恢复自动转入" : "本次及今后", 414, 270, 100, DialogResult.Yes);
+        once.Visible = !seriesOnly;
         if (!B(e, "recurring")) series.Visible = false;
         f.Controls.AddRange(new Control[] { cancel, once, series }); f.CancelButton = cancel;
         DialogResult result = f.ShowDialog();
         if (result != DialogResult.OK && result != DialogResult.Yes) return null;
-        return new Choice { Mode = result == DialogResult.Yes ? "Series" : "Once", Hide = hide.Checked };
+        return new Choice { Mode = seriesOnly || result == DialogResult.Yes ? "Series" : "Once", Hide = hide.Checked };
     }
-    private static bool ConvertInteractive(Dictionary<string,object>e,Dictionary<string,object>state,Dictionary<string,object>cache){Choice c=Choose(e);if(c==null)return false;if(c.Mode=="Series"){Dictionary<string,object>rule=Rules(state).FirstOrDefault(r=>S(r,"uid")==S(e,"uid"));if(rule==null){rule=new Dictionary<string,object>{{"uid",S(e,"uid")},{"title",CleanTitle(S(e,"title"))},{"effective_from",S(e,"start_at")},{"created_at",RuntimeUtil.Iso(DateTimeOffset.Now)},{"reason","manual"}};Rules(state).Add(rule);}rule["hide_event"]=c.Hide;}bool added=AddTask(e,state,c.Mode=="Series"?"series":"single",c.Hide);if(added)cache["status"]=c.Hide?"已转为待办并从日程隐藏":"已转为待办，日程继续显示";return added;}
-    private static DialogResult ShowDetails(Dictionary<string,object> e, bool converted)
+    private static bool NeedsSeriesRuleRestore(Dictionary<string,object>e,Dictionary<string,object>state){return B(e,"recurring")&&Conversions(state).Any(c=>S(c,"occurrence_key")==S(e,"occurrence_key"))&&!Rules(state).Any(r=>S(r,"uid")==S(e,"uid"));}
+    private static bool ConvertInteractive(Dictionary<string,object>e,Dictionary<string,object>state,Dictionary<string,object>cache){bool restoreOnly=NeedsSeriesRuleRestore(e,state);Choice c=Choose(e,restoreOnly);if(c==null)return false;bool createdRule=false;if(c.Mode=="Series"){Dictionary<string,object>rule=Rules(state).FirstOrDefault(r=>S(r,"uid")==S(e,"uid"));if(rule==null){rule=new Dictionary<string,object>{{"uid",S(e,"uid")},{"title",CleanTitle(S(e,"title"))},{"effective_from",S(e,"start_at")},{"created_at",RuntimeUtil.Iso(DateTimeOffset.Now)},{"reason","manual"}};Rules(state).Add(rule);createdRule=true;}rule["hide_event"]=c.Hide;}bool added=AddTask(e,state,c.Mode=="Series"?"series":"single",c.Hide);if(restoreOnly)foreach(Dictionary<string,object>conversion in Conversions(state).Where(x=>S(x,"occurrence_key")==S(e,"occurrence_key")))conversion["hide_event"]=c.Hide;if(createdRule&&!added)cache["status"]="已恢复该系列的未来自动转入";else if(added)cache["status"]=c.Hide?"已转为待办并从日程隐藏":"已转为待办，日程继续显示";return added;}
+    private static DialogResult ShowDetails(Dictionary<string,object> e, bool converted, bool hasSeriesRule)
     {
         Form f = LightUi.Form("日程详情", 680, 630);
         LightUi.Heading(f, CleanTitle(S(e, "title")), "日程详情");
@@ -61,9 +63,10 @@ internal static partial class CalendarApp
         TextBox note = LightUi.TextBox(24, 246, 632, S(e, "description") == "" ? "（没有备注）" : S(e, "description")); note.Multiline = true; note.ReadOnly = true; note.Height = 270; note.ScrollBars = ScrollBars.Vertical; f.Controls.Add(note);
         Button open = LightUi.Button("打开链接 / 路径", 0, 552, 126, DialogResult.None);
         Button edit = LightUi.Button("编辑", 0, 552, 84, DialogResult.Yes);
-        Button convert = LightUi.PrimaryButton(converted ? "已转为待办" : "转为待办", 0, 552, 116, DialogResult.OK);
+        bool canRestore = converted && B(e, "recurring") && !hasSeriesRule;
+        Button convert = LightUi.PrimaryButton(canRestore ? "恢复自动转入" : converted ? "已转为待办" : "转为待办", 0, 552, canRestore ? 132 : 116, DialogResult.OK);
         Button close = LightUi.Button("关闭", 0, 552, 118, DialogResult.Cancel);
-        open.Visible = Target(e) != ""; open.Click += delegate { RuntimeUtil.Run(Target(e)); }; convert.Visible = !converted;
+        open.Visible = Target(e) != ""; open.Click += delegate { RuntimeUtil.Run(Target(e)); }; convert.Visible = !converted || canRestore;
         Action layoutActions = delegate {
             List<Button> buttons = new List<Button>();
             if (open.Visible) buttons.Add(open);
