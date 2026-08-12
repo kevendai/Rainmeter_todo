@@ -19,8 +19,8 @@ internal static partial class TodoApp
     private const int PaperRssPort = 8891;
     private const string PaperRssNamespace = "https://example.com/rss/paper/1.0";
     private const string DublinCoreNamespace = "http://purl.org/dc/elements/1.1/";
-    private static readonly TimeSpan PaperRssStart = TimeSpan.FromHours(8);
-    private static readonly TimeSpan PaperRssEnd = TimeSpan.FromHours(20);
+    private static readonly TimeSpan PaperRssSyncStart = TimeSpan.FromHours(8);
+    private static readonly TimeSpan PaperRssSyncEnd = TimeSpan.FromHours(20);
     private static readonly TimeSpan PaperRssSyncInterval = TimeSpan.FromMinutes(10);
     private static int paperRssSyncRunning;
 
@@ -44,9 +44,9 @@ internal static partial class TodoApp
         public List<string> Categories = new List<string>();
     }
 
-    private static bool IsPaperRssWindow(DateTime now)
+    private static bool IsPaperRssSyncWindow(DateTime now)
     {
-        return now.TimeOfDay >= PaperRssStart && now.TimeOfDay < PaperRssEnd;
+        return now.TimeOfDay >= PaperRssSyncStart && now.TimeOfDay < PaperRssSyncEnd;
     }
 
     private static void EnsurePaperRssServer(bool waitForReady)
@@ -157,7 +157,7 @@ internal static partial class TodoApp
 
     private static void QueuePaperRssSync()
     {
-        if (!IsPaperRssWindow(DateTime.Now)) return;
+        if (!IsPaperRssSyncWindow(DateTime.Now)) return;
         if (Interlocked.CompareExchange(ref paperRssSyncRunning, 1, 0) != 0) return;
         ThreadPool.QueueUserWorkItem(delegate {
             try
@@ -233,7 +233,7 @@ internal static partial class TodoApp
                             {"service", "RainmeterTodoPaperRss"}, {"status", "ok"},
                             {"enabled", settings.Enabled && settings.RssEnabled},
                             {"address", "127.0.0.1"}, {"port", PaperRssPort},
-                            {"in_window", IsPaperRssWindow(DateTime.Now)}, {"time", RuntimeUtil.Iso(DateTimeOffset.Now)}
+                            {"in_window", IsPaperRssSyncWindow(DateTime.Now)}, {"time", RuntimeUtil.Iso(DateTimeOffset.Now)}
                         });
                         WritePaperRssResponse(stream, 200, "application/json; charset=utf-8", body);
                         return;
@@ -280,7 +280,6 @@ internal static partial class TodoApp
 
     private static string BuildCurrentPaperRss(int minimumScore, int limit, DateTimeOffset now)
     {
-        if (!IsPaperRssWindow(now.LocalDateTime)) return BuildPaperRssXml(new List<PaperRssItem>());
         string date = now.ToLocalTime().ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
         string cachePath = Path.Combine(PaperCache, date + "_papers.json");
         List<Dictionary<string, object>> papers;
@@ -470,7 +469,7 @@ internal static partial class TodoApp
             string empty = BuildPaperRssXml(new List<PaperRssItem>());
             document.LoadXml(empty);
             if (document.SelectNodes("/rss/channel/item").Count != 0 || document.SelectSingleNode("/rss/channel") == null) return 71;
-            if (IsPaperRssWindow(new DateTime(2026, 8, 5, 7, 59, 59)) || !IsPaperRssWindow(new DateTime(2026, 8, 5, 8, 0, 0)) || IsPaperRssWindow(new DateTime(2026, 8, 5, 20, 0, 0))) return 72;
+            if (IsPaperRssSyncWindow(new DateTime(2026, 8, 5, 7, 59, 59)) || !IsPaperRssSyncWindow(new DateTime(2026, 8, 5, 8, 0, 0)) || IsPaperRssSyncWindow(new DateTime(2026, 8, 5, 20, 0, 0))) return 72;
             return 0;
         }
         catch { return 73; }

@@ -37,9 +37,9 @@ internal static partial class CalendarApp
         if(begin<0||end<0)throw new Exception("未找到可改写的周期主日程。");
         List<string> block=lines.GetRange(begin+1,end-begin-1);DateTimeOffset start=RuntimeUtil.Date(e,"start_at")??DateTimeOffset.Now, finish=RuntimeUtil.Date(e,"end_at")??start.AddHours(1);bool all=B(e,"all_day");
         int insert=block.Count;UpsertProp(block,"DTSTAMP","DTSTAMP:"+DateTimeOffset.UtcNow.ToString("yyyyMMdd'T'HHmmss'Z'",CultureInfo.InvariantCulture),insert);
-        UpsertProp(block,"DTSTART",IcsDateProp("DTSTART",start,all),insert);
-        UpsertProp(block,"DTEND",IcsDateProp("DTEND",finish,all),insert);
+        if(B(e,"time_changed")){UpsertProp(block,"DTSTART",IcsDateProp("DTSTART",start,all),insert);UpsertProp(block,"DTEND",IcsDateProp("DTEND",finish,all),insert);}
         UpsertProp(block,"SUMMARY","SUMMARY:"+IcsText(S(e,"title")),insert);
+        if(B(e,"rrule_changed")){if(S(e,"rrule")!="")UpsertProp(block,"RRULE","RRULE:"+S(e,"rrule"),insert);else block.RemoveAll(l=>IsProp(l,"RRULE"));}
         if(S(e,"location")!="")UpsertProp(block,"LOCATION","LOCATION:"+IcsText(S(e,"location")),insert);else block.RemoveAll(l=>IsProp(l,"LOCATION"));
         if(S(e,"description")!="")UpsertProp(block,"DESCRIPTION","DESCRIPTION:"+IcsText(S(e,"description")),insert);else block.RemoveAll(l=>IsProp(l,"DESCRIPTION"));
         string link = S(e, "url");
@@ -56,6 +56,7 @@ internal static partial class CalendarApp
         b.Append(all?"DTSTART;VALUE=DATE:":"DTSTART:").Append(IcsDateTime(start,all,false)).Append("\r\n");
         b.Append(all?"DTEND;VALUE=DATE:":"DTEND:").Append(IcsDateTime(end,all,true)).Append("\r\n");
         b.Append("SUMMARY:").Append(IcsText(S(e,"title"))).Append("\r\n");
+        if(S(e,"rrule")!="")b.Append("RRULE:").Append(S(e,"rrule")).Append("\r\n");
         if(S(e,"location")!="")b.Append("LOCATION:").Append(IcsText(S(e,"location"))).Append("\r\n");
         if(S(e,"description")!="")b.Append("DESCRIPTION:").Append(IcsText(S(e,"description"))).Append("\r\n");
         string link=S(e,"url");
@@ -66,11 +67,12 @@ internal static partial class CalendarApp
         b.Append("END:VEVENT\r\nEND:VCALENDAR\r\n");return b.ToString();
     }
 
-    private static Dictionary<string,object> DraftEvent(Dictionary<string,object> original,string source,string title,DateTimeOffset start,DateTimeOffset end,bool allDay,string location,string url,string description,List<int> reminders,List<string> customAlarms)
+    private static Dictionary<string,object> DraftEvent(Dictionary<string,object> original,string source,string title,DateTimeOffset start,DateTimeOffset end,bool allDay,string location,string url,string description,List<int> reminders,List<string> customAlarms,RecurrenceSpec recurrence)
     {
         string uid=original==null||S(original,"uid")==""?Guid.NewGuid().ToString("N")+"@rainmeter.local":S(original,"uid");
         string key=uid+"|"+start.ToUniversalTime().ToString("o");
-        Dictionary<string,object> e=new Dictionary<string,object>{{"id",original==null?RuntimeUtil.Sha256Hex(key).Substring(0,32):S(original,"id")},{"occurrence_key",key},{"uid",uid},{"recurrence_id",start.ToUniversalTime().ToString("o")},{"title",title==""?"（无标题）":title},{"start_at",RuntimeUtil.Iso(start)},{"end_at",RuntimeUtil.Iso(end)},{"all_day",allDay},{"url",url},{"location",location},{"description",description},{"status",""},{"reminder_at",""},{"reminder_count",0},{"reminders",new List<object>()},{"recurring",original!=null&&B(original,"recurring")},{"source",source},{"calendar",source}};
+        string rrule=recurrence!=null&&recurrence.Preserve&&original!=null?S(original,"rrule"):BuildRecurrenceRule(recurrence,start,allDay);bool recurring=recurrence!=null&&recurrence.Preserve?original!=null&&B(original,"recurring"):rrule!="";
+        Dictionary<string,object> e=new Dictionary<string,object>{{"id",original==null?RuntimeUtil.Sha256Hex(key).Substring(0,32):S(original,"id")},{"occurrence_key",key},{"uid",uid},{"recurrence_id",start.ToUniversalTime().ToString("o")},{"title",title==""?"（无标题）":title},{"start_at",RuntimeUtil.Iso(start)},{"end_at",RuntimeUtil.Iso(end)},{"all_day",allDay},{"url",url},{"location",location},{"description",description},{"status",""},{"reminder_at",""},{"reminder_count",0},{"reminders",new List<object>()},{"rrule",rrule},{"rrule_changed",recurrence!=null&&recurrence.Changed},{"recurring",recurring},{"source",source},{"calendar",source}};
         e["custom_alarms"]=customAlarms.Cast<object>().ToList();ApplyReminders(e,reminders,start);if(customAlarms.Count>0&&original!=null){DateTimeOffset? oldReminder=RuntimeUtil.Date(original,"reminder_at"),newReminder=RuntimeUtil.Date(e,"reminder_at");if(oldReminder.HasValue&&(!newReminder.HasValue||oldReminder.Value<newReminder.Value))e["reminder_at"]=RuntimeUtil.Iso(oldReminder.Value);}e["reminder_count"]=Reminders(e).Count+CustomAlarms(e).Count;
         if(original!=null){if(S(original,"href")!="")e["href"]=S(original,"href");if(S(original,"etag")!="")e["etag"]=S(original,"etag");}
         return e;

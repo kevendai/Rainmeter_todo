@@ -56,7 +56,7 @@ Rainmeter 启动或皮肤加载时，仅在本地时间 08:00–20:00 检查，�
 - 条数上限：`GET http://127.0.0.1:8891/paper/rss?limit=10`
 - 健康检查：`GET http://127.0.0.1:8891/healthz`
 
-RSS 只在本地时间 `[08:00, 20:00)` 返回今日未完成推荐，窗口外以及当天没有推荐时均返回 HTTP 200 和不含 item 的合法 RSS 2.0 channel。PaperCache 决定当天推荐顺序、摘要与分数，`tasks.json` 决定中文标题和完成状态；完成论文后对应 item 会消失。服务每 10 分钟复用现有无交互同步路径检查本地或文件服务器缓存，找到远端结果时会原子落盘、导入待办并刷新磁贴，但不会自动调用 DeepSeek。
+RSS 全天返回今日未完成推荐；`healthz.in_window` 只表示当前是否处于 `[08:00, 20:00)` 后台自动同步窗口，不影响 `/paper/rss` 输出。当天没有推荐时返回 HTTP 200 和不含 item 的合法 RSS 2.0 channel。PaperCache 决定当天推荐顺序、摘要与分数，`tasks.json` 决定中文标题和完成状态；完成论文后对应 item 会消失。服务仅在同步窗口内每 10 分钟复用现有无交互路径检查本地或文件服务器缓存，找到远端结果时会原子落盘、导入待办并刷新磁贴，但不会自动调用 DeepSeek。
 
 每个 item 同时提供两层数据：标准 RSS 字段供普通阅读器展示，`paper` 命名空间字段供程序精确解析。`description` 是 CDATA 包装的 HTML，英文摘要正文位于最前；`paper:originalTitle`、可重复的 `paper:author`、`paper:arxivId`、`paper:titleScore`、`paper:abstractScore`、`paper:abstract`、`paper:abstractUrl` 和 `paper:pdfUrl` 提供完整结构化信息。根节点只声明 `xmlns:paper="https://example.com/rss/paper/1.0"` 与 `xmlns:dc="http://purl.org/dc/elements/1.1/"`，不使用默认 XML 命名空间，以保持传统 RSS XPath 兼容。
 

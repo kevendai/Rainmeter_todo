@@ -15,6 +15,7 @@ try {
     $smoke = Join-Path $build 'SmokeTests.exe'
     $todoLayout = Join-Path $build 'TodoLayoutProbe.exe'
     $calendarLayout = Join-Path $build 'CalendarLayoutProbe.exe'
+    $calendarRecurrence = Join-Path $build 'CalendarRecurrenceProbe.exe'
     $dpiAssertions = Join-Path $tests 'DpiLayoutAssertions.cs'
     $todoSources = @(Get-ChildItem -LiteralPath $backend -Filter 'Todo*.cs' | Sort-Object Name | ForEach-Object { $_.FullName })
     $calendarSources = @(Get-ChildItem -LiteralPath $backend -Filter 'Calendar*.cs' | Sort-Object Name | ForEach-Object { $_.FullName })
@@ -28,6 +29,8 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'Todo layout probe compilation failed' }
     & $csc /nologo /target:exe /main:CalendarLayoutProbe /optimize+ @refs "/out:$calendarLayout" (Join-Path $backend 'Common.cs') @calendarSources $dpiAssertions (Join-Path $tests 'CalendarLayoutProbe.cs')
     if ($LASTEXITCODE -ne 0) { throw 'Calendar layout probe compilation failed' }
+    & $csc /nologo /target:exe /main:CalendarRecurrenceProbe /optimize+ @refs "/out:$calendarRecurrence" (Join-Path $backend 'Common.cs') @calendarSources (Join-Path $tests 'CalendarRecurrenceProbe.cs')
+    if ($LASTEXITCODE -ne 0) { throw 'Calendar recurrence probe compilation failed' }
     $previousCommandDisable = $env:RAINMETER_COMMANDS_DISABLED
     try {
         $env:RAINMETER_COMMANDS_DISABLED = '1'
@@ -39,6 +42,8 @@ try {
         & $todo PaperRssSelfTest
         if ($LASTEXITCODE -ne 0) { throw "Paper RSS self-tests failed with exit code $LASTEXITCODE" }
         Write-Host 'Paper RSS selection, completion filtering, score filtering, RFC 822 dates, empty feed, and XML escaping passed'
+        & $calendarRecurrence
+        if ($LASTEXITCODE -ne 0) { throw "Calendar recurrence tests failed with exit code $LASTEXITCODE" }
     } finally {
         if ($null -eq $previousCommandDisable) { Remove-Item Env:RAINMETER_COMMANDS_DISABLED -ErrorAction SilentlyContinue }
         else { $env:RAINMETER_COMMANDS_DISABLED = $previousCommandDisable }
@@ -72,7 +77,9 @@ try {
                 @{ File = $todoLayout; Argument = 'settings'; Name = 'Todo settings' },
                 @{ File = $calendarLayout; Argument = 'manager'; Name = 'Calendar manager' },
                 @{ File = $calendarLayout; Argument = 'settings'; Name = 'Calendar settings' },
-                @{ File = $calendarLayout; Argument = 'detail-restore'; Name = 'Calendar restore-rule detail' }
+                @{ File = $calendarLayout; Argument = 'detail-restore'; Name = 'Calendar restore-rule detail' },
+                @{ File = $calendarLayout; Argument = 'editor-recurrence'; Name = 'Calendar editor recurrence' },
+                @{ File = $calendarLayout; Argument = 'recurrence-dialog'; Name = 'Calendar recurrence dialog' }
             )) {
                 $process = Start-Process -FilePath $probe.File -ArgumentList $probe.Argument -WindowStyle Hidden -PassThru
                 if (-not $process.WaitForExit(20000)) {
@@ -91,7 +98,9 @@ try {
             @{ File = $todoLayout; Argument = 'settings'; Name = 'Todo settings' },
             @{ File = $calendarLayout; Argument = 'manager'; Name = 'Calendar manager' },
             @{ File = $calendarLayout; Argument = 'settings'; Name = 'Calendar settings' },
-            @{ File = $calendarLayout; Argument = 'detail-restore'; Name = 'Calendar restore-rule detail' }
+            @{ File = $calendarLayout; Argument = 'detail-restore'; Name = 'Calendar restore-rule detail' },
+            @{ File = $calendarLayout; Argument = 'editor-recurrence'; Name = 'Calendar editor recurrence' },
+            @{ File = $calendarLayout; Argument = 'recurrence-dialog'; Name = 'Calendar recurrence dialog' }
         )) {
             $process = Start-Process -FilePath $probe.File -ArgumentList $probe.Argument -WindowStyle Hidden -PassThru
             if (-not $process.WaitForExit(20000)) {
