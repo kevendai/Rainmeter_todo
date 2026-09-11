@@ -19,7 +19,7 @@ internal static partial class CalendarApp
 
     private static bool Render(Dictionary<string,object> cache, Dictionary<string,object> state)
     {
-        RainmeterRenderScale = UiScale.Current;
+        RainmeterRenderScale = UiScale.TileCurrent;
         DateTimeOffset now = DateTimeOffset.Now;
         DateTimeOffset start = new DateTimeOffset(now.Year, now.Month, now.Day, 0, 0, 0, now.Offset), end = start.AddDays(1);
         HashSet<string> hidden = new HashSet<string>(Conversions(state).Where(c => JsonUtil.Bool(c, "hide_event", true)).Select(c => S(c, "occurrence_key")));

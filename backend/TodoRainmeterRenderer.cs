@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Drawing;
@@ -18,7 +18,7 @@ internal static partial class TodoApp
 
     private static bool Render(Dictionary<string, object> state)
     {
-        RainmeterRenderScale = UiScale.Current;
+        RainmeterRenderScale = UiScale.TileCurrent;
         DateTimeOffset now = DateTimeOffset.Now;
         List<Dictionary<string, object>> tasks = Tasks(state);
         List<Dictionary<string, object>> pending = tasks.Where(t => !B(t, "completed") && (!RuntimeUtil.Date(t, "available_from").HasValue || now >= RuntimeUtil.Date(t, "available_from").Value))

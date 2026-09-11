@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Drawing;
@@ -155,7 +155,7 @@ internal static partial class TodoApp
         Label updateStatus = LightUi.Label("尚未检查更新", 12, 158, 420);
         Button checkUpdate = LightUi.PrimaryButton("检查更新", 502, 146, 146, DialogResult.None);
         Label uiScaleLabel = LightUi.Label("界面缩放（磁贴和窗口共用）", 12, 214, 300);
-        string[] uiScaleLabels = { "自动（当前 " + UiScale.Percent + "%）", "75%", "80%", "90%", "100%", "110%", "125%" };
+        string[] uiScaleLabels = { "自动（当前磁贴 " + UiScale.TilePercent + "%）", "75%", "80%", "90%", "100%", "110%", "125%" };
         string[] uiScaleValues = { "auto", "0.75", "0.80", "0.90", "1.00", "1.10", "1.25" };
         ComboBox uiScale = new ComboBox { Left = 12, Top = 244, Width = 260, Height = 36, DropDownStyle = ComboBoxStyle.DropDownList, Font = new Font("Microsoft YaHei UI", 10F) };
         uiScale.Items.AddRange(uiScaleLabels.Cast<object>().ToArray());
@@ -163,7 +163,7 @@ internal static partial class TodoApp
         int currentUiScaleIndex = Array.FindIndex(uiScaleValues, value => String.Equals(value, currentUiScaleMode, StringComparison.OrdinalIgnoreCase));
         uiScale.SelectedIndex = currentUiScaleIndex < 0 ? 0 : currentUiScaleIndex;
         Button applyUiScale = LightUi.PrimaryButton("应用缩放", 292, 242, 128, DialogResult.None);
-        Label uiScaleHint = LightUi.Label("比例同时控制磁贴和窗口；窗口会额外适配 Windows 显示缩放。应用后请重新打开窗口。", 12, 296, 620);
+        Label uiScaleHint = LightUi.Label("比例只控制桌面磁贴；设置、编辑和管理窗口保持 2K 设计尺寸，并适配 Windows 显示缩放。", 12, 296, 620);
         uiScaleHint.Height = 48;
         Label backupLabel = LightUi.Label("用户配置备份（跨电脑加密导入）", 12, 350, 320);
         Button exportBackup = LightUi.PrimaryButton("导出用户配置", 12, 382, 164, DialogResult.None);
@@ -189,7 +189,7 @@ internal static partial class TodoApp
                 applyUiScale.Enabled = false;
                 UiScale.SaveMode(uiScaleValues[Math.Max(0, uiScale.SelectedIndex)]);
                 RenderUiScaleSkins();
-                uiScaleLabels[0] = "自动（当前 " + UiScale.Percent + "%）";
+                uiScaleLabels[0] = "自动（当前磁贴 " + UiScale.TilePercent + "%）";
                 uiScale.Items[0] = uiScaleLabels[0];
                 saveStatus.Text = "界面缩放已应用；请重新打开窗口查看";
                 saveStatus.ForeColor = Color.FromArgb(63, 178, 119);

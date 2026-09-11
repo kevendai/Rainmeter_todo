@@ -7,7 +7,13 @@ if (-not [string]::IsNullOrWhiteSpace($env:RAINMETER_DEPLOY_VERSION_OVERRIDE)) {
     $version = $env:RAINMETER_DEPLOY_VERSION_OVERRIDE.Trim()
 }
 $rainmeterRoot = 'D:\Program Files (x86)\Rainmeter'
-$target = Join-Path $rainmeterRoot 'Skins\Calendar'
+$rainmeterIni = Join-Path $env:APPDATA 'Rainmeter\Rainmeter.ini'
+$skinRoot = Join-Path $rainmeterRoot 'Skins'
+if (Test-Path -LiteralPath $rainmeterIni) {
+    $skinPathMatch = [regex]::Match([IO.File]::ReadAllText($rainmeterIni), '(?m)^SkinPath=(.+)$')
+    if ($skinPathMatch.Success) { $skinRoot = $skinPathMatch.Groups[1].Value.Trim() }
+}
+$target = Join-Path $skinRoot 'Calendar'
 $exe = Join-Path $rainmeterRoot 'Rainmeter.exe'
 
 if (-not (Test-Path -LiteralPath $exe)) { throw "Rainmeter not found: $exe" }

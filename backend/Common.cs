@@ -87,18 +87,38 @@ namespace RainmeterBackend
                 float overrideValue;
                 if (!String.IsNullOrWhiteSpace(overrideText) && Single.TryParse(overrideText, NumberStyles.Float, CultureInfo.InvariantCulture, out overrideValue))
                     return Clamp(overrideValue);
+                // Manual values control tile size only; opened windows stay at design size.
+                if (Mode != AutoMode) return 1F;
+                return AutoScale();
+            }
+        }
+
+        public static float TileCurrent
+        {
+            get
+            {
+                string overrideText = Environment.GetEnvironmentVariable("RAINMETER_UI_SCALE_OVERRIDE");
+                float overrideValue;
+                if (!String.IsNullOrWhiteSpace(overrideText) && Single.TryParse(overrideText, NumberStyles.Float, CultureInfo.InvariantCulture, out overrideValue))
+                    return Clamp(overrideValue);
                 string mode = Mode;
                 float manual;
                 if (mode != AutoMode && Single.TryParse(mode, NumberStyles.Float, CultureInfo.InvariantCulture, out manual))
                     return Clamp(manual);
-                Rectangle bounds = Screen.PrimaryScreen == null ? new Rectangle(0, 0, 2560, 1440) : Screen.PrimaryScreen.Bounds;
-                float scale = Math.Min(bounds.Width / BaseWidth, bounds.Height / BaseHeight);
-                scale = (float)Math.Round(scale * 20F, MidpointRounding.AwayFromZero) / 20F;
-                return Clamp(scale);
+                return AutoScale();
             }
         }
 
+        private static float AutoScale()
+        {
+            Rectangle bounds = Screen.PrimaryScreen == null ? new Rectangle(0, 0, 2560, 1440) : Screen.PrimaryScreen.Bounds;
+            float scale = Math.Min(bounds.Width / BaseWidth, bounds.Height / BaseHeight);
+            scale = (float)Math.Round(scale * 20F, MidpointRounding.AwayFromZero) / 20F;
+            return Clamp(scale);
+        }
+
         public static int Percent { get { return (int)Math.Round(Current * 100F); } }
+        public static int TilePercent { get { return (int)Math.Round(TileCurrent * 100F); } }
 
         public static void SaveMode(string mode)
         {
