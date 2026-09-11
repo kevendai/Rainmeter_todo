@@ -15,6 +15,7 @@ using RainmeterBackend;
 
 internal static partial class CalendarApp
 {
+    private static string calendarCredentialsLoadError = "";
     private static bool EditInteractive(Dictionary<string,object> original,Dictionary<string,object> state,Dictionary<string,object> cache)
     {
         Dictionary<string,object> selectedEvent=original;bool isNew=original==null, originalCalDav=!isNew&&S(original,"source")=="caldav";
@@ -149,9 +150,10 @@ internal static partial class CalendarApp
 
     private static Dictionary<string,object> ReadCredentials()
     {
+        calendarCredentialsLoadError = "";
         if (!File.Exists(SecretPath)) return new Dictionary<string,object>();
         try { return JsonUtil.ReadDpapiJson(SecretPath); }
-        catch { return new Dictionary<string,object>(); }
+        catch (Exception ex) { calendarCredentialsLoadError = "CalDAV 凭据无法解密或已损坏：" + ex.Message.Replace("\r", " ").Replace("\n", " "); return new Dictionary<string,object>(); }
     }
 
     private static void SaveCredentials(TextBox server, TextBox username, TextBox password, Dictionary<string,object> cache)
@@ -171,7 +173,12 @@ internal static partial class CalendarApp
 
     private static Dictionary<string,object> CredentialsFromFields(TextBox server, TextBox username, TextBox password)
     {
-        string s = server.Text.Trim(), u = username.Text.Trim(), p = password.Text;
+        return CredentialsFromValues(server.Text, username.Text, password.Text);
+    }
+
+    private static Dictionary<string,object> CredentialsFromValues(string server, string username, string password)
+    {
+        string s = (server ?? "").Trim(), u = (username ?? "").Trim(), p = password ?? "";
         if (s == "") throw new Exception("CalDAV 地址不能为空");
         if (!s.StartsWith("http://", StringComparison.OrdinalIgnoreCase) && !s.StartsWith("https://", StringComparison.OrdinalIgnoreCase)) s = "https://" + s;
         if (u == "" || p == "") throw new Exception("账号和密码不能为空");
@@ -180,7 +187,12 @@ internal static partial class CalendarApp
 
     private static string TestCredentials(TextBox server, TextBox username, TextBox password)
     {
-        CalendarInfo calendar = Discover(CredentialsFromFields(server, username, password));
+        return TestCredentials(server.Text, username.Text, password.Text);
+    }
+
+    private static string TestCredentials(string server, string username, string password)
+    {
+        CalendarInfo calendar = Discover(CredentialsFromValues(server, username, password));
         return "连接成功：" + (calendar.Name == "" ? calendar.Uri : calendar.Name);
     }
 
@@ -481,7 +493,10 @@ internal static partial class CalendarApp
         stop.Font = new System.Drawing.Font("Microsoft YaHei UI", 9F, System.Drawing.FontStyle.Bold);
         rulePage.Controls.Add(stop);
 
-        Label saveStatus = new Label { Text = S(cache, "status"), Left = 64, Top = 502, Width = 280, Height = 28, BackColor = Color.Transparent, ForeColor = S(cache, "status").Contains("成功") || S(cache, "status").Contains("已同步") ? Color.FromArgb(63, 178, 119) : Color.FromArgb(76, 94, 132), Font = new System.Drawing.Font("Microsoft YaHei UI", 10F, System.Drawing.FontStyle.Bold) };
+        string initialCredentialStatus = calendarCredentialsLoadError != "" ? calendarCredentialsLoadError : S(cache, "status");
+        bool insecureCalDav = server.Text.Trim().StartsWith("http://", StringComparison.OrdinalIgnoreCase) && (username.Text.Trim() != "" || password.Text != "");
+        if (insecureCalDav && calendarCredentialsLoadError == "") initialCredentialStatus = "安全警告：CalDAV 凭据正通过 HTTP 明文传输";
+        Label saveStatus = new Label { Text = initialCredentialStatus, Left = 64, Top = 502, Width = 280, Height = 28, BackColor = Color.Transparent, ForeColor = calendarCredentialsLoadError != "" || insecureCalDav ? LightUi.Danger : S(cache, "status").Contains("成功") || S(cache, "status").Contains("已同步") ? Color.FromArgb(63, 178, 119) : Color.FromArgb(76, 94, 132), Font = new System.Drawing.Font("Microsoft YaHei UI", 10F, System.Drawing.FontStyle.Bold) };
         Button clearAccount = LightUi.DangerButton("清除设置", 364, 494, 98, DialogResult.None);
         Button testAccount = LightUi.Button("测试连接", 476, 494, 98, DialogResult.None);
         Button saveAccount = LightUi.PrimaryButton("保存凭据", 588, 494, 100, DialogResult.None);
@@ -501,13 +516,25 @@ internal static partial class CalendarApp
             tabRail.BringToFront(); closeTop.BringToFront();
         };
         showAccount(true);
+        f.Shown += delegate { if (insecureCalDav) MessageBox.Show("当前 CalDAV 地址使用 http://，账号和密码可能以明文传输。建议尽快改用 https://。", "明文凭据警告", MessageBoxButtons.OK, MessageBoxIcon.Warning); };
 
         testAccount.Click += delegate {
-            try { saveStatus.Text = "正在测试…"; saveStatus.ForeColor = Color.FromArgb(76, 94, 132); saveStatus.Refresh(); saveStatus.Text = TestCredentials(server, username, password); saveStatus.ForeColor = Color.FromArgb(63, 178, 119); }
-            catch (Exception ex) { LightUi.Error("连接失败：" + ex.Message); saveStatus.Text = "连接失败"; saveStatus.ForeColor = LightUi.Danger; }
+            try
+            {
+                string serverValue = server.Text, usernameValue = username.Text, passwordValue = password.Text;
+                if (serverValue.Trim().StartsWith("http://", StringComparison.OrdinalIgnoreCase) && MessageBox.Show("CalDAV 使用 http://，账号和密码会以明文通过网络传输。\r\n\r\n仍要测试吗？", "明文凭据警告", MessageBoxButtons.YesNo, MessageBoxIcon.Warning) != DialogResult.Yes) return;
+                testAccount.Enabled = false; saveStatus.Text = "正在测试…"; saveStatus.ForeColor = Color.FromArgb(76, 94, 132);
+                ThreadPool.QueueUserWorkItem(delegate {
+                    string result = ""; Exception failure = null;
+                    try { result = TestCredentials(serverValue, usernameValue, passwordValue); } catch (Exception ex) { failure = ex; }
+                    if (f.IsDisposed || !f.IsHandleCreated) return;
+                    try { f.BeginInvoke(new Action(delegate { if (f.IsDisposed) return; testAccount.Enabled = true; if (failure != null) { LightUi.Error("连接失败：" + failure.Message); saveStatus.Text = "连接失败"; saveStatus.ForeColor = LightUi.Danger; } else { saveStatus.Text = result; saveStatus.ForeColor = Color.FromArgb(63, 178, 119); } })); } catch (InvalidOperationException) { }
+                });
+            }
+            catch (Exception ex) { testAccount.Enabled = true; LightUi.Error("连接失败：" + ex.Message); saveStatus.Text = "连接失败"; saveStatus.ForeColor = LightUi.Danger; }
         };
         saveAccount.Click += delegate {
-            try { SaveCredentials(server, username, password, cache); saveStatus.Text = "已保存"; saveStatus.ForeColor = Color.FromArgb(63, 178, 119); }
+            try { if (server.Text.Trim().StartsWith("http://", StringComparison.OrdinalIgnoreCase) && MessageBox.Show("CalDAV 使用 http://，账号和密码会以明文通过网络传输。\r\n\r\n仍要保存吗？", "明文凭据警告", MessageBoxButtons.YesNo, MessageBoxIcon.Warning) != DialogResult.Yes) return; SaveCredentials(server, username, password, cache); saveStatus.Text = "已保存"; saveStatus.ForeColor = Color.FromArgb(63, 178, 119); }
             catch (Exception ex) { LightUi.Error(ex.Message); }
         };
         clearAccount.Click += delegate {

@@ -19,4 +19,8 @@ caldav.secret
 calendar-cache.json
 calendar-state.json
 tasks.json
-WeeklyPaperClipboard.ps1
+releases/*
+!releases/.gitkeep
+!releases/v1.5.4/
+releases/v1.5.4/*
+!releases/v1.5.4/rainmeter-desktop-widgets-1.5.4.zip

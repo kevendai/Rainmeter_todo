@@ -17,19 +17,23 @@ try {
     $calendarLayout = Join-Path $build 'CalendarLayoutProbe.exe'
     $calendarRecurrence = Join-Path $build 'CalendarRecurrenceProbe.exe'
     $dpiAssertions = Join-Path $tests 'DpiLayoutAssertions.cs'
-    $todoSources = @(Get-ChildItem -LiteralPath $backend -Filter 'Todo*.cs' | Sort-Object Name | ForEach-Object { $_.FullName })
-    $calendarSources = @(Get-ChildItem -LiteralPath $backend -Filter 'Calendar*.cs' | Sort-Object Name | ForEach-Object { $_.FullName })
-    & $csc /nologo /target:winexe /optimize+ @refs "/out:$todo" (Join-Path $backend 'Common.cs') @todoSources
-    if ($LASTEXITCODE -ne 0) { throw 'Todo backend compilation failed' }
-    & $csc /nologo /target:winexe /optimize+ @refs "/out:$calendar" (Join-Path $backend 'Common.cs') @calendarSources
-    if ($LASTEXITCODE -ne 0) { throw 'Calendar backend compilation failed' }
+    function Get-ProjectSources([string]$projectPath) {
+        [xml]$projectXml = Get-Content -LiteralPath $projectPath -Raw -Encoding UTF8
+        $namespace = [Xml.XmlNamespaceManager]::new($projectXml.NameTable)
+        $namespace.AddNamespace('msb', 'http://schemas.microsoft.com/developer/msbuild/2003')
+        @($projectXml.SelectNodes('//msb:Compile', $namespace) | ForEach-Object { Join-Path $backend $_.Include })
+    }
+    $todoSources = Get-ProjectSources (Join-Path $backend 'TodoHost.csproj')
+    $calendarSources = Get-ProjectSources (Join-Path $backend 'CalendarHost.csproj')
+    & (Join-Path $PSScriptRoot 'Build-Backend.ps1') -Backend Todo -OutputDirectory $build | Out-Null
+    & (Join-Path $PSScriptRoot 'Build-Backend.ps1') -Backend Calendar -OutputDirectory $build | Out-Null
     & $csc /nologo /target:exe /optimize+ /r:System.Web.Extensions.dll "/out:$smoke" (Join-Path $backend 'SmokeTests.cs')
     if ($LASTEXITCODE -ne 0) { throw 'Smoke test compilation failed' }
-    & $csc /nologo /target:exe /main:TodoLayoutProbe /optimize+ @refs "/out:$todoLayout" (Join-Path $backend 'Common.cs') @todoSources $dpiAssertions (Join-Path $tests 'TodoLayoutProbe.cs')
+    & $csc /nologo /target:exe /main:TodoLayoutProbe /optimize+ @refs "/out:$todoLayout" @todoSources $dpiAssertions (Join-Path $tests 'TodoLayoutProbe.cs')
     if ($LASTEXITCODE -ne 0) { throw 'Todo layout probe compilation failed' }
-    & $csc /nologo /target:exe /main:CalendarLayoutProbe /optimize+ @refs "/out:$calendarLayout" (Join-Path $backend 'Common.cs') @calendarSources $dpiAssertions (Join-Path $tests 'CalendarLayoutProbe.cs')
+    & $csc /nologo /target:exe /main:CalendarLayoutProbe /optimize+ @refs "/out:$calendarLayout" @calendarSources $dpiAssertions (Join-Path $tests 'CalendarLayoutProbe.cs')
     if ($LASTEXITCODE -ne 0) { throw 'Calendar layout probe compilation failed' }
-    & $csc /nologo /target:exe /main:CalendarRecurrenceProbe /optimize+ @refs "/out:$calendarRecurrence" (Join-Path $backend 'Common.cs') @calendarSources (Join-Path $tests 'CalendarRecurrenceProbe.cs')
+    & $csc /nologo /target:exe /main:CalendarRecurrenceProbe /optimize+ @refs "/out:$calendarRecurrence" @calendarSources (Join-Path $tests 'CalendarRecurrenceProbe.cs')
     if ($LASTEXITCODE -ne 0) { throw 'Calendar recurrence probe compilation failed' }
     $previousCommandDisable = $env:RAINMETER_COMMANDS_DISABLED
     try {

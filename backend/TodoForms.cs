@@ -91,7 +91,7 @@ internal static partial class TodoApp
         int w = 660;
         TextBox importCount = Field(pages[0], "每天导入论文数量（1-20）", 12, 12, 310, settings.ImportCount.ToString(CultureInfo.InvariantCulture));
         TextBox cacheDays = Field(pages[0], "缓存保留天数（1-90）", 342, 12, 306, settings.CacheDays.ToString(CultureInfo.InvariantCulture));
-        CheckBox rssEnabled = new CheckBox { Left = 12, Top = 104, Width = 420, Height = 26, Text = "启用本地论文 RSS（127.0.0.1:8891）", Checked = settings.RssEnabled, ForeColor = LightUi.Text, BackColor = Color.Transparent, Font = new Font("Microsoft YaHei UI", 10F, FontStyle.Bold) };
+        CheckBox rssEnabled = new CheckBox { Left = 12, Top = 104, Width = 420, Height = 26, Text = "启用本地论文 RSS（" + PaperRssAddress + ":" + PaperRssPort.ToString(CultureInfo.InvariantCulture) + "）", Checked = settings.RssEnabled, ForeColor = LightUi.Text, BackColor = Color.Transparent, Font = new Font("Microsoft YaHei UI", 10F, FontStyle.Bold) };
         Label rssState = LightUi.Label(settings.RssEnabled ? "服务状态：正在检查" : "服务状态：已关闭", 438, 106, 210);
         if (settings.RssEnabled)
         {
@@ -144,7 +144,8 @@ internal static partial class TodoApp
 
         TextBox secretId = Field(pages[4], "Tencent Cloud SecretId", 12, 12, w, S(credentials, "SecretId"));
         TextBox secretKey = PasswordField(pages[4], "Tencent Cloud SecretKey", 12, 106, w, S(credentials, "SecretKey"));
-        Label translationStatus = LightUi.Label(File.Exists(TranslationSecret) ? "已保存翻译凭据" : "尚未配置翻译凭据；未配置时论文标题保留英文。", 12, 214, 636);
+        Label translationStatus = LightUi.Label(translationCredentialsLoadError != "" ? translationCredentialsLoadError : File.Exists(TranslationSecret) ? "已保存翻译凭据" : "尚未配置翻译凭据；未配置时论文标题保留英文。", 12, 214, 636);
+        if (translationCredentialsLoadError != "") translationStatus.ForeColor = LightUi.Danger;
         Button clearTranslation = LightUi.DangerButton("清除翻译", 350, 266, 140, DialogResult.None);
         Button testTranslation = LightUi.Button("测试翻译", 502, 266, 140, DialogResult.None);
         pages[4].Controls.AddRange(new Control[] { translationStatus, clearTranslation, testTranslation });
@@ -172,7 +173,8 @@ internal static partial class TodoApp
         backupHint.Height = 48;
         pages[5].Controls.AddRange(new Control[] { aboutTitle, aboutVersion, aboutRepo, updateStatus, checkUpdate, uiScaleLabel, uiScale, applyUiScale, uiScaleHint, backupLabel, exportBackup, importBackup, backupHint });
 
-        Label saveStatus = LightUi.Label(File.Exists(PaperSyncSecret) ? "已保存设置" : "尚未保存设置", 194, 666, 580);
+        Label saveStatus = LightUi.Label(paperSettingsLoadError != "" ? paperSettingsLoadError : File.Exists(PaperSyncSecret) ? "已保存设置" : "尚未保存设置", 194, 666, 580);
+        if (paperSettingsLoadError != "") saveStatus.ForeColor = LightUi.Danger;
         saveStatus.Font = new Font("Microsoft YaHei UI", 10F, FontStyle.Bold);
         Button saveAll = LightUi.PrimaryButton("保存设置", 790, 654, 112, DialogResult.None);
         f.Controls.AddRange(new Control[] { saveStatus, saveAll });
@@ -182,6 +184,9 @@ internal static partial class TodoApp
         };
         for (int i = 0; i < tabs.Count; i++) { int selected = i; tabs[i].Click += delegate { showPage(selected); }; }
         showPage(0);
+        bool insecureExistingPaperConfig = IsInsecureCredentialUrl(settings.ApiBaseUrl, settings.ApiKey) || IsInsecureCredentialUrl(settings.FileBaseUrl, settings.FileAccount + settings.FilePassword);
+        if (insecureExistingPaperConfig && paperSettingsLoadError == "") { saveStatus.Text = "安全警告：当前有凭据通过 HTTP 明文传输"; saveStatus.ForeColor = LightUi.Danger; }
+        f.Shown += delegate { if (insecureExistingPaperConfig) MessageBox.Show("当前论文设置包含 http:// 地址，API Key、账号或密码可能以明文传输。建议尽快改用 https://。", "明文凭据警告", MessageBoxButtons.OK, MessageBoxIcon.Warning); };
 
         applyUiScale.Click += delegate {
             try
@@ -272,6 +277,7 @@ internal static partial class TodoApp
             try
             {
                 PaperSettings value = collect();
+                if (!ConfirmPaperTransport(value)) return;
                 SavePaperSettings(value);
                 if (value.RssEnabled)
                 {
@@ -305,6 +311,7 @@ internal static partial class TodoApp
             {
                 rescore.Enabled = false;
                 PaperSettings value = collect();
+                if (!ConfirmPaperTransport(value)) return;
                 if (StartPaperRescore(value))
                 {
                     saveStatus.Text = "设置已保存，已开始重新评分";
@@ -321,16 +328,20 @@ internal static partial class TodoApp
             finally { refreshPaperProgress(); }
         };
         testApi.Click += delegate {
-            try { testApi.Enabled = false; testApi.Text = "测试中..."; Application.DoEvents(); TestDeepSeekConnection(collect()); saveStatus.Text = "DeepSeek 测试成功"; saveStatus.ForeColor = Color.FromArgb(63, 178, 119); }
+            try
+            {
+                PaperSettings value = collect();
+                if (IsInsecureCredentialUrl(value.ApiBaseUrl, value.ApiKey) && !ConfirmInsecureTransport("DeepSeek API")) return;
+                RunTodoUiOperation<string>(f, testApi, "测试中...", delegate { TestDeepSeekConnection(value); return "DeepSeek 测试成功"; }, delegate(string result) { saveStatus.Text = result; saveStatus.ForeColor = Color.FromArgb(63, 178, 119); }, "DeepSeek 测试失败：");
+            }
             catch (Exception ex) { LightUi.Error("DeepSeek 测试失败：" + ex.Message); }
-            finally { testApi.Enabled = true; testApi.Text = "测试 DeepSeek"; }
         };
         testFile.Click += delegate {
-            try { TestFileServerConnection(collect()); saveStatus.Text = "文件服务器登录成功"; saveStatus.ForeColor = Color.FromArgb(63, 178, 119); }
+            try { PaperSettings value = collect(); if (IsInsecureCredentialUrl(value.FileBaseUrl, value.FileAccount + value.FilePassword) && !ConfirmInsecureTransport("文件服务器")) return; RunTodoUiOperation<string>(f, testFile, "测试中...", delegate { TestFileServerConnection(value); return "文件服务器登录成功"; }, delegate(string result) { saveStatus.Text = result; saveStatus.ForeColor = Color.FromArgb(63, 178, 119); }, "文件服务器测试失败："); }
             catch (Exception ex) { LightUi.Error("文件服务器测试失败：" + ex.Message); }
         };
         testTranslation.Click += delegate {
-            try { string result = TestTranslationCredentials(secretId.Text, secretKey.Text); translationStatus.Text = "连接成功：" + result; translationStatus.ForeColor = Color.FromArgb(63, 178, 119); }
+            try { string id = secretId.Text, key = secretKey.Text; RunTodoUiOperation<string>(f, testTranslation, "测试中...", delegate { return TestTranslationCredentials(id, key); }, delegate(string result) { translationStatus.Text = "连接成功：" + result; translationStatus.ForeColor = Color.FromArgb(63, 178, 119); }, "翻译测试失败："); }
             catch (Exception ex) { LightUi.Error("翻译测试失败：" + ex.Message); }
         };
         clearTranslation.Click += delegate {
@@ -393,39 +404,15 @@ internal static partial class TodoApp
         checkUpdate.Click += delegate {
             try
             {
-                checkUpdate.Enabled = false;
                 updateStatus.Text = "正在检查 GitHub...";
                 updateStatus.ForeColor = LightUi.Muted;
-                updateStatus.Refresh();
-                Application.DoEvents();
-                UpdateCheckResult info = CheckLatestUpdate();
-                if (!info.IsNewer)
-                {
-                    updateStatus.Text = info.CompareResult == 0 ? "已是最新版本：" + info.Tag : "当前版本高于最新标签：" + info.Tag;
-                    updateStatus.ForeColor = Color.FromArgb(63, 178, 119);
-                    return;
-                }
-                updateStatus.Text = "检测到新版本：" + info.Tag;
-                updateStatus.ForeColor = LightUi.Accent;
-                DialogResult update = MessageBox.Show(
-                    "检测到新版本 " + info.Tag + "（统一版）。\r\n\r\n是否现在下载并自动部署？部署脚本会重启 Rainmeter。",
-                    "检查更新",
-                    MessageBoxButtons.YesNo,
-                    MessageBoxIcon.Question);
-                if (update != DialogResult.Yes)
-                {
-                    updateStatus.Text = "已取消更新：" + info.Tag;
-                    updateStatus.ForeColor = LightUi.Muted;
-                    return;
-                }
-                updateStatus.Text = "正在启动独立升级器...";
-                updateStatus.ForeColor = LightUi.Muted;
-                updateStatus.Refresh();
-                Application.DoEvents();
-                StartExternalUpdater();
-                updateStatus.Text = "已启动独立升级器";
-                updateStatus.ForeColor = Color.FromArgb(63, 178, 119);
-                f.BeginInvoke(new Action(f.Close));
+                RunTodoUiOperation<UpdateCheckResult>(f, checkUpdate, "检查中...", CheckLatestUpdate, delegate(UpdateCheckResult info) {
+                    if (!info.IsNewer) { updateStatus.Text = info.CompareResult == 0 ? "已是最新版本：" + info.Tag : "当前版本高于最新标签：" + info.Tag; updateStatus.ForeColor = Color.FromArgb(63, 178, 119); return; }
+                    updateStatus.Text = "检测到新版本：" + info.Tag; updateStatus.ForeColor = LightUi.Accent;
+                    DialogResult update = MessageBox.Show("检测到新版本 " + info.Tag + "（统一版）。\r\n\r\n是否现在下载并自动部署？部署脚本会重启 Rainmeter。", "检查更新", MessageBoxButtons.YesNo, MessageBoxIcon.Question);
+                    if (update != DialogResult.Yes) { updateStatus.Text = "已取消更新：" + info.Tag; updateStatus.ForeColor = LightUi.Muted; return; }
+                    updateStatus.Text = "正在启动独立升级器..."; updateStatus.ForeColor = LightUi.Muted; StartExternalUpdater(); updateStatus.Text = "已启动独立升级器"; updateStatus.ForeColor = Color.FromArgb(63, 178, 119); f.Close();
+                }, "检查更新失败：");
             }
             catch (Exception ex)
             {
@@ -433,13 +420,49 @@ internal static partial class TodoApp
                 updateStatus.ForeColor = LightUi.Danger;
                 LightUi.Error("检查更新失败：" + ex.Message);
             }
-            finally { checkUpdate.Enabled = true; }
         };
 
         f.CancelButton = close;
         f.ShowDialog();
         paperProgressTimer.Stop();
         paperProgressTimer.Dispose();
+    }
+
+    private static void RunTodoUiOperation<T>(Form owner, Button button, string busyText, Func<T> work, Action<T> success, string errorPrefix)
+    {
+        string idleText = button.Text;
+        button.Enabled = false;
+        button.Text = busyText;
+        ThreadPool.QueueUserWorkItem(delegate {
+            T result = default(T);
+            Exception failure = null;
+            try { result = work(); } catch (Exception ex) { failure = ex; }
+            if (owner.IsDisposed || !owner.IsHandleCreated) return;
+            try
+            {
+                owner.BeginInvoke(new Action(delegate {
+                    if (owner.IsDisposed) return;
+                    button.Enabled = true;
+                    button.Text = idleText;
+                    if (failure != null) LightUi.Error(errorPrefix + failure.Message);
+                    else success(result);
+                }));
+            }
+            catch (InvalidOperationException) { }
+        });
+    }
+
+    private static bool ConfirmPaperTransport(PaperSettings settings)
+    {
+        List<string> insecure = new List<string>();
+        if (IsInsecureCredentialUrl(settings.ApiBaseUrl, settings.ApiKey)) insecure.Add("DeepSeek API");
+        if (IsInsecureCredentialUrl(settings.FileBaseUrl, settings.FileAccount + settings.FilePassword)) insecure.Add("文件服务器");
+        return insecure.Count == 0 || ConfirmInsecureTransport(String.Join("、", insecure));
+    }
+
+    private static bool ConfirmInsecureTransport(string label)
+    {
+        return MessageBox.Show(label + " 使用 http://，凭据会以明文通过网络传输。\r\n\r\n仍要继续吗？", "明文凭据警告", MessageBoxButtons.YesNo, MessageBoxIcon.Warning) == DialogResult.Yes;
     }
 
     private static void RenderUiScaleSkins()
@@ -783,6 +806,19 @@ internal static partial class TodoApp
     private static void Manage(Dictionary<string, object> state, ref bool refresh)
     {
         bool managerChanged = false;
+        Func<LockedStateAction, bool> mutate = delegate(LockedStateAction mutation) {
+            Dictionary<string, object> latest = null;
+            bool changed = false;
+            int result = WithLockedState(delegate(Dictionary<string, object> current, ref bool shouldRefresh) {
+                mutation(current, ref shouldRefresh);
+                changed = shouldRefresh;
+                latest = current;
+            });
+            if (result != 0 || latest == null) throw new Exception("待办数据保存失败，请重试。");
+            state = latest;
+            managerChanged |= changed;
+            return changed;
+        };
         Form f = LightUi.Form("全部任务", 1120, 760); LightUi.Heading(f, "全部任务", "管理你的所有待办事项，支持批量操作", "all-tasks.svg");
         Button close = LightUi.Button("×", 1054, 22, 36, DialogResult.Cancel); close.Height = 34; f.Controls.Add(close);
         TextBox search = SearchField(f, 610, 38, 378);
@@ -859,9 +895,15 @@ internal static partial class TodoApp
                 Button openBtn = RowIcon("\xE72A", 914, 5);
                 Button editBtn = RowIcon("\xE70F", 948, 5);
                 Button deleteBtn = RowIcon("\xE74D", 982, 5);
-                openBtn.Click += delegate { bool changed=false; Open(state, id, ref changed); managerChanged |= changed; if (changed) reload(true); };
-                editBtn.Click += delegate { bool changed=false; Edit(state, id, ref changed); managerChanged |= changed; if (changed) reload(true); };
-                deleteBtn.Click += delegate { bool changed=false; Delete(state, id, ref changed); managerChanged |= changed; if (changed) reload(true); };
+                openBtn.Click += delegate { bool changed = mutate(delegate(Dictionary<string, object> current, ref bool shouldRefresh) { Open(current, id, ref shouldRefresh); }); if (changed) reload(true); };
+                editBtn.Click += delegate {
+                    Dictionary<string, object> shown = Find(state, id); if (shown == null) return; EditorResult value = ShowEditor(new Dictionary<string, object>(shown)); if (value == null) return;
+                    if (mutate(delegate(Dictionary<string, object> current, ref bool shouldRefresh) { Dictionary<string, object> task = Find(current, id); if (task == null) return; ApplyEditorResult(task, value); Meta(current)["status"] = "已修改待办"; Commit(current); shouldRefresh = true; })) reload(true);
+                };
+                deleteBtn.Click += delegate {
+                    Dictionary<string, object> shown = Find(state, id); if (shown == null || !LightUi.Confirm("确定删除“" + S(shown, "title") + "”？", "删除待办")) return;
+                    if (mutate(delegate(Dictionary<string, object> current, ref bool shouldRefresh) { if (Tasks(current).RemoveAll(item => S(item, "id") == id) == 0) return; Meta(current)["status"] = "已删除"; Commit(current); shouldRefresh = true; })) reload(true);
+                };
                 row.Controls.Add(openBtn); row.Controls.Add(editBtn); row.Controls.Add(deleteBtn);
                 table.Controls.Add(row); rowPanels[id] = row; y += 42;
             }
@@ -881,11 +923,21 @@ internal static partial class TodoApp
         search.BringToFront();
         close.BringToFront();
         reload(false);
-        edit.Click += delegate { if (selectedId == "") { selectionHint.Text="请先选中一项需要修改的任务。"; selectionHint.ForeColor=LightUi.Danger; return; } bool changed=false; Edit(state, selectedId, ref changed); managerChanged |= changed; selectionHint.ForeColor=LightUi.Muted; if (changed) reload(true); };
-        toggle.Click += delegate { List<string> selected=rowChecks.Where(c=>c.Checked).Select(c=>Convert.ToString(c.Tag)).ToList(); if(selected.Count==0){selectionHint.Text="请先勾选需要完成或恢复的任务。";selectionHint.ForeColor=LightUi.Danger;return;} foreach (string id in selected) { bool changed=false; Toggle(state,id,ref changed); managerChanged |= changed; } selectionHint.ForeColor=LightUi.Muted; reload(true); };
-        delete.Click += delegate { List<string> selected=rowChecks.Where(c=>c.Checked).Select(c=>Convert.ToString(c.Tag)).ToList(); if(selected.Count==0){selectionHint.Text="请先勾选需要删除的任务。";selectionHint.ForeColor=LightUi.Danger;return;} if(!LightUi.Confirm("确定删除勾选的 "+selected.Count+" 项任务？","批量删除"))return; foreach (string id in selected) Tasks(state).RemoveAll(t => S(t, "id") == id); Meta(state)["status"]="已批量删除";Commit(state);managerChanged=true;selectionHint.ForeColor=LightUi.Muted;reload(true); };
-        add.Click += delegate { bool changed=false; Add(state, ref changed); managerChanged |= changed; if (changed) reload(false); };
+        edit.Click += delegate { if (selectedId == "") { selectionHint.Text="请先选中一项需要修改的任务。"; selectionHint.ForeColor=LightUi.Danger; return; } Dictionary<string, object> shown = Find(state, selectedId); if (shown == null) { reload(true); return; } EditorResult value = ShowEditor(new Dictionary<string, object>(shown)); if (value == null) return; if (mutate(delegate(Dictionary<string, object> current, ref bool shouldRefresh) { Dictionary<string, object> task = Find(current, selectedId); if (task == null) return; ApplyEditorResult(task, value); Meta(current)["status"] = "已修改待办"; Commit(current); shouldRefresh = true; })) reload(true); selectionHint.ForeColor=LightUi.Muted; };
+        toggle.Click += delegate { List<string> selected=rowChecks.Where(c=>c.Checked).Select(c=>Convert.ToString(c.Tag)).ToList(); if(selected.Count==0){selectionHint.Text="请先勾选需要完成或恢复的任务。";selectionHint.ForeColor=LightUi.Danger;return;} mutate(delegate(Dictionary<string, object> current, ref bool shouldRefresh) { foreach (string id in selected) Toggle(current, id, ref shouldRefresh); }); selectionHint.ForeColor=LightUi.Muted; reload(true); };
+        delete.Click += delegate { List<string> selected=rowChecks.Where(c=>c.Checked).Select(c=>Convert.ToString(c.Tag)).ToList(); if(selected.Count==0){selectionHint.Text="请先勾选需要删除的任务。";selectionHint.ForeColor=LightUi.Danger;return;} if(!LightUi.Confirm("确定删除勾选的 "+selected.Count+" 项任务？","批量删除"))return; mutate(delegate(Dictionary<string, object> current, ref bool shouldRefresh) { int removed = Tasks(current).RemoveAll(t => selected.Contains(S(t, "id"))); if (removed == 0) return; Meta(current)["status"]="已批量删除"; Commit(current); shouldRefresh=true; }); selectionHint.ForeColor=LightUi.Muted;reload(true); };
+        add.Click += delegate { EditorResult value = ShowEditor(null); if (value == null) return; if (mutate(delegate(Dictionary<string, object> current, ref bool shouldRefresh) { Tasks(current).Add(NewTask(value, "manual")); Meta(current)["status"] = "已新增待办"; Commit(current); shouldRefresh = true; })) reload(false); };
         table.DoubleClick += delegate { edit.PerformClick(); }; f.ShowDialog(); refresh |= managerChanged;
+    }
+
+    private static void ApplyEditorResult(Dictionary<string, object> task, EditorResult value)
+    {
+        task["title"] = value.Title;
+        task["target"] = value.Target;
+        task["note"] = value.Note;
+        task["labels"] = value.Labels.Cast<object>().ToList();
+        task["available_from"] = value.Available == "" ? null : (object)value.Available;
+        task["due_at"] = value.Due == "" ? null : (object)value.Due;
     }
 
     private static Label AddCellLabel(Control parent, string text, int x, int y, int width, Color color, FontStyle style)

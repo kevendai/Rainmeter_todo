@@ -100,7 +100,7 @@ internal static partial class TodoApp
                 if (state != null)
                 {
                     Meta(state)["status"] = "操作失败：" + ex.Message;
-                    try { Commit(state); Refresh(); } catch { }
+                    try { Commit(state); if (!action.Equals("Startup", StringComparison.OrdinalIgnoreCase)) Refresh(); } catch { }
                 }
                 return 1;
             }

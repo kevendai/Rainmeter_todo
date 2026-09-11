@@ -43,7 +43,7 @@ internal static partial class CalendarApp
             else if(action=="Settings"){if(held){mutex.ReleaseMutex();held=false;}Settings(state,cache,ref refreshTodo);Render(cache,state);refresh=true;}
             if(refreshTodo){string todoExe=Path.Combine(TodoDir,"TodoHost.exe");if(File.Exists(todoExe)){using(System.Diagnostics.Process p=System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(todoExe,"Render"){UseShellExecute=false,CreateNoWindow=true})){if(p!=null&&!p.WaitForExit(10000))try{p.Kill();}catch{}}}}
             if(refresh){MarkGuard();RuntimeUtil.Refresh("Calendar");if(refreshTodo)RuntimeUtil.Refresh("Todo");}else if(refreshTodo)RuntimeUtil.Refresh("Todo");return 0;
-        }catch(Exception ex){if(cache!=null){cache["status"]="操作失败："+ex.Message;try{Save(CachePath,cache);Render(cache,state);RuntimeUtil.Refresh("Calendar");}catch{}}return 1;}finally{if(held)mutex.ReleaseMutex();}}
+        }catch(Exception ex){if(cache!=null){cache["status"]="操作失败："+ex.Message;try{Save(CachePath,cache);Render(cache,state);if(!action.Equals("Startup",StringComparison.OrdinalIgnoreCase))RuntimeUtil.Refresh("Calendar");}catch{}}return 1;}finally{if(held)mutex.ReleaseMutex();}}
     }
 
 }

@@ -1,93 +1,72 @@
-param([switch]$Activate)
+param([switch]$Activate, [string]$RainmeterRoot = '')
 $ErrorActionPreference = 'Stop'
 $projectRoot = Split-Path $PSScriptRoot -Parent
 $source = Join-Path $projectRoot 'skins\Calendar'
 $version = [IO.File]::ReadAllText((Join-Path $projectRoot 'VERSION'), [Text.UTF8Encoding]::new($false)).Trim()
-if (-not [string]::IsNullOrWhiteSpace($env:RAINMETER_DEPLOY_VERSION_OVERRIDE)) {
-    $version = $env:RAINMETER_DEPLOY_VERSION_OVERRIDE.Trim()
-}
-$rainmeterRoot = 'D:\Program Files (x86)\Rainmeter'
-$rainmeterIni = Join-Path $env:APPDATA 'Rainmeter\Rainmeter.ini'
-$skinRoot = Join-Path $rainmeterRoot 'Skins'
-if (Test-Path -LiteralPath $rainmeterIni) {
-    $skinPathMatch = [regex]::Match([IO.File]::ReadAllText($rainmeterIni), '(?m)^SkinPath=(.+)$')
-    if ($skinPathMatch.Success) { $skinRoot = $skinPathMatch.Groups[1].Value.Trim() }
-}
-$target = Join-Path $skinRoot 'Calendar'
-$exe = Join-Path $rainmeterRoot 'Rainmeter.exe'
+if (-not [string]::IsNullOrWhiteSpace($env:RAINMETER_DEPLOY_VERSION_OVERRIDE)) { $version = $env:RAINMETER_DEPLOY_VERSION_OVERRIDE.Trim() }
+. (Join-Path $PSScriptRoot 'Rainmeter-Paths.ps1')
+$environment = Resolve-RainmeterEnvironment -RainmeterRoot $RainmeterRoot
+$target = Join-Path $environment.SkinsRoot 'Calendar'
+$exe = $environment.RainmeterExe
 
-if (-not (Test-Path -LiteralPath $exe)) { throw "Rainmeter not found: $exe" }
-New-Item -ItemType Directory -Path $target -Force | Out-Null
+if (-not (Test-Path -LiteralPath $target)) {
+    $recovery = Get-ChildItem -LiteralPath $environment.SkinsRoot -Directory -Filter '.rainmeter-calendar-deploy-*' -ErrorAction SilentlyContinue |
+        Sort-Object LastWriteTimeUtc -Descending | ForEach-Object { Join-Path $_.FullName 'backup\Calendar' } | Where-Object { Test-Path -LiteralPath $_ } | Select-Object -First 1
+    if ($recovery) { Move-Item -LiteralPath $recovery -Destination $target; Write-Warning "Recovered interrupted Calendar deployment from $recovery" }
+}
 
-$preserved = @{}
-foreach ($name in @('calendar-cache.json','calendar-state.json')) {
-    $path = Join-Path $target ('@Resources\' + $name)
-    if (Test-Path -LiteralPath $path) { $preserved[$name] = [IO.File]::ReadAllBytes($path) }
-}
-Copy-Item -Path (Join-Path $source '*') -Destination $target -Recurse -Force
-foreach ($name in $preserved.Keys) {
-    [IO.File]::WriteAllBytes((Join-Path $target ('@Resources\' + $name)), $preserved[$name])
-}
-Remove-Item -LiteralPath (Join-Path $target '@Resources\UiScale.inc') -Force -ErrorAction SilentlyContinue
-& (Join-Path $PSScriptRoot 'New-RefreshArrow.ps1') -OutputDirectory (Join-Path $target '@Resources\RefreshFrames')
-
-# Rainmeter reads Chinese skin literals reliably from UTF-16 LE with BOM.
-$liveIni = Join-Path $target 'Calendar.ini'
-$iniText = [IO.File]::ReadAllText($liveIni, [Text.UTF8Encoding]::new($false))
-$iniText = $iniText -replace '(?m)^Version=.*$', "Version=$version"
-[IO.File]::WriteAllText($liveIni, $iniText, [Text.UnicodeEncoding]::new($false, $true))
-[IO.File]::WriteAllText((Join-Path $target '@Resources\app-version.txt'), $version, [Text.UTF8Encoding]::new($false))
-
-$backendRoot = Join-Path $projectRoot 'backend'
-$commonSource = Join-Path $backendRoot 'Common.cs'
-$hostSources = @(Get-ChildItem -LiteralPath $backendRoot -Filter 'Calendar*.cs' | Sort-Object Name | ForEach-Object { $_.FullName })
-$hostExe = Join-Path $target '@Resources\CalendarHost.exe'
-$hostBuildExe = Join-Path $target '@Resources\CalendarHost.build.exe'
-foreach ($hostProcess in Get-Process -Name CalendarHost -ErrorAction SilentlyContinue) {
-    if ($hostProcess.Path -eq $hostExe) {
-        try { $hostProcess.CloseMainWindow() | Out-Null } catch {}
-    }
-}
-Start-Sleep -Milliseconds 500
-foreach ($hostProcess in Get-Process -Name CalendarHost -ErrorAction SilentlyContinue) {
-    if ($hostProcess.Path -eq $hostExe) {
-        try {
-            if (-not $hostProcess.HasExited) { $hostProcess.Kill() }
-            $hostProcess.WaitForExit(3000)
-        } catch {}
-    }
-}
-$csc = Join-Path ([Environment]::GetFolderPath('Windows')) 'Microsoft.NET\Framework64\v4.0.30319\csc.exe'
-if (-not (Test-Path -LiteralPath $csc)) { $csc = Join-Path ([Environment]::GetFolderPath('Windows')) 'Microsoft.NET\Framework\v4.0.30319\csc.exe' }
-if (-not (Test-Path -LiteralPath $csc)) { throw 'C# compiler not found' }
-& $csc /nologo /target:winexe /optimize+ /r:System.Web.Extensions.dll /r:System.Windows.Forms.dll /r:System.Drawing.dll /r:System.Security.dll "/out:$hostBuildExe" $commonSource $hostSources
-if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $hostBuildExe)) { throw 'Failed to build CalendarHost.exe' }
+$transaction = Join-Path $environment.SkinsRoot ('.rainmeter-calendar-deploy-' + [guid]::NewGuid().ToString('N'))
+$stage = Join-Path $transaction 'stage\Calendar'
+$backup = Join-Path $transaction 'backup\Calendar'
+$swapped = $false
+$success = $false
+$preservedHashes = @{}
 try {
-    $moved = $false
-    foreach ($attempt in 1..20) {
-        try { Move-Item -LiteralPath $hostBuildExe -Destination $hostExe -Force; $moved = $true; break }
-        catch { Start-Sleep -Milliseconds 200 }
+    New-Item -ItemType Directory -Path $stage -Force | Out-Null
+    Copy-Item -Path (Join-Path $source '*') -Destination $stage -Recurse -Force
+    foreach ($name in @('calendar-cache.json','calendar-state.json')) {
+        $current = Join-Path $target ('@Resources\' + $name)
+        if (Test-Path -LiteralPath $current) { $preservedHashes[$name] = (Get-FileHash -LiteralPath $current -Algorithm SHA256).Hash; $destination = Join-Path $stage ('@Resources\' + $name); New-Item -ItemType Directory -Path (Split-Path $destination -Parent) -Force | Out-Null; Copy-Item -LiteralPath $current -Destination $destination -Force }
     }
-    if (-not $moved) { throw 'CalendarHost.exe remained in use during deployment' }
-} catch {
+    Remove-Item -LiteralPath (Join-Path $stage '@Resources\UiScale.inc') -Force -ErrorAction SilentlyContinue
+    & (Join-Path $PSScriptRoot 'New-RefreshArrow.ps1') -OutputDirectory (Join-Path $stage '@Resources\RefreshFrames')
+    $liveIni = Join-Path $stage 'Calendar.ini'
+    $iniText = [IO.File]::ReadAllText($liveIni, [Text.UTF8Encoding]::new($false))
+    $iniText = $iniText -replace '(?m)^Version=.*$', "Version=$version"
+    [IO.File]::WriteAllText($liveIni, $iniText, [Text.UnicodeEncoding]::new($false, $true))
+    [IO.File]::WriteAllText((Join-Path $stage '@Resources\app-version.txt'), $version, [Text.UTF8Encoding]::new($false))
+    & (Join-Path $PSScriptRoot 'Build-Backend.ps1') -Backend Calendar -OutputDirectory (Join-Path $stage '@Resources') | Out-Null
+    foreach ($name in $preservedHashes.Keys) { $stagedData = Join-Path $stage ('@Resources\' + $name); if (-not (Test-Path -LiteralPath $stagedData) -or (Get-FileHash -LiteralPath $stagedData -Algorithm SHA256).Hash -ne $preservedHashes[$name]) { throw "Staged user data verification failed: $name" } }
+    Remove-Item -LiteralPath (Join-Path $stage '@Resources\Calendar.ps1') -Force -ErrorAction SilentlyContinue
+    Remove-Item -LiteralPath (Join-Path $stage '@Resources\CalendarHost.cs') -Force -ErrorAction SilentlyContinue
+
+    $oldHost = Join-Path $target '@Resources\CalendarHost.exe'
+    foreach ($process in Get-Process -Name CalendarHost -ErrorAction SilentlyContinue | Where-Object { $_.Path -eq $oldHost }) { try { $process.CloseMainWindow() | Out-Null } catch {} }
+    Start-Sleep -Milliseconds 500
+    foreach ($process in Get-Process -Name CalendarHost -ErrorAction SilentlyContinue | Where-Object { $_.Path -eq $oldHost }) { try { if (-not $process.HasExited) { $process.Kill() }; $process.WaitForExit(3000) } catch {} }
+    if (Test-Path -LiteralPath $target) { New-Item -ItemType Directory -Path (Split-Path $backup -Parent) -Force | Out-Null; Move-Item -LiteralPath $target -Destination $backup }
+    Move-Item -LiteralPath $stage -Destination $target
+    $swapped = $true
+    foreach ($name in $preservedHashes.Keys) { $liveData = Join-Path $target ('@Resources\' + $name); if (-not (Test-Path -LiteralPath $liveData) -or (Get-FileHash -LiteralPath $liveData -Algorithm SHA256).Hash -ne $preservedHashes[$name]) { throw "Installed user data verification failed: $name" } }
+    $hostExe = Join-Path $target '@Resources\CalendarHost.exe'
+    $render = Start-Process -FilePath $hostExe -ArgumentList 'Render' -WindowStyle Hidden -PassThru
+    if (-not $render.WaitForExit(20000)) { try { $render.Kill() } catch {}; throw 'CalendarHost Render timed out' }
+    if ($render.ExitCode -ne 0) { throw 'CalendarHost Render failed' }
+    & $exe '!RefreshApp'
+    if ($Activate) { Start-Sleep -Milliseconds 800; & $exe '!ActivateConfig' 'Calendar' 'Calendar.ini'; Start-Sleep -Milliseconds 800; Add-Type -AssemblyName PresentationFramework; $x = [Math]::Max(0, [int][System.Windows.SystemParameters]::WorkArea.Width - 1010); & $exe '!SetWindowPosition' ([string]$x) '0' '0' '0' 'Calendar' }
+    $success = $true
+    Write-Host "Deployed Calendar skin transactionally to $target"
+}
+catch {
+    if ($swapped) {
+        $newHost = Join-Path $target '@Resources\CalendarHost.exe'
+        foreach ($process in Get-Process -Name CalendarHost -ErrorAction SilentlyContinue | Where-Object { $_.Path -eq $newHost }) { try { $process.Kill(); $process.WaitForExit(3000) } catch {} }
+        if (Test-Path -LiteralPath $target) { Remove-Item -LiteralPath $target -Recurse -Force }
+        if (Test-Path -LiteralPath $backup) { Move-Item -LiteralPath $backup -Destination $target }
+        try { & $exe '!RefreshApp' } catch {}
+    }
     throw
 }
-Remove-Item -LiteralPath (Join-Path $target '@Resources\Calendar.ps1') -Force -ErrorAction SilentlyContinue
-Remove-Item -LiteralPath (Join-Path $target '@Resources\CalendarHost.cs') -Force -ErrorAction SilentlyContinue
-
-$renderProcess = Start-Process -FilePath $hostExe -ArgumentList 'Render' -WindowStyle Hidden -PassThru
-if (-not $renderProcess.WaitForExit(20000)) {
-    try { $renderProcess.Kill() } catch {}
-    throw 'CalendarHost Render timed out'
+finally {
+    if ($success -or -not $swapped) { Remove-Item -LiteralPath $transaction -Recurse -Force -ErrorAction SilentlyContinue }
 }
-if ($renderProcess.ExitCode -ne 0) { throw 'CalendarHost Render failed' }
-& $exe '!RefreshApp'
-if ($Activate) {
-    Start-Sleep -Milliseconds 800
-    & $exe '!ActivateConfig' 'Calendar' 'Calendar.ini'
-    Start-Sleep -Milliseconds 800
-    Add-Type -AssemblyName PresentationFramework
-    $x = [Math]::Max(0, [int][System.Windows.SystemParameters]::WorkArea.Width - 1010)
-    & $exe '!SetWindowPosition' ([string]$x) '0' '0' '0' 'Calendar'
-}
-Write-Host "Deployed Calendar skin to $target"

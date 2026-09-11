@@ -17,6 +17,8 @@ internal static partial class TodoApp
 {
     private const string PaperRssServerMutexName = @"Global\RainmeterTodoPaperRssServer";
     private const int PaperRssPort = 8891;
+    private const string PaperRssAddress = "127.0.0.1";
+    private static string PaperRssBaseUrl { get { return "http://" + PaperRssAddress + ":" + PaperRssPort.ToString(CultureInfo.InvariantCulture); } }
     private const string PaperRssNamespace = "https://example.com/rss/paper/1.0";
     private const string DublinCoreNamespace = "http://purl.org/dc/elements/1.1/";
     private static readonly TimeSpan PaperRssSyncStart = TimeSpan.FromHours(8);
@@ -68,7 +70,7 @@ internal static partial class TodoApp
             Thread.Sleep(100);
             if (IsPaperRssHealthy()) return;
         }
-        string detail = "端口 8891 可能已被其他程序占用";
+        string detail = "端口 " + PaperRssPort.ToString(CultureInfo.InvariantCulture) + " 可能已被其他程序占用";
         try
         {
             if (File.Exists(PaperRssStatusPath))
@@ -114,20 +116,26 @@ internal static partial class TodoApp
                 try { listener.Start(16); }
                 catch (SocketException ex)
                 {
-                    WritePaperRssStatus("failed", "无法绑定 127.0.0.1:8891；端口可能已被占用（" + ex.SocketErrorCode + "）");
+                    WritePaperRssStatus("failed", "无法绑定 " + PaperRssAddress + ":" + PaperRssPort.ToString(CultureInfo.InvariantCulture) + "；端口可能已被占用（" + ex.SocketErrorCode + "）");
                     return 3;
                 }
                 WritePaperRssStatus("running", "");
                 QueuePaperRssSync();
                 DateTime nextSync = DateTime.Now.Add(PaperRssSyncInterval);
                 DateTime nextSettingsCheck = DateTime.MinValue;
+                DateTime settingsWriteTime = File.Exists(PaperSyncSecret) ? File.GetLastWriteTimeUtc(PaperSyncSecret) : DateTime.MinValue;
                 while (true)
                 {
                     DateTime now = DateTime.Now;
                     if (now >= nextSettingsCheck)
                     {
-                        settings = LoadPaperSettings();
-                        if (!settings.Enabled || !settings.RssEnabled) break;
+                        DateTime currentWriteTime = File.Exists(PaperSyncSecret) ? File.GetLastWriteTimeUtc(PaperSyncSecret) : DateTime.MinValue;
+                        if (currentWriteTime != settingsWriteTime)
+                        {
+                            settings = LoadPaperSettings();
+                            settingsWriteTime = currentWriteTime;
+                            if (!settings.Enabled || !settings.RssEnabled) break;
+                        }
                         nextSettingsCheck = now.AddSeconds(1);
                     }
                     if (now >= nextSync)
@@ -371,7 +379,7 @@ internal static partial class TodoApp
                 writer.WriteAttributeString("xmlns", "dc", null, DublinCoreNamespace);
                 writer.WriteStartElement("channel");
                 writer.WriteElementString("title", "今日论文推荐");
-                writer.WriteElementString("link", "http://127.0.0.1:8891/paper/rss");
+                writer.WriteElementString("link", PaperRssBaseUrl + "/paper/rss");
                 writer.WriteElementString("description", "长昼待办 · 今天的 arxiv 论文推荐");
                 if (items.Count > 0) writer.WriteElementString("pubDate", FormatRssDate(items.Max(item => item.Published)));
                 foreach (PaperRssItem item in items)

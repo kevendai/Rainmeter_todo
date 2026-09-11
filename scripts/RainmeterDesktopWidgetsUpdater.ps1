@@ -107,11 +107,12 @@ function Install-Package {
         if ([string]::IsNullOrWhiteSpace($bootstrapRepository) -or [string]::IsNullOrWhiteSpace($bootstrapTag) -or [string]::IsNullOrWhiteSpace($bootstrapAsset)) {
             throw 'Unified bootstrap metadata is incomplete.'
         }
-        $bootstrapUrl = "https://raw.githubusercontent.com/$bootstrapRepository/$([Uri]::EscapeDataString($bootstrapTag))/releases/$([Uri]::EscapeDataString($bootstrapTag))/$([Uri]::EscapeDataString($bootstrapAsset))"
+        $bootstrapReleaseAsset = Get-VerifiedReleaseAsset -Repo $bootstrapRepository -Tag $bootstrapTag -AssetName $bootstrapAsset
         $bootstrapDownload = Join-Path ([IO.Path]::GetTempPath()) $bootstrapAsset
         $bootstrapExtract = Join-Path ([IO.Path]::GetTempPath()) ('RainmeterUnifiedUpdate-' + [guid]::NewGuid().ToString('N'))
         try {
-            Invoke-WebRequestCompat -Uri $bootstrapUrl -OutFile $bootstrapDownload -Headers @{ 'User-Agent' = $UserAgent } -TimeoutSec 120
+            Invoke-WebRequestCompat -Uri $bootstrapReleaseAsset.Url -OutFile $bootstrapDownload -Headers @{ 'User-Agent' = $UserAgent } -TimeoutSec 120
+            Assert-FileSha256 -Path $bootstrapDownload -Expected $bootstrapReleaseAsset.Sha256
             New-Item -ItemType Directory -Path $bootstrapExtract -Force | Out-Null
             Unblock-File -LiteralPath $bootstrapDownload -ErrorAction SilentlyContinue
             Expand-Archive -LiteralPath $bootstrapDownload -DestinationPath $bootstrapExtract -Force
@@ -156,53 +157,104 @@ function Install-Package {
     }
 
     foreach ($skin in @('Todo', 'Calendar')) {
-        $source = Join-Path $sourceSkins $skin
         $target = Join-Path $roots.SkinsRoot $skin
-        New-Item -ItemType Directory -Path $target -Force | Out-Null
-
-        $preserved = @{}
-        foreach ($name in @('tasks.json','ui-scale.txt','calendar-cache.json','calendar-state.json','caldav.secret','translation.secret','paper-sync.secret')) {
-            $path = Join-Path $target ('@Resources\' + $name)
-            if (Test-Path -LiteralPath $path) { $preserved[$name] = [IO.File]::ReadAllBytes($path) }
+        if (-not (Test-Path -LiteralPath $target)) {
+            $recovery = Get-ChildItem -LiteralPath $roots.SkinsRoot -Directory -Filter '.rainmeter-update-*' -ErrorAction SilentlyContinue |
+                Sort-Object LastWriteTimeUtc -Descending | ForEach-Object { Join-Path $_.FullName ("backup\$skin") } | Where-Object { Test-Path -LiteralPath $_ } | Select-Object -First 1
+            if ($recovery) { Move-Item -LiteralPath $recovery -Destination $target; Write-Warning "Recovered interrupted $skin update from $recovery" }
         }
-
-        Copy-Item -Path (Join-Path $source '*') -Destination $target -Recurse -Force
-        Get-ChildItem -LiteralPath $target -Recurse -File | Unblock-File -ErrorAction SilentlyContinue
-
-        foreach ($name in $preserved.Keys) {
-            $destination = Join-Path $target ('@Resources\' + $name)
-            New-Item -ItemType Directory -Path (Split-Path $destination -Parent) -Force | Out-Null
-            [IO.File]::WriteAllBytes($destination, $preserved[$name])
-        }
-        Remove-Item -LiteralPath (Join-Path $target '@Resources\UiScale.inc') -Force -ErrorAction SilentlyContinue
     }
 
-    Install-UpdaterFiles $SourcePackageRoot $roots.SkinsRoot
-
-    if (Test-Path -LiteralPath $rainmeterExe) {
-        $running = @(Get-Process -Name Rainmeter -ErrorAction SilentlyContinue | Where-Object { $_.Path -eq $rainmeterExe })
-        if ($running.Count -gt 0) {
-            & $rainmeterExe '!Quit'
-            Start-Sleep -Milliseconds 1200
-            $remaining = @(Get-Process -Name Rainmeter -ErrorAction SilentlyContinue | Where-Object { $_.Path -eq $rainmeterExe })
-            foreach ($process in $remaining) {
-                try { $process.Kill(); $process.WaitForExit(3000) } catch {}
+    $transaction = Join-Path $roots.SkinsRoot ('.rainmeter-update-' + [guid]::NewGuid().ToString('N'))
+    $swapped = New-Object System.Collections.Generic.List[string]
+    $installSucceeded = $false
+    $preservedHashesBySkin = @{}
+    try {
+        foreach ($skin in @('Todo', 'Calendar')) {
+            $source = Join-Path $sourceSkins $skin
+            $target = Join-Path $roots.SkinsRoot $skin
+            $stage = Join-Path $transaction ("stage\$skin")
+            New-Item -ItemType Directory -Path $stage -Force | Out-Null
+            Copy-Item -Path (Join-Path $source '*') -Destination $stage -Recurse -Force
+            $skinHashes = @{}
+            foreach ($name in @('tasks.json','ui-scale.txt','calendar-cache.json','calendar-state.json','caldav.secret','translation.secret','paper-sync.secret')) {
+                $current = Join-Path $target ('@Resources\' + $name)
+                if (Test-Path -LiteralPath $current) { $skinHashes[$name] = (Get-FileHash -LiteralPath $current -Algorithm SHA256).Hash; $destination = Join-Path $stage ('@Resources\' + $name); New-Item -ItemType Directory -Path (Split-Path $destination -Parent) -Force | Out-Null; Copy-Item -LiteralPath $current -Destination $destination -Force }
             }
+            $preservedHashesBySkin[$skin] = $skinHashes
+            Remove-Item -LiteralPath (Join-Path $stage '@Resources\UiScale.inc') -Force -ErrorAction SilentlyContinue
+            Get-ChildItem -LiteralPath $stage -Recurse -File | Unblock-File -ErrorAction SilentlyContinue
         }
-        Start-Process -FilePath $rainmeterExe | Out-Null
-        Start-Sleep -Milliseconds 1200
-        & $rainmeterExe '!RefreshApp'
-        if ($ShouldActivate) {
-            Start-Sleep -Milliseconds 800
-            & $rainmeterExe '!ActivateConfig' 'Todo' 'Todo.ini'
-            & $rainmeterExe '!ActivateConfig' 'Calendar' 'Calendar.ini'
-            Start-Sleep -Milliseconds 800
-            & $rainmeterExe '!SetWindowPosition' '100%' '0%' '100%' '0%' 'Todo'
+        $sourceUpdater = Join-Path $SourcePackageRoot 'Updater'
+        if (Test-Path -LiteralPath $sourceUpdater) {
+            $stagedUpdater = Join-Path $transaction 'stage\Todo\@Resources\Updater'
+            New-Item -ItemType Directory -Path $stagedUpdater -Force | Out-Null
+            Copy-Item -Path (Join-Path $sourceUpdater '*') -Destination $stagedUpdater -Recurse -Force
         }
-    } else {
-        Write-Warning 'Rainmeter.exe was not found. Skins were copied, but Rainmeter was not restarted automatically.'
+        foreach ($skin in @('Todo', 'Calendar')) { foreach ($name in $preservedHashesBySkin[$skin].Keys) { $stagedData = Join-Path $transaction ("stage\$skin\@Resources\$name"); if (-not (Test-Path -LiteralPath $stagedData) -or (Get-FileHash -LiteralPath $stagedData -Algorithm SHA256).Hash -ne $preservedHashesBySkin[$skin][$name]) { throw "Staged user data verification failed: $skin/$name" } } }
+        $rainmeterWasRunning = @(Get-Process -Name Rainmeter -ErrorAction SilentlyContinue | Where-Object { $_.Path -eq $rainmeterExe }).Count -gt 0
+        if ($rainmeterWasRunning) { & $rainmeterExe '!Quit'; $deadline = (Get-Date).AddSeconds(10); do { Start-Sleep -Milliseconds 250; $remainingRainmeter = @(Get-Process -Name Rainmeter -ErrorAction SilentlyContinue | Where-Object { $_.Path -eq $rainmeterExe }) } while ($remainingRainmeter.Count -gt 0 -and (Get-Date) -lt $deadline); if ($remainingRainmeter.Count -gt 0) { throw 'Rainmeter did not exit within 10 seconds.' } }
+        foreach ($skin in @('Todo', 'Calendar')) {
+            $target = Join-Path $roots.SkinsRoot $skin
+            $stage = Join-Path $transaction ("stage\$skin")
+            $backup = Join-Path $transaction ("backup\$skin")
+            if (Test-Path -LiteralPath $target) { New-Item -ItemType Directory -Path (Split-Path $backup -Parent) -Force | Out-Null; Move-Item -LiteralPath $target -Destination $backup }
+            Move-Item -LiteralPath $stage -Destination $target
+            $swapped.Add($skin)
+            foreach ($name in $preservedHashesBySkin[$skin].Keys) { $liveData = Join-Path $target ("@Resources\$name"); if (-not (Test-Path -LiteralPath $liveData) -or (Get-FileHash -LiteralPath $liveData -Algorithm SHA256).Hash -ne $preservedHashesBySkin[$skin][$name]) { throw "Installed user data verification failed: $skin/$name" } }
+        }
     }
-    Write-Host "Installed skins to $($roots.SkinsRoot)"
+    catch {
+        [array]$rollbackSkins = @($swapped)
+        [array]::Reverse($rollbackSkins)
+        foreach ($skin in $rollbackSkins) {
+            $target = Join-Path $roots.SkinsRoot $skin
+            $backup = Join-Path $transaction ("backup\$skin")
+            if (Test-Path -LiteralPath $target) { Remove-Item -LiteralPath $target -Recurse -Force }
+            if (Test-Path -LiteralPath $backup) { Move-Item -LiteralPath $backup -Destination $target }
+        }
+        throw
+    }
+
+    try {
+        if (Test-Path -LiteralPath $rainmeterExe) {
+            $running = @(Get-Process -Name Rainmeter -ErrorAction SilentlyContinue | Where-Object { $_.Path -eq $rainmeterExe })
+            if ($running.Count -gt 0) {
+                & $rainmeterExe '!Quit'
+                Start-Sleep -Milliseconds 1200
+                $remaining = @(Get-Process -Name Rainmeter -ErrorAction SilentlyContinue | Where-Object { $_.Path -eq $rainmeterExe })
+                foreach ($process in $remaining) {
+                    try { $process.Kill(); $process.WaitForExit(3000) } catch {}
+                }
+            }
+            Start-Process -FilePath $rainmeterExe | Out-Null
+            Start-Sleep -Milliseconds 1200
+            & $rainmeterExe '!RefreshApp'
+            if ($ShouldActivate) {
+                Start-Sleep -Milliseconds 800
+                & $rainmeterExe '!ActivateConfig' 'Todo' 'Todo.ini'
+                & $rainmeterExe '!ActivateConfig' 'Calendar' 'Calendar.ini'
+                Start-Sleep -Milliseconds 800
+                & $rainmeterExe '!SetWindowPosition' '100%' '0%' '100%' '0%' 'Todo'
+            }
+        } else {
+            Write-Warning 'Rainmeter.exe was not found. Skins were copied, but Rainmeter was not restarted automatically.'
+        }
+        Remove-Item -LiteralPath $transaction -Recurse -Force -ErrorAction SilentlyContinue
+        Write-Host "Installed skins transactionally to $($roots.SkinsRoot)"
+    }
+    catch {
+        [array]$rollbackSkins = @($swapped)
+        [array]::Reverse($rollbackSkins)
+        foreach ($skin in $rollbackSkins) {
+            $target = Join-Path $roots.SkinsRoot $skin
+            $backup = Join-Path $transaction ("backup\$skin")
+            if (Test-Path -LiteralPath $target) { Remove-Item -LiteralPath $target -Recurse -Force }
+            if (Test-Path -LiteralPath $backup) { Move-Item -LiteralPath $backup -Destination $target }
+        }
+        if (Test-Path -LiteralPath $rainmeterExe) { try { Start-Process -FilePath $rainmeterExe | Out-Null } catch {} }
+        throw
+    }
 }
 
 function Get-LatestTag {
@@ -216,6 +268,28 @@ function Get-LatestTag {
     }
     if ($best -eq '') { throw 'No version tag was found on GitHub.' }
     return $best
+}
+
+function Get-VerifiedReleaseAsset {
+    param([string]$Repo, [string]$Tag, [string]$AssetName)
+    $headers = @{ 'User-Agent' = $UserAgent; 'Accept' = 'application/vnd.github+json' }
+    $release = Invoke-RestMethod -Uri "https://api.github.com/repos/$Repo/releases/tags/$([Uri]::EscapeDataString($Tag))" -Headers $headers -TimeoutSec 20
+    $asset = @($release.assets | Where-Object { [string]$_.name -eq $AssetName } | Select-Object -First 1)
+    $checksumName = $AssetName + '.sha256'
+    $checksumAsset = @($release.assets | Where-Object { [string]$_.name -eq $checksumName } | Select-Object -First 1)
+    if ($asset.Count -eq 0) { throw "GitHub Release asset not found: $AssetName" }
+    if ($checksumAsset.Count -eq 0) { throw "GitHub Release checksum not found: $checksumName" }
+    $checksumResponse = Invoke-WebRequestCompat -Uri ([string]$checksumAsset[0].browser_download_url) -Headers @{ 'User-Agent' = $UserAgent } -TimeoutSec 20
+    $checksumText = [string]$checksumResponse.Content
+    $match = [regex]::Match($checksumText.Trim(), '^(?i)([0-9a-f]{64})(?:\s+\*?.+)?$')
+    if (-not $match.Success) { throw "Invalid SHA256 file: $checksumName" }
+    return [pscustomobject]@{ Url = [string]$asset[0].browser_download_url; Sha256 = $match.Groups[1].Value.ToUpperInvariant() }
+}
+
+function Assert-FileSha256 {
+    param([string]$Path, [string]$Expected)
+    $actual = (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash.ToUpperInvariant()
+    if ($actual -ne $Expected.ToUpperInvariant()) { throw "SHA256 verification failed for $(Split-Path -Leaf $Path)." }
 }
 
 function Invoke-WebRequestCompat {
@@ -295,15 +369,15 @@ function Check-And-Install {
     # older TodoHost builds. Every installed edition now downloads the same
     # canonical package.
     $assetName = "rainmeter-desktop-widgets-$latestVersion.zip"
-    $assetUrl = "https://raw.githubusercontent.com/$Repository/$([Uri]::EscapeDataString($latestTag))/releases/$([Uri]::EscapeDataString($latestTag))/$([Uri]::EscapeDataString($assetName))"
-    Invoke-WebRequestCompat -Uri $assetUrl -Method Head -Headers @{ 'User-Agent' = $UserAgent } -TimeoutSec 20 | Out-Null
+    $releaseAsset = Get-VerifiedReleaseAsset -Repo $Repository -Tag $latestTag -AssetName $assetName
 
     $downloads = Join-Path ([Environment]::GetFolderPath([Environment+SpecialFolder]::UserProfile)) 'Downloads'
     New-Item -ItemType Directory -Path $downloads -Force | Out-Null
     $zipPath = Join-Path $downloads $assetName
     $extractRoot = Join-Path $env:TEMP ('RainmeterDesktopWidgetsUpdate-' + [guid]::NewGuid().ToString('N'))
     try {
-        Invoke-WebRequestCompat -Uri $assetUrl -OutFile $zipPath -Headers @{ 'User-Agent' = $UserAgent } -TimeoutSec 120
+        Invoke-WebRequestCompat -Uri $releaseAsset.Url -OutFile $zipPath -Headers @{ 'User-Agent' = $UserAgent } -TimeoutSec 120
+        Assert-FileSha256 -Path $zipPath -Expected $releaseAsset.Sha256
         New-Item -ItemType Directory -Path $extractRoot -Force | Out-Null
         Unblock-File -LiteralPath $zipPath -ErrorAction SilentlyContinue
         Expand-Archive -LiteralPath $zipPath -DestinationPath $extractRoot -Force

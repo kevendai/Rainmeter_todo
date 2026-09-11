@@ -86,7 +86,7 @@ internal static partial class TodoApp
         ValidateBackupPayload(payload);
         BackupImportChoice choice = ShowBackupImportPreview(payload);
         if (choice == null || (!choice.Configuration && !choice.Data)) return "";
-        ApplyBackupPayload(payload, choice.Configuration, choice.Data);
+        WithGlobalStateLocks(delegate { ApplyBackupPayload(payload, choice.Configuration, choice.Data); });
         return "备份导入成功。\r\n\r\n敏感配置已使用当前 Windows 用户的 DPAPI 重新加密。";
     }
 

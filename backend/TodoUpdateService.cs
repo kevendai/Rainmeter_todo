@@ -14,6 +14,7 @@ using RainmeterBackend;
 
 internal static partial class TodoApp
 {
+    private static string translationCredentialsLoadError = "";
     private static void StartExternalUpdater()
     {
         if (!File.Exists(UpdaterScript)) throw new Exception("未找到独立升级器：" + UpdaterScript);
@@ -122,9 +123,10 @@ internal static partial class TodoApp
     }
     private static Dictionary<string, object> ReadTranslationCredentials()
     {
+        translationCredentialsLoadError = "";
         if (!File.Exists(TranslationSecret)) return new Dictionary<string, object>();
         try { return JsonUtil.ReadDpapiJson(TranslationSecret); }
-        catch { return new Dictionary<string, object>(); }
+        catch (Exception ex) { translationCredentialsLoadError = "翻译凭据无法解密或已损坏：" + SafeStatusMessage(ex.Message); return new Dictionary<string, object>(); }
     }
 
     private static void SaveTranslationCredentials(string secretId, string secretKey)

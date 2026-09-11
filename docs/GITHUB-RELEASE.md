@@ -1,9 +1,6 @@
 # GitHub Release Upload Runbook
 
-This project has two release surfaces that must stay aligned:
-
-- The repository commit/tag, used by the newer updater to read `releases/vX.Y.Z/*.zip` from the tagged tree.
-- The GitHub Release assets, used by older updaters such as `1.0.2` through `GET /repos/kevendai/Rainmeter_todo/releases/tags/vX.Y.Z`.
+Release binaries live only in GitHub Release assets. The repository contains source, build scripts, and tags; the updater refuses a package unless the matching `.sha256` asset is present and valid.
 
 ## Build
 
@@ -22,16 +19,9 @@ powershell -ExecutionPolicy Bypass -File .\scripts\Test-Backends.ps1
 powershell -ExecutionPolicy Bypass -File .\scripts\Build-ReleasePackages.ps1
 ```
 
-Copy the generated release files into the versioned release folder:
+The build emits a `.sha256` sidecar for every ZIP and RMSKIN. Keep these artifacts in the ignored `release-build` directory until they are uploaded.
 
-```powershell
-New-Item -ItemType Directory -Path .\releases\vX.Y.Z -Force | Out-Null
-Copy-Item .\release-build\rainmeter-desktop-widgets-X.Y.Z.zip .\releases\vX.Y.Z\ -Force
-Copy-Item .\release-build\rainmeter-desktop-widgets-X.Y.Z.rmskin .\releases\vX.Y.Z\ -Force
-# Small updater bootstraps for old full/lite clients:
-Copy-Item .\release-build\rainmeter-desktop-widgets-full-X.Y.Z.zip .\releases\vX.Y.Z\ -Force
-Copy-Item .\release-build\rainmeter-desktop-widgets-lite-X.Y.Z.zip .\releases\vX.Y.Z\ -Force
-```
+Version 1.5.4 is the one-time migration from repository-hosted packages to verified GitHub Release assets. Keep only `releases/v1.5.4/rainmeter-desktop-widgets-1.5.4.zip` in Git: it is a tiny transition package that upgrades pre-1.5.4 clients before delegating to the checksum-verified Release asset. Do not retain historical full installers or repeat this exception for later versions.
 
 Before committing, inspect the unified zip manifest, app version, runtime feature flag, user-data exclusions, and legacy bootstrap packages:
 
@@ -114,7 +104,7 @@ Select-String -Path .\release-build\rainmeter-desktop-widgets-X.Y.Z\Updater\Rain
 ```powershell
 git status --short
 git tag --list vX.Y.Z
-git add VERSION docs\RELEASE-NOTES.md releases\vX.Y.Z
+git add VERSION docs\RELEASE-NOTES.md
 # Add the actual source/script/docs files changed for this release, for example:
 # git add backend\CalendarForms.cs scripts\Deploy-Calendar.ps1 docs\GITHUB-RELEASE.md
 git diff --cached --name-only
@@ -131,7 +121,7 @@ In the Codex desktop sandbox, writing `.git/index.lock` may require an escalated
 
 ## GitHub Release Assets
 
-Older installed versions may require an actual GitHub Release with zip assets. If `gh` is available:
+All installers and updaters require GitHub Release assets. If `gh` is available:
 
 ```powershell
 $version = 'X.Y.Z'
@@ -146,10 +136,14 @@ for ($i = $start + 1; $i -lt $lines.Count; $i++) {
 [IO.File]::WriteAllText((Resolve-Path .\release-build).Path + "\release-notes-v$version.md", (($lines[($start + 1)..($end - 1)] -join "`r`n").Trim() + "`r`n"), [Text.UTF8Encoding]::new($false))
 
 gh release create "v$version" `
-  ".\releases\v$version\rainmeter-desktop-widgets-$version.zip" `
-  ".\releases\v$version\rainmeter-desktop-widgets-$version.rmskin" `
-  ".\releases\v$version\rainmeter-desktop-widgets-full-$version.zip" `
-  ".\releases\v$version\rainmeter-desktop-widgets-lite-$version.zip" `
+  ".\release-build\rainmeter-desktop-widgets-$version.zip" `
+  ".\release-build\rainmeter-desktop-widgets-$version.zip.sha256" `
+  ".\release-build\rainmeter-desktop-widgets-$version.rmskin" `
+  ".\release-build\rainmeter-desktop-widgets-$version.rmskin.sha256" `
+  ".\release-build\rainmeter-desktop-widgets-full-$version.zip" `
+  ".\release-build\rainmeter-desktop-widgets-full-$version.zip.sha256" `
+  ".\release-build\rainmeter-desktop-widgets-lite-$version.zip" `
+  ".\release-build\rainmeter-desktop-widgets-lite-$version.zip.sha256" `
   --repo kevendai/Rainmeter_todo `
   --title "Rainmeter Desktop Widgets $version" `
   --notes-file $notesPath
@@ -163,7 +157,7 @@ If `gh` is not installed, use the GitHub REST API with explicit user approval be
 https://uploads.github.com/repos/kevendai/Rainmeter_todo/releases/{release_id}/assets?name={asset_name}
 ```
 
-When replacing assets, delete the existing matching asset first, then upload the regenerated zip.
+When replacing assets, delete the existing matching asset and checksum first, then upload both regenerated files.
 
 ## Verification
 
@@ -182,18 +176,18 @@ curl.exe -I https://github.com/kevendai/Rainmeter_todo/releases/download/vX.Y.Z/
 curl.exe -I https://github.com/kevendai/Rainmeter_todo/releases/download/vX.Y.Z/rainmeter-desktop-widgets-X.Y.Z.zip
 ```
 
-Check the newer raw updater path:
+Check the checksum assets and verify a downloaded package:
 
 ```powershell
-curl.exe -I https://raw.githubusercontent.com/kevendai/Rainmeter_todo/vX.Y.Z/releases/vX.Y.Z/rainmeter-desktop-widgets-full-X.Y.Z.zip
-curl.exe -I https://raw.githubusercontent.com/kevendai/Rainmeter_todo/vX.Y.Z/releases/vX.Y.Z/rainmeter-desktop-widgets-lite-X.Y.Z.zip
+$zip = '.\release-build\rainmeter-desktop-widgets-X.Y.Z.zip'
+$expected = (Get-Content "$zip.sha256" -Raw).Split()[0]
+if ((Get-FileHash $zip -Algorithm SHA256).Hash -ne $expected) { throw 'SHA256 mismatch' }
 ```
 
-The raw domain can occasionally return `429 Too Many Requests` during repeated checks. If that happens, verify the same asset through GitHub Release assets and the tag tree before treating it as missing:
+Verify the published asset inventory through the release API:
 
 ```powershell
 gh release view vX.Y.Z --repo kevendai/Rainmeter_todo --json tagName,name,url,assets
-git ls-tree -r --name-only vX.Y.Z releases/vX.Y.Z
 ```
 
 If verifying a live install, inspect the compiled host for the version string:

@@ -15,6 +15,7 @@ using RainmeterBackend;
 
 internal static partial class TodoApp
 {
+    private static string paperSettingsLoadError = "";
     private const string PaperListPlaceholder = "<INSERT_PAPER_LIST_HERE>";
     private const string PaperWorkerMutexName = @"Global\RainmeterTodoPaperWorker";
     private static DateTime lastPaperDesktopUpdate = DateTime.MinValue;
@@ -97,6 +98,7 @@ internal static partial class TodoApp
     private static PaperSettings LoadPaperSettings()
     {
         PaperSettings settings = new PaperSettings();
+        paperSettingsLoadError = "";
         if (!File.Exists(PaperSyncSecret)) return settings;
         try
         {
@@ -135,7 +137,7 @@ internal static partial class TodoApp
             settings.CacheDays = Clamp(JsonUtil.Int(scoring, "CacheDays", settings.CacheDays), 1, 90);
             settings.RssEnabled = JsonUtil.Bool(rss, "Enabled", false);
         }
-        catch { }
+        catch (Exception ex) { paperSettingsLoadError = "论文设置无法解密或已损坏：" + SafeStatusMessage(ex.Message); }
         return settings;
     }
 
@@ -171,8 +173,8 @@ internal static partial class TodoApp
             }},
             {"Rss", new Dictionary<string, object> {
                 {"Enabled", settings.RssEnabled},
-                {"Address", "127.0.0.1"},
-                {"Port", 8891}
+                {"Address", PaperRssAddress},
+                {"Port", PaperRssPort}
             }}
         };
         JsonUtil.WriteDpapiJson(PaperSyncSecret, root);
@@ -190,6 +192,11 @@ internal static partial class TodoApp
             throw new Exception("标题和摘要评分提示词不能为空");
         if (!settings.TitlePrompt.Contains(PaperListPlaceholder) || !settings.AbstractPrompt.Contains(PaperListPlaceholder))
             throw new Exception("标题和摘要评分提示词都必须包含论文插入占位符 " + PaperListPlaceholder);
+    }
+
+    private static bool IsInsecureCredentialUrl(string url, string credential)
+    {
+        return !String.IsNullOrWhiteSpace(credential) && (url ?? "").Trim().StartsWith("http://", StringComparison.OrdinalIgnoreCase);
     }
 
     private static int Clamp(int value, int minimum, int maximum) { return Math.Max(minimum, Math.Min(maximum, value)); }
@@ -1118,9 +1125,12 @@ internal static partial class TodoApp
 
     private static int RunPaperSelfTests()
     {
-        byte[] original = File.Exists(PaperSyncSecret) ? File.ReadAllBytes(PaperSyncSecret) : null;
+        string originalResourceDir = ResourceDir;
+        string testRoot = Path.Combine(Path.GetTempPath(), "RainmeterPaperTest-" + Guid.NewGuid().ToString("N"));
         try
         {
+            Directory.CreateDirectory(testRoot);
+            ResourceDir = testRoot;
             PaperSettings settings = new PaperSettings();
             List<Dictionary<string, object>> papers = new List<Dictionary<string, object>> {
                 new Dictionary<string, object>{{"id",1},{"score",new Dictionary<string,object>{{"title",8},{"abstract",40}}}},
@@ -1158,8 +1168,8 @@ internal static partial class TodoApp
         }
         finally
         {
-            if (original == null) { try { File.Delete(PaperSyncSecret); } catch { } }
-            else File.WriteAllBytes(PaperSyncSecret, original);
+            ResourceDir = originalResourceDir;
+            try { Directory.Delete(testRoot, true); } catch { }
         }
     }
 }

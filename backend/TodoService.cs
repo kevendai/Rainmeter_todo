@@ -73,6 +73,32 @@ internal static partial class TodoApp
     }
 
     private delegate void LockedStateAction(Dictionary<string, object> state, ref bool refresh);
+    private static void WithGlobalStateLocks(Action action)
+    {
+        // Calendar code can acquire its state mutex before touching Todo state.
+        // Keep the same order here so backup import cannot deadlock with it.
+        using (Mutex calendar = new Mutex(false, @"Global\RainmeterCalendarState"))
+        using (Mutex todo = new Mutex(false, @"Global\RainmeterTodoState"))
+        {
+            bool calendarHeld = false, todoHeld = false;
+            try
+            {
+                try { calendarHeld = calendar.WaitOne(TimeSpan.FromSeconds(15)); }
+                catch (AbandonedMutexException) { calendarHeld = true; }
+                if (!calendarHeld) throw new Exception("日历数据正在使用，请稍后重试。");
+                try { todoHeld = todo.WaitOne(TimeSpan.FromSeconds(15)); }
+                catch (AbandonedMutexException) { todoHeld = true; }
+                if (!todoHeld) throw new Exception("待办数据正在使用，请稍后重试。");
+                action();
+            }
+            finally
+            {
+                if (todoHeld) todo.ReleaseMutex();
+                if (calendarHeld) calendar.ReleaseMutex();
+            }
+        }
+    }
+
     private static int WithLockedState(LockedStateAction action)
     {
         using (Mutex mutex = new Mutex(false, @"Global\RainmeterTodoState"))
@@ -81,7 +107,8 @@ internal static partial class TodoApp
             Dictionary<string, object> state = null;
             try
             {
-                held = mutex.WaitOne(TimeSpan.FromSeconds(15));
+                try { held = mutex.WaitOne(TimeSpan.FromSeconds(15)); }
+                catch (AbandonedMutexException) { held = true; }
                 if (!held) return 4;
                 state = LoadState();
                 bool refresh = false;

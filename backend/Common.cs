@@ -482,7 +482,6 @@ namespace RainmeterBackend
             string besidePortableSkins = Path.GetFullPath(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "..", "..", "..", "Rainmeter.exe"));
             string[] candidates = {
                 besidePortableSkins,
-                @"D:\Program Files (x86)\Rainmeter\Rainmeter.exe",
                 Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "Rainmeter", "Rainmeter.exe"),
                 Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86), "Rainmeter", "Rainmeter.exe")
             };

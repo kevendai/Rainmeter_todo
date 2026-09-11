@@ -12,12 +12,6 @@ if ([string]::IsNullOrWhiteSpace($Version)) {
 }
 $cacheRoot = Join-Path $projectRoot '.release-cache'
 $installer = Join-Path $cacheRoot 'Rainmeter-4.5.26.exe'
-$csc = Join-Path ([Environment]::GetFolderPath('Windows')) 'Microsoft.NET\Framework64\v4.0.30319\csc.exe'
-if (-not (Test-Path -LiteralPath $csc)) {
-    $csc = Join-Path ([Environment]::GetFolderPath('Windows')) 'Microsoft.NET\Framework\v4.0.30319\csc.exe'
-}
-if (-not (Test-Path -LiteralPath $csc)) { throw 'C# compiler not found' }
-
 New-Item -ItemType Directory -Path $cacheRoot -Force | Out-Null
 if (-not (Test-Path -LiteralPath $installer)) {
     Write-Host "Downloading Rainmeter installer..."
@@ -225,17 +219,10 @@ function New-Package {
     Convert-IniToUtf16 (Join-Path $todoRoot 'Todo.ini')
     Convert-IniToUtf16 (Join-Path $calendarRoot 'Calendar.ini')
 
-    $backendRoot = Join-Path $projectRoot 'backend'
-    $common = Join-Path $backendRoot 'Common.cs'
-    $todoSources = @(Get-ChildItem -LiteralPath $backendRoot -Filter 'Todo*.cs' | Sort-Object Name | ForEach-Object { $_.FullName })
-    $calendarSources = @(Get-ChildItem -LiteralPath $backendRoot -Filter 'Calendar*.cs' | Sort-Object Name | ForEach-Object { $_.FullName })
     $todoExe = Join-Path $todoRoot '@Resources\TodoHost.exe'
     $calendarExe = Join-Path $calendarRoot '@Resources\CalendarHost.exe'
-    $todoCompileArgs = @('/nologo','/target:winexe','/optimize+','/r:System.Web.Extensions.dll','/r:System.Windows.Forms.dll','/r:System.Drawing.dll','/r:System.Security.dll',"/out:$todoExe",$common) + $todoSources
-    & $csc @todoCompileArgs
-    if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $todoExe)) { throw "Failed to build TodoHost.exe for $DisplayName" }
-    & $csc /nologo /target:winexe /optimize+ /r:System.Web.Extensions.dll /r:System.Windows.Forms.dll /r:System.Drawing.dll /r:System.Security.dll "/out:$calendarExe" $common $calendarSources
-    if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $calendarExe)) { throw "Failed to build CalendarHost.exe for $DisplayName" }
+    & (Join-Path $PSScriptRoot 'Build-Backend.ps1') -Backend Todo -OutputDirectory (Split-Path $todoExe -Parent) | Out-Null
+    & (Join-Path $PSScriptRoot 'Build-Backend.ps1') -Backend Calendar -OutputDirectory (Split-Path $calendarExe -Parent) | Out-Null
 
     Copy-Item -LiteralPath $installer -Destination (Join-Path $packageRoot 'Rainmeter-4.5.26.exe') -Force
     Copy-Item -LiteralPath (Join-Path $projectRoot 'docs\RELEASE-DEPLOY.md') -Destination (Join-Path $packageRoot 'DEPLOY.md') -Force
@@ -290,3 +277,44 @@ function New-LegacyBootstrapPackages {
 }
 
 New-LegacyBootstrapPackages
+
+function New-RawTransitionBootstrapPackage {
+    # v1.5.3 and earlier unified updaters resolve the next canonical ZIP from
+    # raw.githubusercontent.com before they can install the Release-only updater.
+    # This tiny package satisfies their legacy layout check, self-updates the
+    # updater, and then delegates to the SHA256-verified GitHub Release asset.
+    $transitionRoot = Join-Path $OutputRoot ("legacy-raw-transition-$Version")
+    $updaterRoot = Join-Path $transitionRoot 'Updater'
+    $todoRoot = Join-Path $transitionRoot 'Skins\Todo'
+    $calendarRoot = Join-Path $transitionRoot 'Skins\Calendar'
+    New-Item -ItemType Directory -Path $updaterRoot, $todoRoot, $calendarRoot -Force | Out-Null
+    New-UpdaterScript (Join-Path $updaterRoot 'RainmeterDesktopWidgetsUpdater.ps1')
+    [IO.File]::WriteAllText((Join-Path $todoRoot '.transition'), '', [Text.UTF8Encoding]::new($false))
+    [IO.File]::WriteAllText((Join-Path $calendarRoot '.transition'), '', [Text.UTF8Encoding]::new($false))
+    $manifest = [ordered]@{
+        name = 'Rainmeter Desktop Widgets updater transition'
+        version = $Version
+        updater_version = 1
+    } | ConvertTo-Json
+    [IO.File]::WriteAllText((Join-Path $transitionRoot 'manifest.json'), $manifest, [Text.UTF8Encoding]::new($false))
+    $bootstrap = [ordered]@{
+        repository = 'kevendai/Rainmeter_todo'
+        tag = "v$Version"
+        version = $Version
+        asset = "rainmeter-desktop-widgets-$Version.zip"
+    } | ConvertTo-Json
+    [IO.File]::WriteAllText((Join-Path $transitionRoot 'unified-bootstrap.json'), $bootstrap, [Text.UTF8Encoding]::new($false))
+
+    $transitionZip = Join-Path $OutputRoot ("rainmeter-desktop-widgets-raw-transition-$Version.zip")
+    Compress-Archive -Path (Join-Path $transitionRoot '*') -DestinationPath $transitionZip -Force
+    Write-Host "Created one-time raw updater transition $transitionZip"
+}
+
+New-RawTransitionBootstrapPackage
+
+Get-ChildItem -LiteralPath $OutputRoot -File | Where-Object { $_.Extension -in @('.zip', '.rmskin') } | ForEach-Object {
+    $hash = (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+    $checksumPath = $_.FullName + '.sha256'
+    [IO.File]::WriteAllText($checksumPath, "$hash  $($_.Name)`n", [Text.UTF8Encoding]::new($false))
+    Write-Host "Created $checksumPath"
+}

@@ -15,12 +15,104 @@ using RainmeterBackend;
 
 internal static partial class CalendarApp
 {
-    private sealed class DavResult{public int Status;public string Text,Location;}
-    private static DavResult Dav(string method,string uri,Dictionary<string,object> credentials,string body,int depth,int timeoutMs=20000){HttpWebRequest q=(HttpWebRequest)WebRequest.Create(uri);q.Method=method;q.Credentials=new NetworkCredential(S(credentials,"Username"),S(credentials,"Password"));q.PreAuthenticate=true;q.AllowAutoRedirect=false;q.Timeout=timeoutMs;q.ReadWriteTimeout=timeoutMs;q.UserAgent="Rainmeter-Calendar/2.0";if(depth>=0)q.Headers["Depth"]=depth.ToString();if(body!=""){byte[]b=Encoding.UTF8.GetBytes(body);q.ContentType="application/xml; charset=utf-8";q.ContentLength=b.Length;using(Stream s=q.GetRequestStream())s.Write(b,0,b.Length);}WebResponse response;try{response=q.GetResponse();}catch(WebException ex){if(ex.Response==null)throw;response=ex.Response;}using(response)using(StreamReader reader=new StreamReader(response.GetResponseStream())){HttpWebResponse h=(HttpWebResponse)response;return new DavResult{Status=(int)h.StatusCode,Text=reader.ReadToEnd(),Location=h.Headers["Location"]};}}
-    private static DavResult DavText(string method,string uri,Dictionary<string,object> credentials,string body,string contentType,string etag){HttpWebRequest q=(HttpWebRequest)WebRequest.Create(uri);q.Method=method;q.Credentials=new NetworkCredential(S(credentials,"Username"),S(credentials,"Password"));q.PreAuthenticate=true;q.AllowAutoRedirect=false;q.Timeout=20000;q.ReadWriteTimeout=20000;q.UserAgent="Rainmeter-Calendar/2.0";if(etag=="*")q.Headers["If-None-Match"]="*";else if(etag!="")q.Headers["If-Match"]=etag;if(body!=""){byte[]b=Encoding.UTF8.GetBytes(body);q.ContentType=contentType;q.ContentLength=b.Length;using(Stream s=q.GetRequestStream())s.Write(b,0,b.Length);}WebResponse response;try{response=q.GetResponse();}catch(WebException ex){if(ex.Response==null)throw;response=ex.Response;}using(response)using(StreamReader reader=new StreamReader(response.GetResponseStream())){HttpWebResponse h=(HttpWebResponse)response;return new DavResult{Status=(int)h.StatusCode,Text=reader.ReadToEnd(),Location=h.Headers["Location"]};}}
-    private static string Resolve(string root,string href){return new Uri(new Uri(root.TrimEnd('/')+"/"),href).AbsoluteUri;}
-    private sealed class CalendarInfo{public string Uri,Name;}
-    private static CalendarInfo Discover(Dictionary<string,object> c){string root=S(c,"Server").Trim();if(root=="")throw new Exception("CalDAV 地址不能为空");root=root.TrimEnd('/');string prop="<?xml version=\"1.0\" encoding=\"utf-8\"?><d:propfind xmlns:d=\"DAV:\" xmlns:c=\"urn:ietf:params:xml:ns:caldav\"><d:prop><d:current-user-principal/><c:calendar-home-set/><d:displayname/><d:resourcetype/><c:supported-calendar-component-set/></d:prop></d:propfind>";DavResult wk=Dav("PROPFIND",root+"/.well-known/caldav",c,prop,0);string davUri=wk.Location!=""&&wk.Location!=null?Resolve(root,wk.Location):root+"/dav/";DavResult dav=Dav("PROPFIND",davUri,c,prop,0);if(dav.Status==401)throw new Exception("CalDAV 账号或密码无效");if(dav.Status!=207)throw new Exception("CalDAV 服务发现失败：HTTP "+dav.Status);XmlDocument doc=Xml(dav.Text);XmlNamespaceManager ns=Ns(doc);XmlNode home=doc.SelectSingleNode("//c:calendar-home-set/d:href",ns);if(home==null){XmlNode principal=doc.SelectSingleNode("//d:current-user-principal/d:href",ns);if(principal==null)throw new Exception("CalDAV 未返回 current-user-principal");DavResult pr=Dav("PROPFIND",Resolve(root,principal.InnerText),c,prop,0);if(pr.Status!=207)throw new Exception("CalDAV principal 查询失败：HTTP "+pr.Status);XmlDocument pd=Xml(pr.Text);home=pd.SelectSingleNode("//c:calendar-home-set/d:href",Ns(pd));}if(home==null)throw new Exception("CalDAV 未返回 calendar-home-set");DavResult list=Dav("PROPFIND",Resolve(root,home.InnerText),c,prop,1);if(list.Status!=207)throw new Exception("日历列表读取失败：HTTP "+list.Status);XmlDocument ld=Xml(list.Text);XmlNamespaceManager lns=Ns(ld);List<CalendarInfo>found=new List<CalendarInfo>();foreach(XmlNode response in ld.SelectNodes("//d:response",lns)){if(response.SelectSingleNode(".//d:resourcetype/c:calendar",lns)==null)continue;XmlNode href=response.SelectSingleNode("./d:href",lns),name=response.SelectSingleNode(".//d:displayname",lns);if(href!=null)found.Add(new CalendarInfo{Uri=Resolve(root,href.InnerText),Name=name==null?"":name.InnerText});}if(found.Count==0)throw new Exception("没有找到支持 VEVENT 的日历");return found.OrderBy(x=>x.Name=="Default Calendar"?0:1).ThenBy(x=>x.Name).First();}
+    private sealed class DavResult { public int Status; public string Text, Location; }
+
+    private static DavResult Dav(string method, string uri, Dictionary<string, object> credentials, string body, int depth, int timeoutMs = 20000)
+    {
+        HttpWebRequest request = CreateDavRequest(method, uri, credentials, timeoutMs);
+        if (depth >= 0) request.Headers["Depth"] = depth.ToString(CultureInfo.InvariantCulture);
+        WriteDavBody(request, body, "application/xml; charset=utf-8");
+        return ReadDavResponse(request);
+    }
+
+    private static DavResult DavText(string method, string uri, Dictionary<string, object> credentials, string body, string contentType, string etag)
+    {
+        HttpWebRequest request = CreateDavRequest(method, uri, credentials, 20000);
+        if (etag == "*") request.Headers["If-None-Match"] = "*";
+        else if (etag != "") request.Headers["If-Match"] = etag;
+        WriteDavBody(request, body, contentType);
+        return ReadDavResponse(request);
+    }
+
+    private static HttpWebRequest CreateDavRequest(string method, string uri, Dictionary<string, object> credentials, int timeoutMs)
+    {
+        HttpWebRequest request = (HttpWebRequest)WebRequest.Create(uri);
+        request.Method = method;
+        request.Credentials = new NetworkCredential(S(credentials, "Username"), S(credentials, "Password"));
+        request.PreAuthenticate = true;
+        request.AllowAutoRedirect = false;
+        request.Timeout = timeoutMs;
+        request.ReadWriteTimeout = timeoutMs;
+        request.UserAgent = "Rainmeter-Calendar/2.0";
+        return request;
+    }
+
+    private static void WriteDavBody(HttpWebRequest request, string body, string contentType)
+    {
+        if (body == "") return;
+        byte[] bytes = Encoding.UTF8.GetBytes(body);
+        request.ContentType = contentType;
+        request.ContentLength = bytes.Length;
+        using (Stream stream = request.GetRequestStream()) stream.Write(bytes, 0, bytes.Length);
+    }
+
+    private static DavResult ReadDavResponse(HttpWebRequest request)
+    {
+        WebResponse response;
+        try { response = request.GetResponse(); }
+        catch (WebException ex) { if (ex.Response == null) throw; response = ex.Response; }
+        using (response)
+        using (StreamReader reader = new StreamReader(response.GetResponseStream()))
+        {
+            HttpWebResponse http = (HttpWebResponse)response;
+            return new DavResult { Status = (int)http.StatusCode, Text = reader.ReadToEnd(), Location = http.Headers["Location"] };
+        }
+    }
+
+    private static string Resolve(string root, string href) { return new Uri(new Uri(root.TrimEnd('/') + "/"), href).AbsoluteUri; }
+    private sealed class CalendarInfo { public string Uri, Name; }
+
+    private static CalendarInfo Discover(Dictionary<string, object> credentials)
+    {
+        string root = S(credentials, "Server").Trim();
+        if (root == "") throw new Exception("CalDAV 地址不能为空");
+        root = root.TrimEnd('/');
+        string properties = "<?xml version=\"1.0\" encoding=\"utf-8\"?><d:propfind xmlns:d=\"DAV:\" xmlns:c=\"urn:ietf:params:xml:ns:caldav\"><d:prop><d:current-user-principal/><c:calendar-home-set/><d:displayname/><d:resourcetype/><c:supported-calendar-component-set/></d:prop></d:propfind>";
+        DavResult wellKnown = Dav("PROPFIND", root + "/.well-known/caldav", credentials, properties, 0);
+        string davUri = !String.IsNullOrEmpty(wellKnown.Location) ? Resolve(root, wellKnown.Location) : root + "/dav/";
+        DavResult dav = Dav("PROPFIND", davUri, credentials, properties, 0);
+        if (dav.Status == 401) throw new Exception("CalDAV 账号或密码无效");
+        if (dav.Status != 207) throw new Exception("CalDAV 服务发现失败：HTTP " + dav.Status);
+
+        XmlDocument document = Xml(dav.Text);
+        XmlNamespaceManager namespaces = Ns(document);
+        XmlNode home = document.SelectSingleNode("//c:calendar-home-set/d:href", namespaces);
+        if (home == null)
+        {
+            XmlNode principal = document.SelectSingleNode("//d:current-user-principal/d:href", namespaces);
+            if (principal == null) throw new Exception("CalDAV 未返回 current-user-principal");
+            DavResult principalResult = Dav("PROPFIND", Resolve(root, principal.InnerText), credentials, properties, 0);
+            if (principalResult.Status != 207) throw new Exception("CalDAV principal 查询失败：HTTP " + principalResult.Status);
+            XmlDocument principalDocument = Xml(principalResult.Text);
+            home = principalDocument.SelectSingleNode("//c:calendar-home-set/d:href", Ns(principalDocument));
+        }
+        if (home == null) throw new Exception("CalDAV 未返回 calendar-home-set");
+
+        DavResult list = Dav("PROPFIND", Resolve(root, home.InnerText), credentials, properties, 1);
+        if (list.Status != 207) throw new Exception("日历列表读取失败：HTTP " + list.Status);
+        XmlDocument listDocument = Xml(list.Text);
+        XmlNamespaceManager listNamespaces = Ns(listDocument);
+        List<CalendarInfo> found = new List<CalendarInfo>();
+        foreach (XmlNode response in listDocument.SelectNodes("//d:response", listNamespaces))
+        {
+            if (response.SelectSingleNode(".//d:resourcetype/c:calendar", listNamespaces) == null) continue;
+            XmlNode href = response.SelectSingleNode("./d:href", listNamespaces);
+            XmlNode name = response.SelectSingleNode(".//d:displayname", listNamespaces);
+            if (href != null) found.Add(new CalendarInfo { Uri = Resolve(root, href.InnerText), Name = name == null ? "" : name.InnerText });
+        }
+        if (found.Count == 0) throw new Exception("没有找到支持 VEVENT 的日历");
+        return found.OrderBy(item => item.Name == "Default Calendar" ? 0 : 1).ThenBy(item => item.Name).First();
+    }
     private static XmlDocument Xml(string text){XmlDocument d=new XmlDocument();d.LoadXml(text);return d;} private static XmlNamespaceManager Ns(XmlDocument d){XmlNamespaceManager n=new XmlNamespaceManager(d.NameTable);n.AddNamespace("d","DAV:");n.AddNamespace("c","urn:ietf:params:xml:ns:caldav");return n;}
 
     private sealed class IProp{public string Value;public Dictionary<string,string> P=new Dictionary<string,string>();}
