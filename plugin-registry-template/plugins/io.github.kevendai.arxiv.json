@@ -1,0 +1,13 @@
+{
+  "id": "io.github.kevendai.arxiv",
+  "name": "arXiv Paper Recommendation",
+  "channel": "stable",
+  "official": true,
+  "version": "1.0.0",
+  "api_version": 1,
+  "min_host_version": "2.0.0",
+  "download": "https://github.com/kevendai/Rainmeter_todo-plugin-registry/releases/download/arxiv-v1.0.0/arxiv-1.0.0.rwplugin",
+  "sha256": "e10f13b9f45a5e0ab49e5ba92b30ab8ca0adc5228032e084e8f5f4c93b83c425",
+  "release_notes": "Initial official release",
+  "homepage": "https://github.com/kevendai/Rainmeter_todo-plugin-registry/tree/master/official-plugins/arxiv"
+}

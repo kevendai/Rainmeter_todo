@@ -1,0 +1,13 @@
+{
+  "id": "io.github.kevendai.calendar-to-todo",
+  "name": "Calendar to Todo",
+  "channel": "stable",
+  "official": true,
+  "version": "1.0.0",
+  "api_version": 1,
+  "min_host_version": "2.0.0",
+  "download": "https://github.com/kevendai/Rainmeter_todo-plugin-registry/releases/download/calendar-to-todo-v1.0.0/calendar-to-todo-1.0.0.rwplugin",
+  "sha256": "00f1e38925619c1069cf6bdac22d82b5d96e2eab3a27fa38197e4635f796bdf7",
+  "release_notes": "Initial official release",
+  "homepage": "https://github.com/kevendai/Rainmeter_todo-plugin-registry/tree/master/official-plugins/calendar-to-todo"
+}

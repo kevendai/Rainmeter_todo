@@ -1,0 +1,19 @@
+{
+  "id": "io.github.kevendai.arxiv",
+  "name": "arXiv Paper Recommendation",
+  "version": "1.0.0",
+  "api_version": 1,
+  "min_host_version": "2.0.0",
+  "entry": "bin/ArxivPlugin.exe",
+  "capabilities": ["todo_source"],
+  "permissions": ["network"],
+  "settings_schema": "settings.schema.json",
+  "homepage": "https://github.com/kevendai/Rainmeter_todo-plugin-registry/tree/master/official-plugins/arxiv",
+  "default_enabled": true,
+  "actions": [
+    {"id":"test_api","name":"测试 DeepSeek","confirm":false,"long_running":false},
+    {"id":"test_file_server","name":"测试文件服务器","confirm":false,"long_running":false},
+    {"id":"test_translation","name":"测试标题翻译","confirm":false,"long_running":false},
+    {"id":"rescore","name":"重新爬取并打分","confirm":true,"risk":"可能调用付费 API，并替换当天论文缓存。","long_running":true}
+  ]
+}

@@ -1,0 +1,20 @@
+name: build-official-plugins
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+jobs:
+  build:
+    runs-on: windows-latest
+    strategy:
+      matrix:
+        plugin: [arxiv, calendar-to-todo, network-ip]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build package
+        shell: pwsh
+        run: ./official-plugins/${{ matrix.plugin }}/Build-Package.ps1
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.plugin }}
+          path: official-plugins/${{ matrix.plugin }}/dist/*
