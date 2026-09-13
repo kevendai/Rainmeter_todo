@@ -21,7 +21,7 @@ internal static partial class TodoApp
         if (e == null) return 0;
         return WithLockedState(delegate(Dictionary<string, object> state, ref bool refresh) {
             int rolled = Normalize(state);
-            if (rolled > 0) Meta(state)["status"] = "已自动归档昨日论文" + rolled + " 篇";
+            if (rolled > 0) Meta(state)["status"] = "已按任务策略自动归档 " + rolled + " 项";
             Tasks(state).Add(NewTask(e, "manual"));
             Meta(state)["status"] = "已新增待办";
             Commit(state);

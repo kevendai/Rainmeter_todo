@@ -30,12 +30,14 @@ internal static class SmokeTests
                 }}
             };
             File.WriteAllText(Path.Combine(todoDir,"tasks.json"), Json.Serialize(todo), new UTF8Encoding(false));
-            Run(Path.Combine(todoDir,"TodoHost.exe"), "PaperSelfTest");
             Run(Path.Combine(todoDir,"TodoHost.exe"), "Toggle 11111111111111111111111111111111");
             Dictionary<string,object> saved = (Dictionary<string,object>)Json.DeserializeObject(File.ReadAllText(Path.Combine(todoDir,"tasks.json"),Encoding.UTF8));
             object[] tasks=(object[])saved["tasks"]; Dictionary<string,object> manual=(Dictionary<string,object>)tasks[0],paper=(Dictionary<string,object>)tasks[1];
             Check((bool)manual["completed"], "Todo toggle did not persist");
             Check(!paper.ContainsKey("translated_title") && ((string)paper["title"]).StartsWith("(9.5)"), "Legacy paper migration failed");
+            string pluginRoot=Environment.GetEnvironmentVariable("RAINMETER_PLUGIN_ROOT");Check(!String.IsNullOrWhiteSpace(pluginRoot)&&File.Exists(Path.Combine(pluginRoot,"migration-v2.json")),"Migration completion marker was not written");
+            Dictionary<string,object> marker=(Dictionary<string,object>)Json.DeserializeObject(File.ReadAllText(Path.Combine(pluginRoot,"migration-v2.json"),Encoding.UTF8));Check(File.Exists(Path.Combine(Convert.ToString(marker["backup"]),"tasks.json")),"Migration backup did not preserve tasks.json");
+            string afterMigration=File.ReadAllText(Path.Combine(todoDir,"tasks.json"),Encoding.UTF8);Run(Path.Combine(todoDir,"TodoHost.exe"),"Render");Check(File.ReadAllText(Path.Combine(todoDir,"tasks.json"),Encoding.UTF8)==afterMigration,"Migration was not idempotent");
             Check(File.ReadAllText(Path.Combine(todoDir,"Generated.inc"),Encoding.Unicode).Contains("TodoHost.exe\" \"Toggle"), "Todo actions were not generated for the C# host");
 
             DateTimeOffset start=DateTimeOffset.Now.AddMinutes(10),end=start.AddHours(1);
@@ -68,7 +70,7 @@ internal static class SmokeTests
             string noCalDav=File.ReadAllText(Path.Combine(calendarDir,"Generated.inc"),Encoding.Unicode);
             Check(noCalDav.Contains("CalDAV 未连接"),"Calendar without credentials did not settle on disconnected status");
             Check(!noCalDav.Contains("!SetOption CalendarStatus Text"),"Calendar sync action can leave a transient status stuck");
-            Console.WriteLine("PASS: Todo paper self-tests, settings, migration/toggle/render and Calendar compatibility");
+            Console.WriteLine("PASS: Todo v3 migration, settings, toggle/render and Calendar compatibility");
         }
         finally { try { Directory.Delete(root,true); } catch { } }
     }

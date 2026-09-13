@@ -22,9 +22,9 @@ internal static partial class TodoApp
     private static string IncludePath { get { return Path.Combine(ResourceDir, "Generated.inc"); } }
     private static string GuardPath { get { return Path.Combine(ResourceDir, ".refresh-guard"); } }
     private static string UpdaterScript { get { return Path.Combine(ResourceDir, "Updater", "RainmeterDesktopWidgetsUpdater.ps1"); } }
-    private static string PaperCache { get { return Path.Combine(ResourceDir, "PaperCache"); } }
     private static string PaperSyncSecret { get { return Path.Combine(ResourceDir, "paper-sync.secret"); } }
     private static string TranslationSecret { get { return Path.Combine(ResourceDir, "translation.secret"); } }
+    private static string PluginHostPath { get { return Path.Combine(ResourceDir, "PluginHost.exe"); } }
 
     private static string LoadAppVersion()
     {
@@ -45,16 +45,14 @@ internal static partial class TodoApp
         Application.SetCompatibleTextRenderingDefault(false);
         string action = args.Length > 0 ? args[0] : "Render";
         string id = args.Length > 1 ? args[1] : "";
+        string pluginAction = args.Length > 2 ? args[2] : "";
         bool force = args.Any(x => String.Equals(x, "Force", StringComparison.OrdinalIgnoreCase));
         if (action == "Add") return AddInteractive();
         if (action == "Edit") return EditInteractive(id);
         if (action == "Manage") return ManageInteractive();
         if (action == "Settings") return SettingsInteractive();
-        if (action == "PaperWorker") return RunPaperWorker(id);
-        if (action == "PaperRssServer") return RunPaperRssServer();
-        if (action == "PaperRssSelfTest") return RunPaperRssSelfTests();
-        if (action == "PaperSelfTest") return RunPaperSelfTests();
         if (action == "BackupSelfTest") return RunBackupSelfTests();
+        if(action=="PluginAction"){if(id==""||pluginAction=="")return 2;StartPluginCommand("PluginAction",id+" "+pluginAction);return 0;}
         using (Mutex mutex = new Mutex(false, @"Global\RainmeterTodoState"))
         {
             bool held = false;
@@ -66,31 +64,27 @@ internal static partial class TodoApp
                 state = LoadState();
                 int rolled = Normalize(state);
                 bool refresh = rolled > 0;
-                if (rolled > 0) Meta(state)["status"] = "已自动归档昨日论文" + rolled + " 篇";
+                if (rolled > 0) Meta(state)["status"] = "已按任务策略自动归档 " + rolled + " 项";
                 switch (action)
                 {
                     case "Startup":
                         bool guarded = ConsumeGuard();
-                        SyncArxiv(state, false, "");
                         Save(state);
                         refresh |= Render(state) && !guarded;
-                        EnsurePaperRssServer(false);
+                        StartPluginCommand("SyncAll", "startup");
+                        StartPluginCommand("ValuesAll", "startup");
                         break;
                     case "Rollover": refresh |= Render(state); break;
                     case "Refresh":
-                        SyncArxiv(state, true, "");
-                        Save(state); Render(state); refresh = true; break;
+                        Save(state); Render(state); StartPluginCommand("SyncAll", "manual");StartPluginCommand("ValuesAll","manual"); refresh = true; break;
                     case "Render": Render(state); break;
                     case "Delete": Delete(state, id, ref refresh); break;
                     case "Toggle": Toggle(state, id, ref refresh); break;
                     case "Open": Open(state, id, ref refresh); break;
-                    case "ClearArxiv":
-                        Tasks(state).RemoveAll(t => S(t, "source") == "arxiv");
-                        Meta(state)["last_arxiv_sync_date"] = "";
-                        Meta(state)["status"] = "已清除论文待办";
-                        Commit(state); refresh = true; break;
-                    case "SyncArxiv":
-                        SyncArxiv(state, true, ""); Commit(state); refresh = true; break;
+                    case "PluginClearTasks":
+                        if(id!=""&&LightUi.Confirm("确定清除插件 "+id+" 已创建的全部待办？此操作不会卸载插件。","清除插件待办")){int removed=Tasks(state).RemoveAll(t=>JsonUtil.String(JsonUtil.Object(JsonUtil.Get(t,"origin")),"plugin_id","").Equals(id,StringComparison.OrdinalIgnoreCase));Meta(state)["status"]="已清除 "+removed+" 项插件待办";Commit(state);refresh=true;}break;
+                    case "PluginSync":
+                        if(id!="")StartPluginCommand("Sync",id);Commit(state);refresh=true;break;
                 }
                 if (refresh) Refresh();
                 return 0;
@@ -126,6 +120,11 @@ internal static partial class TodoApp
 
 
     private static bool ConsumeGuard(){if(!File.Exists(GuardPath))return false;try{bool fresh=(DateTime.Now-File.GetLastWriteTime(GuardPath)).TotalSeconds<20;File.Delete(GuardPath);return fresh;}catch{return true;}}
+    private static void StartPluginCommand(string action,string pluginId)
+    {
+        if(!File.Exists(PluginHostPath))return;
+        Process.Start(new ProcessStartInfo(PluginHostPath,action+" "+pluginId){UseShellExecute=false,CreateNoWindow=true,WindowStyle=ProcessWindowStyle.Hidden});
+    }
     private static void Refresh(){File.WriteAllText(GuardPath,RuntimeUtil.Iso(DateTimeOffset.Now),RuntimeUtil.Utf8NoBom);RuntimeUtil.Refresh("Todo");string calendar=Path.GetFullPath(Path.Combine(ResourceDir,"..","..","Calendar","Calendar.ini"));if(File.Exists(calendar))RuntimeUtil.Refresh("Calendar");}
 }
 

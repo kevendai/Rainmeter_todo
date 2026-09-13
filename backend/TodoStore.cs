@@ -17,20 +17,24 @@ internal static partial class TodoApp
     private static Dictionary<string, object> NewState()
     {
         return new Dictionary<string, object> {
-            {"version", 2}, {"meta", new Dictionary<string, object>{{"last_arxiv_sync_date", ""}, {"status", "就绪"}}},
+            {"version", 3}, {"meta", new Dictionary<string, object>{{"status", "就绪"}}},
             {"tasks", new List<object>()}
         };
     }
 
     private static Dictionary<string, object> LoadState()
     {
+        PluginRuntime.BootstrapBundled(Path.Combine(ResourceDir,"BundledPlugins"));
+        PluginRuntime.MigrateInstallation(ResourceDir,StatePath,Path.GetFullPath(Path.Combine(ResourceDir,"..","..","Calendar","@Resources","calendar-state.json")));
         if (!File.Exists(StatePath)) return NewState();
         try
         {
             Dictionary<string, object> state = JsonUtil.LoadObject(StatePath);
-            state["version"] = 2;
-            if (!(JsonUtil.Get(state, "meta") is Dictionary<string, object>)) state["meta"] = new Dictionary<string, object>{{"last_arxiv_sync_date", ""}, {"status", "就绪"}};
+            int oldVersion = JsonUtil.Int(state, "version", 1);
+            TodoExternalImport.MigrateV3(state);
+            if (!(JsonUtil.Get(state, "meta") is Dictionary<string, object>)) state["meta"] = new Dictionary<string, object>{{"status", "就绪"}};
             if (JsonUtil.Get(state, "tasks") == null) state["tasks"] = new List<object>();
+            if (oldVersion < 3) JsonUtil.SaveAtomic(StatePath, state);
             return state;
         }
         catch
@@ -54,7 +58,7 @@ internal static partial class TodoApp
     private static void AddLabel(Dictionary<string, object> task, string label) { List<string> labels = Labels(task); if (!labels.Contains(label)) labels.Add(label); SetLabels(task, labels); }
     private static void RemoveLabel(Dictionary<string, object> task, string label) { SetLabels(task, Labels(task).Where(x => x != label)); }
 
-    private static void Save(Dictionary<string, object> state) { JsonUtil.SaveAtomic(StatePath, state); }
+    private static void Save(Dictionary<string, object> state) { JsonUtil.SaveAtomic(StatePath, state); try{PluginRuntime.WritePluginTaskSnapshots(state);}catch{} }
     private static void Commit(Dictionary<string, object> state) { Save(state); Render(state); }
 
 }

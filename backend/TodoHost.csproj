@@ -24,11 +24,11 @@
   </ItemGroup>
   <ItemGroup>
     <Compile Include="Common.cs" />
+    <Compile Include="PluginRuntime.cs" />
+    <Compile Include="PluginManagerForms.cs" />
     <Compile Include="TodoApp.cs" />
     <Compile Include="TodoBackupService.cs" />
     <Compile Include="TodoForms.cs" />
-    <Compile Include="TodoPaperRssService.cs" />
-    <Compile Include="TodoPaperService.cs" />
     <Compile Include="TodoRainmeterRenderer.cs" />
     <Compile Include="TodoRules.cs" />
     <Compile Include="TodoService.cs" />

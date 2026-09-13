@@ -7,13 +7,14 @@ using System.IO.Compression;
 using System.Linq;
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.RegularExpressions;
 using System.Windows.Forms;
 using RainmeterBackend;
 
 internal static partial class TodoApp
 {
     private const int BackupFormatVersion = 1;
-    private const string BackupConfigVersion = "1.0";
+    private const string BackupConfigVersion = "2.0";
     private const int BackupKdfIterations = 310000;
     private const int MaxBackupBytes = 64 * 1024 * 1024;
     private const int MaxBackupPlainBytes = 32 * 1024 * 1024;
@@ -97,6 +98,7 @@ internal static partial class TodoApp
         if (File.Exists(TranslationSecret)) components["translation"] = ReadSecretForBackup(TranslationSecret, "翻译凭据");
         if (File.Exists(CalDavSecret)) components["caldav"] = ReadSecretForBackup(CalDavSecret, "CalDAV 凭据");
         components["ui_scale"] = ReadBackupUiScale();
+        components["plugins"] = BuildPluginBackup();
 
         Dictionary<string, object> calendarState = LoadOptionalObject(CalendarStatePath, NewBackupCalendarState());
         components["calendar_rules"] = JsonUtil.Array(JsonUtil.Get(calendarState, "series_rules"));
@@ -114,6 +116,20 @@ internal static partial class TodoApp
             {"full_backup", fullBackup},
             {"components", components}
         };
+    }
+
+    private static List<object> BuildPluginBackup()
+    {
+        PluginPaths.Ensure();HashSet<string> ids=new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        if(Directory.Exists(PluginPaths.Plugins))foreach(string path in Directory.GetDirectories(PluginPaths.Plugins))ids.Add(Path.GetFileName(path));
+        if(Directory.Exists(PluginPaths.Data))foreach(string path in Directory.GetDirectories(PluginPaths.Data))ids.Add(Path.GetFileName(path));
+        List<object> result=new List<object>();foreach(string id in ids.OrderBy(x=>x,StringComparer.OrdinalIgnoreCase))
+        {
+            Dictionary<string,object> current=PluginRuntime.Current(id),record=new Dictionary<string,object>{{"id",id},{"enabled",JsonUtil.Bool(current,"enabled",false)},{"version",JsonUtil.String(current,"version","")}};
+            string data=PluginPaths.DataRoot(id),config=Path.Combine(data,"config.json"),secret=Path.Combine(data,"secret.dat");
+            record["config"]=File.Exists(config)?JsonUtil.LoadObject(config):new Dictionary<string,object>();
+            record["secret"]=File.Exists(secret)?ReadSecretForBackup(secret,"插件 "+id+" 的敏感设置"):new Dictionary<string,object>();result.Add(record);
+        }return result;
     }
 
     private static Dictionary<string, object> ReadSecretForBackup(string path, string label)
@@ -155,6 +171,13 @@ internal static partial class TodoApp
                 throw new Exception("备份中的敏感配置格式无效：" + secretName + "。");
         }
         ValidateArrayLimit(JsonUtil.Get(components, "calendar_rules"), "日历规则");
+        ValidateArrayLimit(JsonUtil.Get(components, "plugins"), "插件配置");
+        foreach(object raw in JsonUtil.Array(JsonUtil.Get(components,"plugins")))
+        {
+            Dictionary<string,object> plugin=JsonUtil.Object(raw);string id=JsonUtil.String(plugin,"id","");
+            if(!Regex.IsMatch(id,@"^[a-z0-9]+(?:[.-][a-z0-9]+)+$"))throw new Exception("备份中的插件 ID 无效。");
+            if(!(JsonUtil.Get(plugin,"config") is Dictionary<string,object>)||!(JsonUtil.Get(plugin,"secret") is Dictionary<string,object>))throw new Exception("备份中的插件配置格式无效："+id+"。");
+        }
         Dictionary<string, object> tasks = JsonUtil.Get(components, "tasks") == null ? null : JsonUtil.Object(JsonUtil.Get(components, "tasks"));
         if (tasks != null)
         {
@@ -179,6 +202,12 @@ internal static partial class TodoApp
         {
             case BackupConfigVersion:
                 return;
+            case "1.0":
+                Dictionary<string,object> components=JsonUtil.Object(JsonUtil.Get(payload,"components"));Dictionary<string,object> secret=new Dictionary<string,object>();
+                if(JsonUtil.Get(components,"paper_settings") is Dictionary<string,object>)secret["paper_settings"]=JsonUtil.Object(JsonUtil.Get(components,"paper_settings"));
+                if(JsonUtil.Get(components,"translation") is Dictionary<string,object>)secret["translation"]=JsonUtil.Object(JsonUtil.Get(components,"translation"));
+                components["plugins"]=secret.Count==0?new List<object>():new List<object>{new Dictionary<string,object>{{"id","io.github.kevendai.arxiv"},{"version",""},{"enabled",false},{"config",new Dictionary<string,object>()},{"secret",secret}}};
+                payload["config_version"]=BackupConfigVersion;return;
             default:
                 throw new Exception("无法导入用户配置版本 " + (version == "" ? "未知" : version) + "。当前支持版本：" + BackupConfigVersion + "。");
         }
@@ -193,13 +222,14 @@ internal static partial class TodoApp
     private static void ApplyBackupPayload(Dictionary<string, object> payload, bool importConfiguration, bool importData)
     {
         Dictionary<string, object> components = JsonUtil.Object(JsonUtil.Get(payload, "components"));
-        string[] paths = { PaperSyncSecret, TranslationSecret, CalDavSecret, UiScalePath, StatePath, CalendarStatePath };
+        List<string> paths = new List<string>{ PaperSyncSecret, TranslationSecret, CalDavSecret, UiScalePath, StatePath, CalendarStatePath };
+        foreach(object raw in JsonUtil.Array(JsonUtil.Get(components,"plugins"))){string id=JsonUtil.String(JsonUtil.Object(raw),"id","");string data=PluginPaths.DataRoot(id);paths.Add(Path.Combine(data,"config.json"));paths.Add(Path.Combine(data,"secret.dat"));paths.Add(Path.Combine(PluginPaths.PluginRoot(id),"current.json"));}
         string rollback = Path.Combine(ResourceDir, ".import-rollback-" + Guid.NewGuid().ToString("N"));
         Dictionary<string, string> saved = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         Directory.CreateDirectory(rollback);
         try
         {
-            for (int i = 0; i < paths.Length; i++)
+            for (int i = 0; i < paths.Count; i++)
             {
                 if (!File.Exists(paths[i])) continue;
                 string copy = Path.Combine(rollback, i.ToString(CultureInfo.InvariantCulture) + ".bak");
@@ -215,6 +245,7 @@ internal static partial class TodoApp
                 WriteSecretComponent(components, "paper_settings", PaperSyncSecret);
                 WriteSecretComponent(components, "translation", TranslationSecret);
                 WriteSecretComponent(components, "caldav", CalDavSecret);
+                ApplyPluginBackup(components);
                 object scale = JsonUtil.Get(components, "ui_scale");
                 if (scale != null) WriteBackupUiScale(Convert.ToString(scale, CultureInfo.InvariantCulture));
                 object rules = JsonUtil.Get(components, "calendar_rules");
@@ -249,6 +280,16 @@ internal static partial class TodoApp
         finally
         {
             try { Directory.Delete(rollback, true); } catch { }
+        }
+    }
+
+    private static void ApplyPluginBackup(Dictionary<string,object> components)
+    {
+        foreach(object raw in JsonUtil.Array(JsonUtil.Get(components,"plugins")))
+        {
+            Dictionary<string,object> record=JsonUtil.Object(raw);string id=JsonUtil.String(record,"id","");if(!Regex.IsMatch(id,@"^[a-z0-9]+(?:[.-][a-z0-9]+)+$"))throw new Exception("插件 ID 无效。");
+            string data=PluginPaths.DataRoot(id);Directory.CreateDirectory(data);JsonUtil.SaveAtomic(Path.Combine(data,"config.json"),JsonUtil.Object(JsonUtil.Get(record,"config")));JsonUtil.WriteDpapiJson(Path.Combine(data,"secret.dat"),JsonUtil.Object(JsonUtil.Get(record,"secret")));
+            string currentPath=Path.Combine(PluginPaths.PluginRoot(id),"current.json");if(File.Exists(currentPath)){Dictionary<string,object> current=JsonUtil.LoadObject(currentPath);current["enabled"]=JsonUtil.Bool(record,"enabled",false);JsonUtil.SaveAtomic(currentPath,current);}
         }
     }
 
@@ -563,6 +604,8 @@ internal static partial class TodoApp
 
             Dictionary<string, object> portable = BuildBackupPayload(true);
             if (JsonUtil.String(portable, "config_version", "") != BackupConfigVersion) return 65;
+            Dictionary<string,object> legacy=new Dictionary<string,object>{{"format_version",1},{"config_version","1.0"},{"components",new Dictionary<string,object>{{"paper_settings",paper},{"translation",translation},{"caldav",caldav},{"ui_scale","0.90"},{"calendar_rules",new List<object>()}}}};
+            UpgradeBackupPayload(legacy);ValidateBackupPayload(legacy);List<object> upgradedPlugins=JsonUtil.Array(JsonUtil.Get(JsonUtil.Object(JsonUtil.Get(legacy,"components")),"plugins"));if(JsonUtil.String(legacy,"config_version","")!="2.0"||upgradedPlugins.Count!=1||JsonUtil.String(JsonUtil.Object(upgradedPlugins[0]),"id","")!="io.github.kevendai.arxiv")return 73;
             byte[] portableEncrypted = EncryptBackup(JsonUtil.Serialize(portable), "portable backup password", 100000);
             Dictionary<string, object> reopened = JsonUtil.Object(JsonUtil.Deserialize(DecryptBackup(portableEncrypted, "portable backup password")));
             UpgradeBackupPayload(reopened);
@@ -588,7 +631,7 @@ internal static partial class TodoApp
             if (!File.ReadAllBytes(PaperSyncSecret).SequenceEqual(paperBeforeFailure)) return 72;
             return 0;
         }
-        catch { return 60; }
+        catch(Exception ex) { try{Console.Error.WriteLine(ex.ToString());File.WriteAllText(Path.Combine(testRoot,"backup-selftest-error.txt"),ex.ToString(),RuntimeUtil.Utf8NoBom);}catch{}return 60; }
         finally
         {
             ResourceDir = originalResourceDir;

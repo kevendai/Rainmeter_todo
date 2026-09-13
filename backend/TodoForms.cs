@@ -59,7 +59,8 @@ internal static partial class TodoApp
         return null;
     }
 
-    private static void ShowSettings()
+#if LEGACY_PAPER_UI
+    private static void ShowLegacySettings()
     {
         Dictionary<string, object> credentials = ReadTranslationCredentials();
         PaperSettings settings = LoadPaperSettings();
@@ -464,6 +465,7 @@ internal static partial class TodoApp
     {
         return MessageBox.Show(label + " 使用 http://，凭据会以明文通过网络传输。\r\n\r\n仍要继续吗？", "明文凭据警告", MessageBoxButtons.YesNo, MessageBoxIcon.Warning) == DialogResult.Yes;
     }
+#endif
 
     private static void RenderUiScaleSkins()
     {
@@ -487,6 +489,7 @@ internal static partial class TodoApp
         RuntimeUtil.RefreshAll();
     }
 
+#if LEGACY_PAPER_UI
     private static string ShowPaperScoringConsent(string message)
     {
         Form form = LightUi.Form("本地论文评分", 560, 300);
@@ -618,6 +621,7 @@ internal static partial class TodoApp
         insert.BringToFront();
         return box;
     }
+#endif
 
     private static IEnumerable<string> CommonLabels(Dictionary<string, object> task)
     {

@@ -18,35 +18,26 @@ internal static partial class TodoApp
     {
         List<Dictionary<string, object>> tasks = Tasks(state);
         int changed = 0, rolled = 0;
-        DateTimeOffset now = DateTimeOffset.Now, window = CompletionWindow(now), cutoff = now.AddDays(-30);
+        DateTimeOffset now = DateTimeOffset.Now, cutoff = now.AddDays(-30);
         foreach (Dictionary<string, object> task in tasks.ToList())
         {
-            if (S(task, "source") == "arxiv" && (task.ContainsKey("translated_title") || task.ContainsKey("abstract_score") || task.ContainsKey("arxiv_id")))
+            Dictionary<string, object> policy = JsonUtil.Object(JsonUtil.Get(task, "policy"));
+            string manualLabel = JsonUtil.String(policy, "manual_complete_label", "");
+            string rolloverLabel = JsonUtil.String(policy, "rollover_label", "");
+            if (B(task, "completed") && manualLabel != "" && !Labels(task).Contains(manualLabel) && (rolloverLabel == "" || !Labels(task).Contains(rolloverLabel)))
             {
-                string original = S(task, "title"), translated = S(task, "translated_title"), score = S(task, "abstract_score"), arxiv = S(task, "arxiv_id");
-                if (arxiv == "") { Match match = Regex.Match(S(task, "target"), @"/([^/?#]+)(?:[?#].*)?$"); if (match.Success) arxiv = match.Groups[1].Value; }
-                string display = translated == "" ? original : translated;
-                task["title"] = score == "" ? display : "(" + score + ") " + display;
-                string metadata = "论文原标题：" + original + (arxiv == "" ? "" : "\r\narXiv ID：" + arxiv), note = S(task, "note");
-                task["note"] = note == "" ? metadata : note + "\r\n\r\n" + metadata;
-                task.Remove("translated_title"); task.Remove("abstract_score"); task.Remove("arxiv_id"); changed++;
+                AddLabel(task, manualLabel); changed++;
             }
-            string labelsBefore = String.Join("|", Labels(task));
-            if (S(task, "source") == "arxiv") AddLabel(task, "论文");
-            if (S(task, "source") == "caldav") AddLabel(task, "日程");
-            if (S(task, "source") == "arxiv" && B(task, "completed") && !Labels(task).Contains("已读") && !Labels(task).Contains("自动归档"))
+            if (!B(task, "completed") && JsonUtil.String(policy, "daily_rollover", "") == "auto_complete")
             {
-                DateTimeOffset? completed = RuntimeUtil.Date(task, "completed_at");
-                AddLabel(task, completed.HasValue && completed.Value.Hour == 5 && completed.Value.Minute == 59 ? "自动归档" : "已读"); changed++;
-            }
-            if (labelsBefore != String.Join("|", Labels(task))) changed++;
-            if (!B(task, "completed") && S(task, "source") == "arxiv")
-            {
+                DateTimeOffset window = PolicyWindow(now, JsonUtil.String(policy, "daily_boundary", "06:00"));
                 DateTimeOffset? created = RuntimeUtil.Date(task, "created_at");
                 if (created.HasValue && created.Value < window)
                 {
                     task["completed"] = true; task["completed_at"] = RuntimeUtil.Iso(window.AddTicks(-1));
-                    AddLabel(task, "论文"); AddLabel(task, "自动归档"); RemoveLabel(task, "已读"); rolled++;
+                    if (rolloverLabel != "") AddLabel(task, rolloverLabel);
+                    if (manualLabel != "") RemoveLabel(task, manualLabel);
+                    rolled++;
                 }
             }
         }
@@ -55,11 +46,15 @@ internal static partial class TodoApp
         return rolled;
     }
 
-    private static DateTimeOffset CompletionWindow(DateTimeOffset now)
+    private static DateTimeOffset PolicyWindow(DateTimeOffset now, string boundaryText)
     {
-        DateTimeOffset boundary = new DateTimeOffset(now.Year, now.Month, now.Day, 6, 0, 0, now.Offset);
+        TimeSpan time;
+        if (!TimeSpan.TryParseExact(boundaryText, @"hh\:mm", CultureInfo.InvariantCulture, out time)) time = TimeSpan.FromHours(6);
+        DateTimeOffset boundary = new DateTimeOffset(now.Year, now.Month, now.Day, time.Hours, time.Minutes, 0, now.Offset);
         return now < boundary ? boundary.AddDays(-1) : boundary;
     }
+
+    private static DateTimeOffset CompletionWindow(DateTimeOffset now) { return PolicyWindow(now, "06:00"); }
 
     private static void Add(Dictionary<string, object> state, ref bool refresh)
     {
@@ -85,8 +80,19 @@ internal static partial class TodoApp
     private static void Toggle(Dictionary<string, object> state, string id, ref bool refresh)
     {
         Dictionary<string, object> task = Find(state, id); if (task == null) return;
-        if (B(task, "completed")) { task["completed"] = false; task["completed_at"] = null; if (S(task, "source") == "arxiv") { task["created_at"] = RuntimeUtil.Iso(DateTimeOffset.Now); RemoveLabel(task, "已读"); RemoveLabel(task, "自动归档"); } Meta(state)["status"] = "已恢复到待办"; }
-        else { task["completed"] = true; task["completed_at"] = RuntimeUtil.Iso(DateTimeOffset.Now); if (Labels(task).Contains("论文")) { AddLabel(task, "已读"); RemoveLabel(task, "自动归档"); } Meta(state)["status"] = "已完成"; }
+        Dictionary<string, object> policy = JsonUtil.Object(JsonUtil.Get(task, "policy"));
+        string manualLabel = JsonUtil.String(policy, "manual_complete_label", ""), rolloverLabel = JsonUtil.String(policy, "rollover_label", "");
+        if (B(task, "completed")) {
+            task["completed"] = false; task["completed_at"] = null;
+            if (JsonUtil.Bool(policy, "restore_resets_age", false)) task["created_at"] = RuntimeUtil.Iso(DateTimeOffset.Now);
+            if (manualLabel != "") RemoveLabel(task, manualLabel); if (rolloverLabel != "") RemoveLabel(task, rolloverLabel);
+            Meta(state)["status"] = "已恢复到待办";
+        }
+        else {
+            task["completed"] = true; task["completed_at"] = RuntimeUtil.Iso(DateTimeOffset.Now);
+            if (manualLabel != "") AddLabel(task, manualLabel); if (rolloverLabel != "") RemoveLabel(task, rolloverLabel);
+            Meta(state)["status"] = "已完成";
+        }
         Commit(state); refresh = true;
     }
     private static void Open(Dictionary<string, object> state, string id, ref bool refresh)

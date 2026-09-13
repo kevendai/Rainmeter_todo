@@ -126,7 +126,7 @@ internal static partial class TodoApp
         translationCredentialsLoadError = "";
         if (!File.Exists(TranslationSecret)) return new Dictionary<string, object>();
         try { return JsonUtil.ReadDpapiJson(TranslationSecret); }
-        catch (Exception ex) { translationCredentialsLoadError = "翻译凭据无法解密或已损坏：" + SafeStatusMessage(ex.Message); return new Dictionary<string, object>(); }
+        catch (Exception ex) { translationCredentialsLoadError = "翻译凭据无法解密或已损坏：" + (ex.Message ?? "未知错误").Replace("\r"," ").Replace("\n"," "); return new Dictionary<string, object>(); }
     }
 
     private static void SaveTranslationCredentials(string secretId, string secretKey)
