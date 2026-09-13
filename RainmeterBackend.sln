@@ -6,6 +6,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "TodoHost", "backend\TodoHos
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "CalendarHost", "backend\CalendarHost.csproj", "{EB09D535-A5E6-4BAC-B67A-B447748A555E}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "PluginHost", "backend\PluginHost.csproj", "{5C93942B-2E6F-4E0C-9B20-13B1BA46E001}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Release|Any CPU = Release|Any CPU
@@ -15,5 +17,7 @@ Global
 		{E7A4888C-4B31-4B59-BE0A-319B591E53A0}.Release|Any CPU.Build.0 = Release|AnyCPU
 		{EB09D535-A5E6-4BAC-B67A-B447748A555E}.Release|Any CPU.ActiveCfg = Release|AnyCPU
 		{EB09D535-A5E6-4BAC-B67A-B447748A555E}.Release|Any CPU.Build.0 = Release|AnyCPU
+		{5C93942B-2E6F-4E0C-9B20-13B1BA46E001}.Release|Any CPU.ActiveCfg = Release|AnyCPU
+		{5C93942B-2E6F-4E0C-9B20-13B1BA46E001}.Release|Any CPU.Build.0 = Release|AnyCPU
 	EndGlobalSection
 EndGlobal
