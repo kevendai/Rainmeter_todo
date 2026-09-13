@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Drawing;
 using System.Globalization;
 using System.IO;
@@ -22,7 +23,31 @@ internal static partial class CalendarApp
     private static bool IsWebLink(string value){Uri uri;return Uri.TryCreate((value??"").Trim(),UriKind.Absolute,out uri)&&(uri.Scheme=="http"||uri.Scheme=="https"||uri.Scheme=="wemeet");}
     private static string Target(Dictionary<string,object>e){string direct=TrimTarget(S(e,"url"));if(direct!=""){if(IsLocalPath(direct))return direct;Uri uri;if(Uri.TryCreate(direct,UriKind.Absolute,out uri)&&(uri.Scheme=="http"||uri.Scheme=="https"||uri.Scheme=="wemeet"||uri.IsFile))return uri.IsFile?uri.LocalPath:direct;}foreach(string k in new[]{"location","description"}){string text=S(e,k);Match m=Regex.Match(text,@"(?i)(?:https?://|wemeet://|file:///)[^\s<>\""'，。；;]+");if(m.Success)return DisplayLink(TrimTarget(m.Value));m=Regex.Match(text,@"(?i)(?:[A-Z]:\\|\\\\)[^\r\n<>""|?*]+");if(m.Success)return TrimTarget(m.Value);}return "";}
     private static string FullTime(Dictionary<string,object>e){DateTimeOffset?start=RuntimeUtil.Date(e,"start_at"),end=RuntimeUtil.Date(e,"end_at");if(!start.HasValue)return"";if(B(e,"all_day")){DateTimeOffset last=end.HasValue?end.Value.AddDays(-1):start.Value;return last.Date==start.Value.Date?start.Value.ToString("yyyy年M月d日 全天"):start.Value.ToString("yyyy年M月d日")+"–"+last.ToString("yyyy年M月d日")+" 全天";}if(!end.HasValue||end<=start)return start.Value.ToString("yyyy年M月d日 HH:mm");return end.Value.Date==start.Value.Date?start.Value.ToString("yyyy年M月d日 HH:mm")+"–"+end.Value.ToString("HH:mm"):start.Value.ToString("yyyy年M月d日 HH:mm")+" → "+end.Value.ToString("yyyy年M月d日 HH:mm");}
-    private static bool AddTask(Dictionary<string,object>e,Dictionary<string,object>state,string mode,bool hide){using(Mutex m=new Mutex(false,@"Global\RainmeterTodoState")){bool held=m.WaitOne(TimeSpan.FromSeconds(15));if(!held)throw new Exception("待办数据正忙，请稍后重试");try{if(!File.Exists(TodoPath))throw new Exception("未找到待办数据");Dictionary<string,object>todo=JsonUtil.LoadObject(TodoPath);List<Dictionary<string,object>>tasks=List(todo,"tasks");Dictionary<string,object>task=tasks.FirstOrDefault(t=>S(t,"calendar_occurrence_key")==S(e,"occurrence_key"));if(task!=null){if(!Conversions(state).Any(c=>S(c,"occurrence_key")==S(e,"occurrence_key")))Conversions(state).Add(Conversion(e,task,mode,hide));return false;}Conversions(state).RemoveAll(c=>S(c,"occurrence_key")==S(e,"occurrence_key"));DateTimeOffset?start=RuntimeUtil.Date(e,"start_at"),end=RuntimeUtil.Date(e,"end_at"),reminder=RuntimeUtil.Date(e,"reminder_at");DateTimeOffset?available=start.HasValue&&reminder.HasValue?(start.Value<=reminder.Value?start:reminder):(reminder.HasValue?reminder:start);if(B(e,"all_day")&&end.HasValue)end=end.Value.AddMinutes(-1);string source=S(e,"source")=="local"?"本地":"CalDAV";List<string>notes=new List<string>{"来自 "+source+" 日程","日程时间："+FullTime(e)};if(reminder.HasValue)notes.Add("最早提醒："+reminder.Value.ToString("yyyy年M月d日 HH:mm"));if(S(e,"location")!="")notes.Add("地点："+S(e,"location"));if(S(e,"description")!="")notes.Add("日程备注："+S(e,"description"));task=new Dictionary<string,object>{{"id",Guid.NewGuid().ToString("N")},{"title","（日程）"+CleanTitle(S(e,"title"))},{"target",Target(e)},{"note",String.Join("\r\n",notes)},{"labels",new List<object>{"日程"}},{"completed",false},{"source",S(e,"source")=="local"?"local-calendar":"caldav"},{"created_at",RuntimeUtil.Iso(DateTimeOffset.Now)},{"completed_at",null},{"available_from",available.HasValue?RuntimeUtil.Iso(available.Value):null},{"due_at",end.HasValue?RuntimeUtil.Iso(end.Value):null},{"calendar_uid",S(e,"uid")},{"calendar_occurrence_key",S(e,"occurrence_key")}};tasks.Add(task);Save(TodoPath,todo);Conversions(state).Add(Conversion(e,task,mode,hide));return true;}finally{m.ReleaseMutex();}}}
+    private static bool AddTask(Dictionary<string,object>e,Dictionary<string,object>state,string mode,bool hide)
+    {
+        string pluginHost=Path.Combine(TodoDir,"PluginHost.exe");
+        if(!File.Exists(pluginHost))throw new Exception("未找到 PluginHost.exe");
+        string token=Guid.NewGuid().ToString("N"),input=Path.Combine(Path.GetTempPath(),"rw-calendar-"+token+".json"),output=Path.Combine(Path.GetTempPath(),"rw-calendar-"+token+".result.json");
+        try
+        {
+            JsonUtil.SaveAtomic(input,e);
+            using(Process p=Process.Start(new ProcessStartInfo(pluginHost,"Transform io.github.kevendai.calendar-to-todo "+Quote(input)+" "+Quote(output)){UseShellExecute=false,CreateNoWindow=true,WindowStyle=ProcessWindowStyle.Hidden}))
+            {
+                if(p==null||!p.WaitForExit(45000)){try{if(p!=null)p.Kill();}catch{}throw new Exception("日程转换插件执行超时");}
+                if(p.ExitCode!=0||!File.Exists(output))throw new Exception("日程转换插件执行失败");
+            }
+            Dictionary<string,object> response=JsonUtil.LoadObject(output);
+            if(!JsonUtil.Bool(response,"ok",false))throw new Exception(JsonUtil.String(response,"error","日程转换失败"));
+            Dictionary<string,object> imported=JsonUtil.Object(JsonUtil.Get(response,"import"));
+            string taskId=JsonUtil.String(imported,"task_id","");
+            if(taskId=="")throw new Exception("日程转换未返回待办 ID");
+            Conversions(state).RemoveAll(c=>S(c,"occurrence_key")==S(e,"occurrence_key"));
+            Conversions(state).Add(Conversion(e,new Dictionary<string,object>{{"id",taskId}},mode,hide));
+            return JsonUtil.Int(imported,"created",0)>0;
+        }
+        finally{try{File.Delete(input);}catch{}try{File.Delete(output);}catch{}}
+    }
+    private static string Quote(string value){return "\""+value.Replace("\"","\\\"")+"\"";}
     private static Dictionary<string,object> Conversion(Dictionary<string,object>e,Dictionary<string,object>task,string mode,bool hide){return new Dictionary<string,object>{{"occurrence_key",S(e,"occurrence_key")},{"uid",S(e,"uid")},{"recurrence_id",S(e,"recurrence_id")},{"task_id",S(task,"id")},{"converted_at",RuntimeUtil.Iso(DateTimeOffset.Now)},{"mode",mode},{"hide_event",hide}};}
     private static bool OccursOn(Dictionary<string,object>e,DateTime date){DateTimeOffset?start=RuntimeUtil.Date(e,"start_at"),end=RuntimeUtil.Date(e,"end_at");if(!start.HasValue||!end.HasValue)return false;DateTimeOffset ds=new DateTimeOffset(date,TimeZoneInfo.Local.GetUtcOffset(date)),de=ds.AddDays(1);return start.Value<de&&end.Value>ds;}
     private static bool AutoConvertDue(Dictionary<string,object> e,DateTime today){DateTimeOffset? reminder=RuntimeUtil.Date(e,"reminder_at");return OccursOn(e,today)||(reminder.HasValue&&reminder.Value.Date<=today);}

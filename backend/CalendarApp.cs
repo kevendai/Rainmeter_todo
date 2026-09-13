@@ -20,7 +20,6 @@ internal static partial class CalendarApp
     private static string IncludePath { get { return Path.Combine(R,"Generated.inc"); } }
     private static string GuardPath { get { return Path.Combine(R,".refresh-guard"); } }
     private static string TodoDir { get { return Path.GetFullPath(Path.Combine(R,"..","..","Todo","@Resources")); } }
-    private static string TodoPath { get { return Path.Combine(TodoDir,"tasks.json"); } }
     private static string SecretPath { get { return Path.Combine(TodoDir,"caldav.secret"); } }
 
     [STAThread] private static int Main(string[] args)

@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Drawing;
 using System.Globalization;
 using System.IO;
@@ -27,5 +28,14 @@ internal static partial class CalendarApp
     private static IEnumerable<Dictionary<string,object>> AllEvents(Dictionary<string,object> cache,Dictionary<string,object> state){foreach(Dictionary<string,object> e in Events(cache)){e["source"]="caldav";if(S(e,"calendar")=="")e["calendar"]="caldav";yield return e;}foreach(Dictionary<string,object> master in LocalEvents(state)){master["source"]="local";if(S(master,"calendar")=="")master["calendar"]="local";foreach(Dictionary<string,object> e in ExpandLocalSeries(master))yield return e;}}
     private static Dictionary<string,object> FindEvent(Dictionary<string,object> cache,Dictionary<string,object> state,string id){return AllEvents(cache,state).FirstOrDefault(e=>S(e,"id")==id);}
 
-    private static bool Reconcile(Dictionary<string,object> state){if(!File.Exists(TodoPath))return false;try{Dictionary<string,object>todo=JsonUtil.LoadObject(TodoPath);List<Dictionary<string,object>>tasks=List(todo,"tasks");HashSet<string>ids=new HashSet<string>(tasks.Select(t=>S(t,"id")));HashSet<string>keys=new HashSet<string>(tasks.Select(t=>S(t,"calendar_occurrence_key")));List<Dictionary<string,object>>conversions=Conversions(state);int before=conversions.Count;conversions.RemoveAll(c=>!ids.Contains(S(c,"task_id"))&&!keys.Contains(S(c,"occurrence_key")));return before!=conversions.Count;}catch{return false;}}
+    private static bool Reconcile(Dictionary<string,object> state)
+    {
+        List<Dictionary<string,object>> conversions=Conversions(state);if(conversions.Count==0)return false;string host=Path.Combine(TodoDir,"PluginHost.exe");if(!File.Exists(host))return false;
+        string token=Guid.NewGuid().ToString("N"),input=Path.Combine(Path.GetTempPath(),"rw-query-"+token+".json"),output=Path.Combine(Path.GetTempPath(),"rw-query-"+token+".result.json");try
+        {
+            JsonUtil.SaveAtomic(input,new Dictionary<string,object>{{"task_ids",conversions.Select(c=>(object)S(c,"task_id")).ToList()}});
+            using(Process p=Process.Start(new ProcessStartInfo(host,"QueryTasks "+Quote(input)+" "+Quote(output)){UseShellExecute=false,CreateNoWindow=true,WindowStyle=ProcessWindowStyle.Hidden}))if(p==null||!p.WaitForExit(30000)||p.ExitCode!=0)return false;
+            Dictionary<string,object> result=JsonUtil.LoadObject(output);HashSet<string> ids=new HashSet<string>(JsonUtil.Array(JsonUtil.Get(result,"task_ids")).Select(Convert.ToString),StringComparer.OrdinalIgnoreCase);int before=conversions.Count;conversions.RemoveAll(c=>!ids.Contains(S(c,"task_id")));return before!=conversions.Count;
+        }catch{return false;}finally{try{File.Delete(input);}catch{}try{File.Delete(output);}catch{}}
+    }
 }
