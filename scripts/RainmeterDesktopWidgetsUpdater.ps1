@@ -139,15 +139,16 @@ function Install-Package {
 
     $targetHostPaths = @(
         (Join-Path $roots.SkinsRoot 'Todo\@Resources\TodoHost.exe'),
-        (Join-Path $roots.SkinsRoot 'Calendar\@Resources\CalendarHost.exe')
+        (Join-Path $roots.SkinsRoot 'Calendar\@Resources\CalendarHost.exe'),
+        (Join-Path $roots.SkinsRoot 'Todo\@Resources\PluginHost.exe')
     )
-    foreach ($hostProcess in Get-Process -Name TodoHost,CalendarHost -ErrorAction SilentlyContinue) {
+    foreach ($hostProcess in Get-Process -Name TodoHost,CalendarHost,PluginHost -ErrorAction SilentlyContinue) {
         if ($targetHostPaths -contains $hostProcess.Path) {
             try { $hostProcess.CloseMainWindow() | Out-Null } catch {}
         }
     }
     Start-Sleep -Milliseconds 800
-    foreach ($hostProcess in Get-Process -Name TodoHost,CalendarHost -ErrorAction SilentlyContinue) {
+    foreach ($hostProcess in Get-Process -Name TodoHost,CalendarHost,PluginHost -ErrorAction SilentlyContinue) {
         if ($targetHostPaths -contains $hostProcess.Path) {
             try {
                 if (-not $hostProcess.HasExited) { $hostProcess.Kill() }
@@ -203,6 +204,9 @@ function Install-Package {
             $swapped.Add($skin)
             foreach ($name in $preservedHashesBySkin[$skin].Keys) { $liveData = Join-Path $target ("@Resources\$name"); if (-not (Test-Path -LiteralPath $liveData) -or (Get-FileHash -LiteralPath $liveData -Algorithm SHA256).Hash -ne $preservedHashesBySkin[$skin][$name]) { throw "Installed user data verification failed: $skin/$name" } }
         }
+        $installedTodoHost=Join-Path $roots.SkinsRoot 'Todo\@Resources\TodoHost.exe';$installedCalendarHost=Join-Path $roots.SkinsRoot 'Calendar\@Resources\CalendarHost.exe';$installedPluginHost=Join-Path $roots.SkinsRoot 'Todo\@Resources\PluginHost.exe'
+        foreach($requiredHost in @($installedTodoHost,$installedCalendarHost,$installedPluginHost)){if(-not (Test-Path -LiteralPath $requiredHost -PathType Leaf)){throw "Installed host is missing: $requiredHost"}}
+        foreach($probe in @(@{File=$installedPluginHost;Args='SelfTest';Name='PluginHost'},@{File=$installedTodoHost;Args='Render';Name='TodoHost'},@{File=$installedCalendarHost;Args='Render';Name='CalendarHost'})){$process=Start-Process -FilePath $probe.File -ArgumentList $probe.Args -WindowStyle Hidden -PassThru;if(-not $process.WaitForExit(30000)){try{$process.Kill()}catch{};throw "$($probe.Name) validation timed out"};if($process.ExitCode -ne 0){throw "$($probe.Name) validation failed with exit code $($process.ExitCode)"}}
     }
     catch {
         [array]$rollbackSkins = @($swapped)

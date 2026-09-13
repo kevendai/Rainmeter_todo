@@ -42,14 +42,18 @@ try {
     [IO.File]::WriteAllText($liveIni, $iniText, [Text.UnicodeEncoding]::new($false, $true))
     [IO.File]::WriteAllText((Join-Path $stage '@Resources\app-version.txt'), $version, [Text.UTF8Encoding]::new($false))
     & (Join-Path $PSScriptRoot 'Build-Backend.ps1') -Backend Todo -OutputDirectory (Join-Path $stage '@Resources') | Out-Null
+    & (Join-Path $PSScriptRoot 'Build-Backend.ps1') -Backend Plugin -OutputDirectory (Join-Path $stage '@Resources') | Out-Null
+    & (Join-Path $PSScriptRoot 'Build-OfficialPlugins.ps1') -OutputDirectory (Join-Path $stage '@Resources\BundledPlugins') | Out-Null
+    Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'Install-RwPlugin.ps1') -Destination (Join-Path $stage '@Resources\PluginInstaller.ps1') -Force
     foreach ($name in $preservedHashes.Keys) { $stagedData = Join-Path $stage ('@Resources\' + $name); if (-not (Test-Path -LiteralPath $stagedData) -or (Get-FileHash -LiteralPath $stagedData -Algorithm SHA256).Hash -ne $preservedHashes[$name]) { throw "Staged user data verification failed: $name" } }
     Remove-Item -LiteralPath (Join-Path $stage '@Resources\Todo.ps1') -Force -ErrorAction SilentlyContinue
     Remove-Item -LiteralPath (Join-Path $stage '@Resources\TodoHost.cs') -Force -ErrorAction SilentlyContinue
 
     $oldHost = Join-Path $target '@Resources\TodoHost.exe'
-    foreach ($process in Get-Process -Name TodoHost -ErrorAction SilentlyContinue | Where-Object { $_.Path -eq $oldHost }) { try { $process.CloseMainWindow() | Out-Null } catch {} }
+    $oldPluginHost = Join-Path $target '@Resources\PluginHost.exe'
+    foreach ($process in Get-Process -Name TodoHost,PluginHost -ErrorAction SilentlyContinue | Where-Object { $_.Path -eq $oldHost -or $_.Path -eq $oldPluginHost }) { try { $process.CloseMainWindow() | Out-Null } catch {} }
     Start-Sleep -Milliseconds 500
-    foreach ($process in Get-Process -Name TodoHost -ErrorAction SilentlyContinue | Where-Object { $_.Path -eq $oldHost }) { try { if (-not $process.HasExited) { $process.Kill() }; $process.WaitForExit(3000) } catch {} }
+    foreach ($process in Get-Process -Name TodoHost,PluginHost -ErrorAction SilentlyContinue | Where-Object { $_.Path -eq $oldHost -or $_.Path -eq $oldPluginHost }) { try { if (-not $process.HasExited) { $process.Kill() }; $process.WaitForExit(3000) } catch {} }
 
     $rainmeterWasRunning = @(Get-Process -Name Rainmeter -ErrorAction SilentlyContinue | Where-Object { $_.Path -eq $exe }).Count -gt 0
     if ($rainmeterWasRunning) { & $exe '!Quit'; $deadline = (Get-Date).AddSeconds(10); do { Start-Sleep -Milliseconds 250; $remainingRainmeter = @(Get-Process -Name Rainmeter -ErrorAction SilentlyContinue | Where-Object { $_.Path -eq $exe }) } while ($remainingRainmeter.Count -gt 0 -and (Get-Date) -lt $deadline); if ($remainingRainmeter.Count -gt 0) { throw 'Rainmeter did not exit within 10 seconds.' } }
@@ -59,6 +63,10 @@ try {
     $swapped = $true
     foreach ($name in $preservedHashes.Keys) { $liveData = Join-Path $target ('@Resources\' + $name); if (-not (Test-Path -LiteralPath $liveData) -or (Get-FileHash -LiteralPath $liveData -Algorithm SHA256).Hash -ne $preservedHashes[$name]) { throw "Installed user data verification failed: $name" } }
     $hostExe = Join-Path $target '@Resources\TodoHost.exe'
+    $pluginHostExe = Join-Path $target '@Resources\PluginHost.exe'
+    $pluginProbe = Start-Process -FilePath $pluginHostExe -ArgumentList 'SelfTest' -WindowStyle Hidden -PassThru
+    if (-not $pluginProbe.WaitForExit(20000)) { try { $pluginProbe.Kill() } catch {}; throw 'PluginHost SelfTest timed out' }
+    if ($pluginProbe.ExitCode -ne 0) { throw 'PluginHost SelfTest failed' }
     $render = Start-Process -FilePath $hostExe -ArgumentList 'Render' -WindowStyle Hidden -PassThru
     if (-not $render.WaitForExit(20000)) { try { $render.Kill() } catch {}; throw 'TodoHost Render timed out' }
     if ($render.ExitCode -ne 0) { throw 'TodoHost Render failed' }
@@ -71,7 +79,8 @@ try {
 catch {
     if ($swapped) {
         $newHost = Join-Path $target '@Resources\TodoHost.exe'
-        foreach ($process in Get-Process -Name TodoHost -ErrorAction SilentlyContinue | Where-Object { $_.Path -eq $newHost }) { try { $process.Kill(); $process.WaitForExit(3000) } catch {} }
+        $newPluginHost = Join-Path $target '@Resources\PluginHost.exe'
+        foreach ($process in Get-Process -Name TodoHost,PluginHost -ErrorAction SilentlyContinue | Where-Object { $_.Path -eq $newHost -or $_.Path -eq $newPluginHost }) { try { $process.Kill(); $process.WaitForExit(3000) } catch {} }
         if (Test-Path -LiteralPath $target) { Remove-Item -LiteralPath $target -Recurse -Force }
         if (Test-Path -LiteralPath $backup) { Move-Item -LiteralPath $backup -Destination $target }
         if ($rainmeterWasRunning -and -not (Get-Process -Name Rainmeter -ErrorAction SilentlyContinue | Where-Object { $_.Path -eq $exe })) { try { Start-Process -FilePath $exe | Out-Null; Start-Sleep -Milliseconds 1200 } catch {} }

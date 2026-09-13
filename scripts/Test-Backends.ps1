@@ -12,10 +12,13 @@ try {
     $refs = @('/r:System.Web.Extensions.dll','/r:System.Windows.Forms.dll','/r:System.Drawing.dll','/r:System.Security.dll')
     $todo = Join-Path $build 'TodoHost.exe'
     $calendar = Join-Path $build 'CalendarHost.exe'
+    $plugin = Join-Path $build 'PluginHost.exe'
+    $bundledPlugins = Join-Path $build 'BundledPlugins'
     $smoke = Join-Path $build 'SmokeTests.exe'
     $todoLayout = Join-Path $build 'TodoLayoutProbe.exe'
     $calendarLayout = Join-Path $build 'CalendarLayoutProbe.exe'
     $calendarRecurrence = Join-Path $build 'CalendarRecurrenceProbe.exe'
+    $fakePlugin = Join-Path $build 'FakePlugin.exe'
     $dpiAssertions = Join-Path $tests 'DpiLayoutAssertions.cs'
     function Get-ProjectSources([string]$projectPath) {
         [xml]$projectXml = Get-Content -LiteralPath $projectPath -Raw -Encoding UTF8
@@ -27,6 +30,9 @@ try {
     $calendarSources = Get-ProjectSources (Join-Path $backend 'CalendarHost.csproj')
     & (Join-Path $PSScriptRoot 'Build-Backend.ps1') -Backend Todo -OutputDirectory $build | Out-Null
     & (Join-Path $PSScriptRoot 'Build-Backend.ps1') -Backend Calendar -OutputDirectory $build | Out-Null
+    & (Join-Path $PSScriptRoot 'Build-Backend.ps1') -Backend Plugin -OutputDirectory $build | Out-Null
+    & (Join-Path $PSScriptRoot 'Build-OfficialPlugins.ps1') -OutputDirectory $bundledPlugins | Out-Null
+    & (Join-Path $tests 'Test-PluginInstaller.ps1') -Installer (Join-Path $PSScriptRoot 'Install-RwPlugin.ps1') -PluginSource (Join-Path $bundledPlugins 'calendar-to-todo')
     & $csc /nologo /target:exe /optimize+ /r:System.Web.Extensions.dll "/out:$smoke" (Join-Path $backend 'SmokeTests.cs')
     if ($LASTEXITCODE -ne 0) { throw 'Smoke test compilation failed' }
     & $csc /nologo /target:exe /main:TodoLayoutProbe /optimize+ @refs "/out:$todoLayout" @todoSources $dpiAssertions (Join-Path $tests 'TodoLayoutProbe.cs')
@@ -35,20 +41,49 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'Calendar layout probe compilation failed' }
     & $csc /nologo /target:exe /main:CalendarRecurrenceProbe /optimize+ @refs "/out:$calendarRecurrence" @calendarSources (Join-Path $tests 'CalendarRecurrenceProbe.cs')
     if ($LASTEXITCODE -ne 0) { throw 'Calendar recurrence probe compilation failed' }
+    & $csc /nologo /target:exe /optimize+ /r:System.Web.Extensions.dll "/out:$fakePlugin" (Join-Path $tests 'FakePlugin.cs')
+    if ($LASTEXITCODE -ne 0) { throw 'Fake plugin compilation failed' }
     $previousCommandDisable = $env:RAINMETER_COMMANDS_DISABLED
+    $previousPluginRoot = $env:RAINMETER_PLUGIN_ROOT
     try {
         $env:RAINMETER_COMMANDS_DISABLED = '1'
+        $env:RAINMETER_PLUGIN_ROOT = Join-Path $build 'PluginState'
         & $smoke $todo $calendar
         if ($LASTEXITCODE -ne 0) { throw 'Backend smoke tests failed' }
-        & $todo BackupSelfTest
-        if ($LASTEXITCODE -ne 0) { throw "Encrypted backup self-tests failed with exit code $LASTEXITCODE" }
-        Write-Host 'Encrypted portable backup config v1.0 round-trip, DPAPI rewrap, rollback, wrong-password, and tamper tests passed'
-        & $todo PaperRssSelfTest
-        if ($LASTEXITCODE -ne 0) { throw "Paper RSS self-tests failed with exit code $LASTEXITCODE" }
-        Write-Host 'Paper RSS selection, completion filtering, score filtering, RFC 822 dates, empty feed, and XML escaping passed'
+        & $plugin SelfTest
+        if ($LASTEXITCODE -ne 0) { throw "PluginHost self-tests failed with exit code $LASTEXITCODE" }
+        & $plugin Bootstrap
+        if ($LASTEXITCODE -ne 0) { throw "Bundled plugin bootstrap failed with exit code $LASTEXITCODE" }
+        $arxivPlugin=Join-Path $bundledPlugins 'arxiv\bin\ArxivPlugin.exe';& $arxivPlugin PaperRssSelfTest;if($LASTEXITCODE -ne 0){throw "arXiv plugin RSS tests failed with exit code $LASTEXITCODE"};Write-Host 'arXiv plugin RSS selection, filtering, dates and XML escaping passed'
+        @{version=3;meta=@{};tasks=@()} | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path $build 'tasks.json') -Encoding UTF8
+        $eventPath=Join-Path $build 'calendar-event.json';$firstResult=Join-Path $build 'calendar-result-1.json';$secondResult=Join-Path $build 'calendar-result-2.json'
+        @{uid='meeting';occurrence_key='meeting#one';title='组会';start_at='2026-09-13T09:00:00+08:00';end_at='2026-09-13T10:00:00+08:00';reminder_at='2026-09-13T08:45:00+08:00';source='caldav';all_day=$false}|ConvertTo-Json -Depth 5|Set-Content -LiteralPath $eventPath -Encoding UTF8
+        & $plugin Transform io.github.kevendai.calendar-to-todo $eventPath $firstResult;if($LASTEXITCODE -ne 0){throw 'Calendar transform plugin failed'}
+        & $plugin Transform io.github.kevendai.calendar-to-todo $eventPath $secondResult;if($LASTEXITCODE -ne 0){throw 'Calendar transform plugin repeat failed'}
+        $one=Get-Content -LiteralPath $firstResult -Raw -Encoding UTF8|ConvertFrom-Json;$two=Get-Content -LiteralPath $secondResult -Raw -Encoding UTF8|ConvertFrom-Json;$imported=Get-Content -LiteralPath (Join-Path $build 'tasks.json') -Raw -Encoding UTF8|ConvertFrom-Json
+        if($one.import.created -ne 1 -or $two.import.skipped -ne 1 -or $imported.tasks.Count -ne 1){throw 'Calendar transform import/dedup assertion failed'}
+        Write-Host 'Calendar plugin transform, import, UTF-8 and origin dedup passed'
+        $fakeId='io.github.test.protocol';$fakeVersion=Join-Path $env:RAINMETER_PLUGIN_ROOT 'Plugins\io.github.test.protocol\versions\1.0.0';New-Item -ItemType Directory -Path (Join-Path $fakeVersion 'bin') -Force|Out-Null;Copy-Item -LiteralPath $fakePlugin -Destination (Join-Path $fakeVersion 'bin\FakePlugin.exe')
+        @{id=$fakeId;name='Protocol probe';version='1.0.0';api_version=1;min_host_version='2.0.0';entry='bin/FakePlugin.exe';capabilities=@('value_provider');permissions=@()}|ConvertTo-Json -Depth 5|Set-Content -LiteralPath (Join-Path $fakeVersion 'plugin.json') -Encoding UTF8
+        @{version='1.0.0';enabled=$true}|ConvertTo-Json|Set-Content -LiteralPath (Join-Path $env:RAINMETER_PLUGIN_ROOT 'Plugins\io.github.test.protocol\current.json') -Encoding UTF8
+        & $plugin PluginAction $fakeId progress;if($LASTEXITCODE -ne 0){throw 'Valid progress/result protocol failed'}
+        foreach($bad in @('invalid_json','duplicate_result','no_result','crash')){& $plugin PluginAction $fakeId $bad;if($LASTEXITCODE -eq 0){throw "Malformed plugin protocol was accepted: $bad"}}
+        & $plugin Values $fakeId;if($LASTEXITCODE -ne 0){throw 'Value provider success failed'}
+        $values=Get-Content (Join-Path $env:RAINMETER_PLUGIN_ROOT 'PluginValues.json') -Raw -Encoding UTF8|ConvertFrom-Json;$inc=Get-Content (Join-Path $build 'PluginValues.inc') -Raw -Encoding Unicode
+        if($values.providers.$fakeId.ttl -ne 60 -or $inc -notmatch 'Plugin_io_github_test_protocol_wan_ip=测试地址'){throw 'Value provider TTL/INC materialization failed'}
+        $fakeData=Join-Path $env:RAINMETER_PLUGIN_ROOT 'PluginData\io.github.test.protocol';New-Item -ItemType Directory -Path $fakeData -Force|Out-Null;@{fail=$true}|ConvertTo-Json|Set-Content (Join-Path $fakeData 'config.json') -Encoding UTF8
+        & $plugin Values $fakeId;if($LASTEXITCODE -eq 0){throw 'Failing value provider reported success'};$inc=Get-Content (Join-Path $build 'PluginValues.inc') -Raw -Encoding Unicode
+        if($inc -notmatch 'Plugin_io_github_test_protocol_wan_ip_Stale=1' -or $inc -notmatch 'Plugin_io_github_test_protocol_wan_ip=测试地址'){throw 'Value provider stale last-success behavior failed'}
+        Remove-Item (Join-Path $fakeData 'config.json') -Force
+        $longHost=Start-Process -FilePath $plugin -ArgumentList @('PluginAction',$fakeId,'sleep') -WindowStyle Hidden -PassThru;$jobPath=Join-Path $env:RAINMETER_PLUGIN_ROOT 'PluginJobs\io.github.test.protocol.json';$job=$null;for($attempt=0;$attempt -lt 50;$attempt++){if(Test-Path $jobPath){$job=Get-Content $jobPath -Raw -Encoding UTF8|ConvertFrom-Json;if($job.state -eq 'running' -and $job.pid){break}};Start-Sleep -Milliseconds 100};if(-not $job.pid){try{$longHost.Kill()}catch{};throw 'Long-running plugin PID was not recorded'};& $plugin Cancel $fakeId;if($LASTEXITCODE -ne 0){throw 'Plugin cancellation command failed'};if(-not $longHost.WaitForExit(10000)){try{$longHost.Kill()}catch{};throw 'Plugin host did not settle after cancellation'};$job=Get-Content $jobPath -Raw -Encoding UTF8|ConvertFrom-Json;if($job.state -ne 'cancelled'){throw ('Cancelled job state was overwritten: '+$job.state+' / '+$job.message)}
+        Write-Host 'Plugin progress, invalid JSON, duplicate/missing result and crash isolation passed'
+        $backupProcess=Start-Process -FilePath $todo -ArgumentList 'BackupSelfTest' -WindowStyle Hidden -PassThru -Wait
+        if ($backupProcess.ExitCode -ne 0) { throw "Encrypted backup self-tests failed with exit code $($backupProcess.ExitCode)" }
+        Write-Host 'Encrypted portable backup config v2.0 round-trip, v1.0 compatibility, DPAPI rewrap, rollback, wrong-password, and tamper tests passed'
         & $calendarRecurrence
         if ($LASTEXITCODE -ne 0) { throw "Calendar recurrence tests failed with exit code $LASTEXITCODE" }
     } finally {
+        if ($null -eq $previousPluginRoot) { Remove-Item Env:RAINMETER_PLUGIN_ROOT -ErrorAction SilentlyContinue } else { $env:RAINMETER_PLUGIN_ROOT = $previousPluginRoot }
         if ($null -eq $previousCommandDisable) { Remove-Item Env:RAINMETER_COMMANDS_DISABLED -ErrorAction SilentlyContinue }
         else { $env:RAINMETER_COMMANDS_DISABLED = $previousCommandDisable }
     }

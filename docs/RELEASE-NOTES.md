@@ -1,5 +1,15 @@
 # Release Notes
 
+## 2.0.0 - 2026-09-13
+
+- 新增按需启动的 `PluginHost.exe`、Plugin API v1、JSON Lines 进程协议、UTF-8 管道、超时/取消、任务状态、错误日志和插件级同步互斥。
+- Todo 数据升级为 v3：外部身份统一使用 `origin.plugin_id + external_id`，行为使用 `policy`，核心不再识别 arXiv/CalDAV 业务名；迁移前创建时间戳备份并写入幂等完成标记。
+- arXiv、Calendar-to-Todo 和 Network IP 成为三个独立进程官方插件；TodoHost 不再编译论文抓取/RSS 服务，CalendarHost 不再直接读写 `tasks.json`。
+- 新增插件管理 UI：安装、启用、禁用、Schema 配置、actions、取消、更新、卸载及二次删除数据确认；市场仅显示 `official=true` 条目并强制 GitHub HTTPS 与 SHA256。
+- 新增 `.rwplugin` 安全 staging 安装器、官方插件包/哈希/锁文件构建、GitHub Pages 注册表模板和公开 Schema/API 文档。
+- 新增 `PluginValues.json` / `PluginValues.inc` 桥接、TTL 调度以及失败时保留最后成功值的 Stale 标记。
+- `.rwbackup` 配置升级为 2.0，包含插件启用状态、配置和重新加密的 secret，并继续导入 1.0 备份。
+
 ## 1.5.4 - 2026-09-11
 
 - 修复待办管理、论文 Worker、自动归档和备份导入之间的并发整文件写入竞态：所有状态变更统一在全局锁内重新加载、修改并原子提交，避免过期快照覆盖新数据。

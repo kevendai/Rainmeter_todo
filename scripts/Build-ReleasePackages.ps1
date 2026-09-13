@@ -27,6 +27,7 @@ function Copy-Tree {
         'translation.secret',
         'paper-sync.secret',
         'caldav.secret',
+        'PluginValues.inc',
         'ui-scale.txt',
         'tasks.json',
         'calendar-cache.json',
@@ -209,6 +210,13 @@ function New-Package {
 
     Copy-Tree (Join-Path $projectRoot 'skins\Todo') $todoRoot
     Copy-Tree (Join-Path $projectRoot 'skins\Calendar') $calendarRoot
+    # PluginValues.inc is user/runtime data. Never copy the working-tree file
+    # into a release; create a known-empty bridge for first startup instead.
+    [IO.File]::WriteAllText(
+        (Join-Path $todoRoot '@Resources\PluginValues.inc'),
+        "[Variables]`r`n",
+        [Text.UnicodeEncoding]::new($false, $true)
+    )
     Remove-ReleaseSecrets $skinsRoot
 
     & (Join-Path $PSScriptRoot 'New-RefreshArrow.ps1') -OutputDirectory (Join-Path $todoRoot '@Resources\RefreshFrames')
@@ -221,8 +229,12 @@ function New-Package {
 
     $todoExe = Join-Path $todoRoot '@Resources\TodoHost.exe'
     $calendarExe = Join-Path $calendarRoot '@Resources\CalendarHost.exe'
+    $pluginExe = Join-Path $todoRoot '@Resources\PluginHost.exe'
     & (Join-Path $PSScriptRoot 'Build-Backend.ps1') -Backend Todo -OutputDirectory (Split-Path $todoExe -Parent) | Out-Null
     & (Join-Path $PSScriptRoot 'Build-Backend.ps1') -Backend Calendar -OutputDirectory (Split-Path $calendarExe -Parent) | Out-Null
+    & (Join-Path $PSScriptRoot 'Build-Backend.ps1') -Backend Plugin -OutputDirectory (Split-Path $pluginExe -Parent) | Out-Null
+    & (Join-Path $PSScriptRoot 'Build-OfficialPlugins.ps1') -OutputDirectory (Join-Path $todoRoot '@Resources\BundledPlugins') -PackageDirectory (Join-Path $todoRoot '@Resources\BundledPluginPackages') -LockPath (Join-Path $todoRoot '@Resources\bundled-plugins.lock.json') | Out-Null
+    Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'Install-RwPlugin.ps1') -Destination (Join-Path $todoRoot '@Resources\PluginInstaller.ps1') -Force
 
     Copy-Item -LiteralPath $installer -Destination (Join-Path $packageRoot 'Rainmeter-4.5.26.exe') -Force
     Copy-Item -LiteralPath (Join-Path $projectRoot 'docs\RELEASE-DEPLOY.md') -Destination (Join-Path $packageRoot 'DEPLOY.md') -Force
@@ -237,7 +249,8 @@ function New-Package {
         rainmeter = '4.5.26.3894'
         paper_features = $true
         paper_features_runtime_switch = $true
-        excludes = @('translation.secret','paper-sync.secret','caldav.secret','ui-scale.txt','tasks.json','calendar-cache.json','calendar-state.json','PaperCache')
+        plugin_api = 1
+        excludes = @('translation.secret','paper-sync.secret','caldav.secret','ui-scale.txt','tasks.json','calendar-cache.json','calendar-state.json','PaperCache','PluginData','PluginLogs','PluginJobs')
     } | ConvertTo-Json -Depth 4
     Set-Content -LiteralPath (Join-Path $packageRoot 'manifest.json') -Value $manifest -Encoding UTF8
 

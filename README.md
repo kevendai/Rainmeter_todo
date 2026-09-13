@@ -1,6 +1,6 @@
 # Rainmeter Desktop Widgets
 
-一套面向 Windows 的 Rainmeter 桌面组件，把待办、日程和论文推荐放在桌面右上角。日常操作通过原生 C# 窗口完成，不需要常驻终端，也不依赖外部 Python 服务。
+一套面向 Windows 的 Rainmeter 桌面组件，把待办、日程和可安装的数据插件放在桌面右上角。日常操作通过原生 C# 窗口完成；`PluginHost.exe` 和插件均按需启动，不需要常驻终端或 Windows 服务。
 
 ## 功能
 
@@ -9,7 +9,7 @@
 - 快速新增、编辑、完成、恢复和删除任务。
 - 支持开始时间、截止时间、逾期标红、备注、标签和批量管理。
 - 点击任务可打开网页、文件、文件夹或应用。
-- 每天 06:00 自动整理上一周期未完成的论文任务，并区分“已读”和“自动归档”。
+- 外部任务通过通用 policy 控制每日整理、完成标签和恢复行为；普通“论文”标签不会触发隐藏规则。
 
 ### 今日日程
 
@@ -27,12 +27,20 @@
 - 可选启用仅绑定 `127.0.0.1:8891` 的本地 RSS，让同机 AI 或阅读器全天订阅今日未完成推荐；08:00–20:00 只限制后台自动同步，不限制 RSS 读取，该服务默认关闭。
 - 只有用户主动确认后才会调用评分 API；论文推荐也可以在设置中完全关闭。
 
+### 插件与动态变量
+
+- 内置 arXiv、Calendar-to-Todo 和默认关闭的 Network IP 三个官方独立进程插件。
+- Todo 设置中可安装、启用、禁用、配置、更新、卸载插件，并可从本地安装 `.rwplugin`。
+- 官方市场索引通过 GitHub Pages 提供，插件二进制来自各自 GitHub Release 并校验 SHA256；v2.0 市场只展示官方插件。
+- 动态值写入 `PluginValues.inc`，失败时保留最后成功值并提供 `_Stale` 和 `_UpdatedAt` 变量。
+- 第三方插件是普通 Windows 程序；permissions 用于声明和提示，并不是系统级沙箱。仅安装你信任的插件。
+
 ### 用户配置备份
 
 - Todo 设置的“关于”页可以导出、导入跨电脑使用的 `.rwbackup` 加密备份。
 - 默认仅导出 CalDAV、论文、文件服务器、翻译、界面缩放和日历自动转入规则；也可以选择完整备份待办与本地日程。
 - 备份使用独立密码加密；导入到新电脑后，敏感配置会使用新电脑当前 Windows 用户的 DPAPI 重新加密。
-- 当前用户配置结构版本为 `1.0`，后续版本通过显式迁移保持旧备份可导入。
+- 当前用户配置结构版本为 `2.0`，继续支持导入 `1.0`；插件 secret 会在恢复时用当前 Windows 用户的 DPAPI 重新加密。
 
 ## 安装
 
@@ -50,7 +58,7 @@
 
 ### 从旧版本更新
 
-优先在 Todo 设置的“关于”页面点击“检查更新”。更新器会保留：
+优先在 Todo 设置的“外观、备份与更新”页面点击“检查更新”。插件程序和数据位于 `%LOCALAPPDATA%\RainmeterDesktopWidgets`，不参与皮肤目录替换。更新器会保留：
 
 - 待办任务和日程转换状态
 - CalDAV、DeepSeek、文件服务器和腾讯翻译凭据
@@ -63,7 +71,7 @@
 1. 加载 `Todo\Todo.ini` 和 `Calendar\Calendar.ini`。
 2. 点击 Todo 顶部的 `+` 新增任务，点击 `☰` 管理全部任务。
 3. 如需日程同步，在 Calendar 设置中填写 CalDAV 配置。
-4. 如需论文推荐，在 Todo 设置中开启该功能并填写 DeepSeek API Key。
+4. 如需论文推荐，在 Todo 设置的“插件”页配置 arXiv 插件并填写 DeepSeek API Key。
 5. 文件服务器同步和腾讯云标题翻译均为可选功能。
 
 更完整的行为说明：
@@ -74,7 +82,7 @@
 
 ## 数据与隐私
 
-- 任务、日程缓存和论文缓存只保存在本机 Rainmeter 皮肤目录。
+- 任务和日程状态保存在本机皮肤资源目录；插件程序、设置、缓存、日志和 job 保存在 `%LOCALAPPDATA%\RainmeterDesktopWidgets`。
 - API Key、服务器密码和 CalDAV 等凭据使用 Windows DPAPI CurrentUser 加密。
 - 用户主动导出的 `.rwbackup` 使用备份密码派生的独立密钥加密，可以跨 Windows 电脑迁移；密码无法找回。
 - 发布包不包含任何凭据、任务、论文缓存或用户配置。
@@ -94,17 +102,19 @@
 - `backend/`：C# 后端
 - `scripts/`：部署、测试、升级和打包脚本
 - `docs/`：功能与发布文档
+- `plugins/official/`：三个官方插件源码与 manifest
+- `schemas/`：Plugin API v1 的公开 JSON Schema
 
 运行后端和 UI 冒烟测试：
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File .\scripts\Test-Backends.ps1
+pwsh.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\Test-Backends.ps1
 ```
 
 构建统一包、full/lite 兼容引导包和 `.rmskin`：
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File .\scripts\Build-ReleasePackages.ps1
+pwsh.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\Build-ReleasePackages.ps1
 ```
 
-发布流程见 [GitHub Release 指南](docs/GITHUB-RELEASE.md)。
+插件开发接口见 [Plugin API v1](docs/PLUGIN-API.md)，主程序发布流程见 [GitHub Release 指南](docs/GITHUB-RELEASE.md)。

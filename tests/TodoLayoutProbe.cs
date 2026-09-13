@@ -156,7 +156,6 @@ internal static class TodoLayoutProbe
 
     private static void ProbeSettings()
     {
-        int stage = 0;
         Timer timer = new Timer { Interval = 80 };
         timer.Tick += delegate {
             Form form = Application.OpenForms.Cast<Form>().FirstOrDefault(candidate => candidate.Text == "待办设置");
@@ -165,20 +164,14 @@ internal static class TodoLayoutProbe
             {
                 DpiLayoutAssertions.AssertManualScaling(form);
                 DpiLayoutAssertions.AssertPixelFonts(form);
-                if (stage == 0)
-                {
-                    Button about = Descendants(form).OfType<Button>().First(button => button.Text == "关于");
-                    about.PerformClick();
-                    stage = 1;
-                    return;
-                }
-                Button export = Descendants(form).OfType<Button>().First(button => button.Text == "导出用户配置");
-                Button import = Descendants(form).OfType<Button>().First(button => button.Text == "导入用户配置");
-                if (!export.Visible || !import.Visible) throw new Exception("Backup controls are not visible on About page");
-                DpiLayoutAssertions.AssertFitsAt200Percent(export, true, "Export backup button");
-                DpiLayoutAssertions.AssertFitsAt200Percent(import, true, "Import backup button");
-                if (export.Parent == null || export.Bottom > export.Parent.ClientSize.Height) throw new Exception("Export backup button is clipped");
-                if (import.Parent == null || import.Bottom > import.Parent.ClientSize.Height) throw new Exception("Import backup button is clipped");
+                TabControl tabs = Descendants(form).OfType<TabControl>().First();
+                if (tabs.TabPages.Count != 2 || tabs.TabPages[0].Text != "已安装" || tabs.TabPages[1].Text != "插件市场") throw new Exception("Plugin tabs are missing");
+                Button local = Descendants(form).OfType<Button>().First(button => button.Text == "从本地安装");
+                Button legacy = Descendants(form).OfType<Button>().First(button => button.Text == "外观、备份与兼容设置");
+                DpiLayoutAssertions.AssertFitsAt200Percent(local, true, "Local plugin install button");
+                DpiLayoutAssertions.AssertFitsAt200Percent(legacy, true, "Legacy settings button");
+                if (local.Parent == null || local.Bottom > local.Parent.ClientSize.Height) throw new Exception("Local install button is clipped");
+                if (legacy.Parent == null || legacy.Bottom > legacy.Parent.ClientSize.Height) throw new Exception("Legacy settings button is clipped");
                 timer.Stop();
                 form.Close();
             }
