@@ -21,7 +21,7 @@ powershell -ExecutionPolicy Bypass -File .\scripts\Build-ReleasePackages.ps1
 
 The build emits a `.sha256` sidecar for every ZIP and RMSKIN. Keep these artifacts in the ignored `release-build` directory until they are uploaded.
 
-Version 1.5.4 is the one-time migration from repository-hosted packages to verified GitHub Release assets. Keep only `releases/v1.5.4/rainmeter-desktop-widgets-1.5.4.zip` in Git: it is a tiny transition package that upgrades pre-1.5.4 clients before delegating to the checksum-verified Release asset. Do not retain historical full installers or repeat this exception for later versions.
+Legacy updaters select the newest tag but download from `raw.githubusercontent.com/<tag>/releases/<tag>/`. For every release that must remain reachable from v1.3.5, copy the generated `repository-transition-vX.Y.Z` compatibility set into `releases/vX.Y.Z/`: the canonical alias serves v1.4.4+ and the `full`/`lite` aliases contain the proven v1.4.4 bootstrap for pre-1.4.4 clients, producing an explicit two-step upgrade before v2 migration. These are updater bootstraps only; never commit the full installer or user data. v1.5.4 retains its earlier canonical transition for already-migrated clients.
 
 Before committing, inspect the unified zip manifest, app version, runtime feature flag, user-data exclusions, and legacy bootstrap packages:
 
@@ -78,7 +78,7 @@ Expected values:
 
 - Unified package: `Version = X.Y.Z`, `AppVersion = X.Y.Z`, `PaperFeatures = True`, `RuntimeSwitch = True`, `BadEntries` empty.
 - Unified zip contains the complete product and its top-level updater, but `HasInstallEntry = False`; it is an automatic-update transport package, not a manual installer.
-- full/lite zips retain `Install-Skins.ps1`, the updater, and `unified-bootstrap.json` only as a compatibility bootstrap for pre-1.4.4 clients.
+- full/lite zips are the v1.4.4 compatibility bootstrap renamed for the current tag: v1.3.5 installs v1.4.4 first, then a second update installs the current unified release.
 - Only the unified `.rmskin` is published.
 - The `.rmskin` must end with the 16-byte Rainmeter package footer: an 8-byte little-endian archive size, one flags byte, and the ASCII key `RMSKIN\0`. A normal ZIP renamed to `.rmskin` is invalid.
 

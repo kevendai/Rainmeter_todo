@@ -12,8 +12,7 @@ if ($outputRoot.TrimEnd('\') -eq $projectRoot.TrimEnd('\')) {
 
 $definitions = @(
     @{ Folder='arxiv' },
-    @{ Folder='calendar-to-todo' },
-    @{ Folder='network-ip' }
+    @{ Folder='calendar-to-todo' }
 )
 
 $buildScript = @'
@@ -31,12 +30,12 @@ try {
     New-Item -ItemType Directory -Path $bin -Force | Out-Null
     & $msbuild $project.FullName /nologo /verbosity:minimal /target:Build /property:Configuration=Release "/property:OutputPath=$bin\" "/property:IntermediateOutputPath=$(Join-Path $stage 'obj')\"
     if ($LASTEXITCODE -ne 0) { throw 'Plugin build failed.' }
-    foreach ($name in @('plugin.json','settings.schema.json','README.md','icon.png')) {
+    foreach ($name in @('plugin.json','settings.schema.json','README.md','THIRD-PARTY-NOTICES.md','icon.png')) {
         $source = Join-Path $PSScriptRoot $name
         if (Test-Path -LiteralPath $source) { Copy-Item -LiteralPath $source -Destination $stage }
     }
     New-Item -ItemType Directory -Path $OutputDirectory -Force | Out-Null
-    $slug = if ($manifest.id -eq 'io.github.kevendai.arxiv') { 'arxiv' } elseif ($manifest.id -eq 'io.github.kevendai.calendar-to-todo') { 'calendar-to-todo' } else { 'network-ip' }
+    $slug = if ($manifest.id -eq 'io.github.kevendai.arxiv') { 'arxiv' } else { 'calendar-to-todo' }
     $baseName = $slug + '-' + $manifest.version
     $zip = Join-Path $OutputDirectory ($baseName + '.zip')
     $package = Join-Path $OutputDirectory ($baseName + '.rwplugin')

@@ -39,6 +39,20 @@ internal static class DpiLayoutAssertions
         }
     }
 
+    public static void AssertSingleLineLabelsNotClipped(Form form)
+    {
+        foreach (Control control in SelfAndDescendants(form))
+        {
+            Label label = control as Label;
+            if (label == null || label.AutoSize || label.Font == null || String.IsNullOrWhiteSpace(label.Text) || label.Text.IndexOf('\n') >= 0)
+                continue;
+            int availableHeight = Math.Max(0, label.ClientSize.Height - label.Padding.Vertical);
+            int requiredHeight = label.Font.Height + 2;
+            if (availableHeight < requiredHeight)
+                throw new Exception("Single-line label clips vertically: '" + label.Text + "' required=" + requiredHeight + ", available=" + availableHeight);
+        }
+    }
+
     public static void AssertFitsAt200Percent(Control control, bool checkWidth, string name)
     {
         if (control == null || String.IsNullOrWhiteSpace(control.Text)) return;

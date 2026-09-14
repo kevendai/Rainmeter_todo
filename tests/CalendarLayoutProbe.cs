@@ -116,6 +116,7 @@ internal static class CalendarLayoutProbe
     {
         Dictionary<string, object> state = State(), cache = Cache();
         int stage = 0;
+        DateTime? keyboardExpected = null;
         Timer timer = new Timer { Interval = 100 };
         timer.Tick += delegate {
             Form form = Application.OpenForms.Cast<Form>().FirstOrDefault(candidate => candidate.Text == "日程管理");
@@ -139,7 +140,7 @@ internal static class CalendarLayoutProbe
                 }
                 FlowLayoutPanel list = Descendants(form).OfType<FlowLayoutPanel>().First(panel => panel.AutoScroll && panel.FlowDirection == FlowDirection.TopDown);
                 List<Panel> rows = list.Controls.OfType<Panel>().Where(panel => panel.Tag is string).ToList();
-                if (rows.Count == 0) throw new Exception("Calendar event rows missing after tab switch");
+                if (rows.Count == 0 && stage < 3) throw new Exception("Calendar event rows missing after tab switch");
                 if (rows.Any(row => row.Width > list.ClientSize.Width + 1)) throw new Exception("Calendar event row did not scale with list");
                 Size tabText = TextRenderer.MeasureText(allTime.Text, allTime.Font, Size.Empty, TextFormatFlags.NoPadding | TextFormatFlags.SingleLine);
                 if (tabText.Width > allTime.ClientSize.Width + 2) throw new Exception("All-time tab text clipped");
@@ -159,6 +160,21 @@ internal static class CalendarLayoutProbe
                     today.PerformClick();
                     stage = 2;
                     return;
+                }
+                if (stage == 2)
+                {
+                    Control keyboardDay = days[10];
+                    keyboardExpected = ((DateTime)keyboardDay.Tag).AddDays(1).Date;
+                    keyboardDay.Focus();
+                    MethodInfo onKeyDown = keyboardDay.GetType().GetMethod("OnKeyDown", BindingFlags.Instance | BindingFlags.NonPublic);
+                    onKeyDown.Invoke(keyboardDay, new object[] { new KeyEventArgs(Keys.Right) });
+                    stage = 3;
+                    return;
+                }
+                if (stage == 3)
+                {
+                    Control focusedDay = days.FirstOrDefault(day => ((DateTime)day.Tag).Date == keyboardExpected.Value.Date);
+                    if (focusedDay == null || !focusedDay.Focused) throw new Exception("Calendar keyboard navigation lost focus after rebuilding the day grid");
                 }
                 timer.Stop();
                 form.Close();

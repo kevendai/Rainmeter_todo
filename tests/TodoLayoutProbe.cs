@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Drawing;
 using System.Linq;
+using System.IO;
 using System.Reflection;
 using System.Windows.Forms;
 
@@ -20,6 +21,8 @@ internal static class TodoLayoutProbe
         if (scenario == "editor") ProbeEditor();
         else if (scenario == "manager") ProbeManager();
         else if (scenario == "settings") ProbeSettings();
+        else if (scenario == "appearance-settings") ProbeAppearanceSettings();
+        else if (scenario == "scale-config") ProbeScaleConfiguration();
         else throw new ArgumentException("Unknown scenario: " + scenario);
         if (failure != null) { Console.Error.WriteLine(scenario + ": " + failure.Message); Environment.ExitCode = 1; return; }
         Console.WriteLine("PASS " + scenario);
@@ -154,6 +157,63 @@ internal static class TodoLayoutProbe
         timer.Dispose();
     }
 
+    private static void ProbeScaleConfiguration()
+    {
+        string tilePath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "ui-scale.txt");
+        string windowPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "ui-window-scale.txt");
+        string previousOverride = Environment.GetEnvironmentVariable("RAINMETER_UI_SCALE_OVERRIDE");
+        try
+        {
+            Environment.SetEnvironmentVariable("RAINMETER_UI_SCALE_OVERRIDE", null);
+            File.WriteAllText(tilePath, "0.80");
+            if (RainmeterBackend.UiScale.Mode != "0.80" || RainmeterBackend.UiScale.WindowMode != "1.00")
+                throw new Exception("Legacy manual tile scale did not preserve the 100% window default");
+            RainmeterBackend.UiScale.SaveWindowMode("1.10");
+            if (RainmeterBackend.UiScale.WindowMode != "1.10")
+                throw new Exception("Independent window scale was not persisted");
+            if (Math.Abs(RainmeterBackend.UiScale.TileCurrent - 0.80F) > 0.001F || Math.Abs(RainmeterBackend.UiScale.Current - 1.10F) > 0.001F)
+                throw new Exception("Tile and window scales are not independent");
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("RAINMETER_UI_SCALE_OVERRIDE", previousOverride);
+            if (File.Exists(tilePath)) File.Delete(tilePath);
+            if (File.Exists(windowPath)) File.Delete(windowPath);
+        }
+    }
+
+    private static void ProbeAppearanceSettings()
+    {
+        Timer timer = new Timer { Interval = 80 };
+        timer.Tick += delegate {
+            Form form = Application.OpenForms.Cast<Form>().FirstOrDefault(candidate => candidate.Text == "待办设置");
+            if (form == null) return;
+            try
+            {
+                DpiLayoutAssertions.AssertManualScaling(form);
+                DpiLayoutAssertions.AssertPixelFonts(form);
+                DpiLayoutAssertions.AssertSingleLineLabelsNotClipped(form);
+                List<Control> controls = Descendants(form).ToList();
+                if (!controls.Any(control => control.Text == "桌面磁贴缩放") || !controls.Any(control => control.Text == "管理与编辑窗口缩放"))
+                    throw new Exception("Independent tile/window scale controls are missing");
+                if (controls.OfType<ComboBox>().Count() < 2) throw new Exception("Scale selectors are missing");
+                Button apply = controls.OfType<Button>().First(button => button.Text == "应用缩放");
+                if (apply.Right > form.ClientSize.Width || apply.Bottom > form.ClientSize.Height) throw new Exception("Scale apply button is clipped");
+                timer.Stop();
+                form.Close();
+            }
+            catch (Exception ex)
+            {
+                failure = ex;
+                timer.Stop();
+                form.Close();
+            }
+        };
+        timer.Start();
+        try { Method("ShowSettings").Invoke(null, null); }
+        catch (TargetInvocationException ex) { failure = ex.InnerException ?? ex; }
+        timer.Dispose();
+    }
     private static void ProbeSettings()
     {
         Timer timer = new Timer { Interval = 80 };
@@ -164,14 +224,22 @@ internal static class TodoLayoutProbe
             {
                 DpiLayoutAssertions.AssertManualScaling(form);
                 DpiLayoutAssertions.AssertPixelFonts(form);
-                TabControl tabs = Descendants(form).OfType<TabControl>().First();
-                if (tabs.TabPages.Count != 2 || tabs.TabPages[0].Text != "已安装" || tabs.TabPages[1].Text != "插件市场") throw new Exception("Plugin tabs are missing");
+                DpiLayoutAssertions.AssertSingleLineLabelsNotClipped(form);
+                string[] expectedNav = { "已安装插件", "插件市场", "外观与备份", "关于与更新" };
+                foreach (string expected in expectedNav)
+                {
+                    if (!Descendants(form).Any(control => control.GetType().Name == "SettingsNavItem" && control.Text == expected))
+                        throw new Exception("Settings nav missing: " + expected);
+                }
+                string[] expectedButtons = { "从本地安装", "刷新市场", "应用缩放", "导出用户配置", "导入用户配置", "检查主程序更新" };
+                foreach (string expected in expectedButtons)
+                {
+                    if (!Descendants(form).OfType<Button>().Any(button => button.Text == expected))
+                        throw new Exception("Settings button missing: " + expected);
+                }
                 Button local = Descendants(form).OfType<Button>().First(button => button.Text == "从本地安装");
-                Button legacy = Descendants(form).OfType<Button>().First(button => button.Text == "外观、备份与兼容设置");
                 DpiLayoutAssertions.AssertFitsAt200Percent(local, true, "Local plugin install button");
-                DpiLayoutAssertions.AssertFitsAt200Percent(legacy, true, "Legacy settings button");
                 if (local.Parent == null || local.Bottom > local.Parent.ClientSize.Height) throw new Exception("Local install button is clipped");
-                if (legacy.Parent == null || legacy.Bottom > legacy.Parent.ClientSize.Height) throw new Exception("Legacy settings button is clipped");
                 timer.Stop();
                 form.Close();
             }

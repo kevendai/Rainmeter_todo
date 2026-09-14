@@ -28,7 +28,34 @@ internal static partial class CalendarApp
         cache["fetched_at"]=RuntimeUtil.Iso(DateTimeOffset.Now);
         cache["status"]=status+(r.FailedWindows>0?"（"+r.FailedWindows+" 次查询超时）":"");
     }
-    private static void Sync(Dictionary<string,object>cache,Dictionary<string,object>state,ref bool todo){try{if(!File.Exists(SecretPath)){cache["events"]=new List<object>();cache["calendar_url"]="";cache["fetched_at"]="";cache["status"]="CalDAV 未连接";if(AutoConvert(cache,state))todo=true;Save(CachePath,cache);Save(StatePath,state);return;}Dictionary<string,object>c=JsonUtil.ReadDpapiJson(SecretPath);FetchResult r=Fetch(c,S(cache,"calendar_url"));cache["events"]=r.Events.Cast<object>().ToList();cache["calendar_url"]=r.Calendar.Uri;cache["fetched_at"]=RuntimeUtil.Iso(DateTimeOffset.Now);cache["status"]="已同步 "+r.Events.Count+" 项"+(r.FailedWindows>0?"（"+r.FailedWindows+" 次查询超时）":"");if(AutoConvert(cache,state))todo=true;Save(CachePath,cache);Save(StatePath,state);}catch(Exception ex){cache["status"]="同步失败："+ex.Message;Save(CachePath,cache);}}
+    private static void Sync(Dictionary<string,object>cache,Dictionary<string,object>state,ref bool todo)
+    {
+        try
+        {
+            if(!File.Exists(SecretPath)){cache["events"]=new List<object>();cache["calendar_url"]="";cache["fetched_at"]="";cache["status"]="CalDAV 未连接";if(AutoConvert(cache,state))todo=true;Save(CachePath,cache);Save(StatePath,state);return;}
+            Dictionary<string,object> credentials=ReadCredentials();FetchResult result=FetchWithSsdpRetry(credentials,S(cache,"calendar_url"));cache["events"]=result.Events.Cast<object>().ToList();cache["calendar_url"]=result.Calendar.Uri;cache["fetched_at"]=RuntimeUtil.Iso(DateTimeOffset.Now);cache["status"]="已同步 "+result.Events.Count+" 项"+(result.FailedWindows>0?"（"+result.FailedWindows+" 次查询超时）":"");if(AutoConvert(cache,state))todo=true;Save(CachePath,cache);Save(StatePath,state);
+        }
+        catch(Exception ex){cache["status"]="同步失败："+ex.Message;Save(CachePath,cache);}
+    }
+    private static FetchResult FetchWithSsdpRetry(Dictionary<string,object> credentials,string cachedCalendarUrl)
+    {
+        AddressProviderBinding provider=DynamicPluginValues.AddressProvider("calendar.caldav");string cached=DynamicPluginValues.BindForTarget(cachedCalendarUrl,"calendar.caldav");
+        try{return Fetch(credentials,cached);}
+        catch(Exception first)
+        {
+            if(provider==null)throw;
+            string refreshError;if(!TryRefreshAddressProvider(provider.PluginId,out refreshError))throw new Exception(first.Message+"；"+provider.PluginName+" 未找到服务器："+refreshError+"。服务器可能已关机或故障。");
+            Dictionary<string,object> refreshed=ReadCredentials();
+            try{return Fetch(refreshed,DynamicPluginValues.BindForTarget(cachedCalendarUrl,"calendar.caldav"));}
+            catch(Exception retry){throw new Exception(retry.Message+"；地址插件已找到服务器，但 CalDAV 仍无法连接，服务器服务可能故障。");}
+        }
+    }
+    private static bool TryRefreshAddressProvider(string pluginId,out string error)
+    {
+        error="";string host=Path.Combine(TodoDir,"PluginHost.exe");if(!File.Exists(host)){error="缺少 PluginHost.exe";return false;}
+        try{System.Diagnostics.ProcessStartInfo info=new System.Diagnostics.ProcessStartInfo(host,"Values "+pluginId){UseShellExecute=false,CreateNoWindow=true,RedirectStandardOutput=true,RedirectStandardError=true};using(System.Diagnostics.Process process=System.Diagnostics.Process.Start(info)){if(process==null){error="无法启动插件宿主";return false;}string output=process.StandardOutput.ReadToEnd(),stderr=process.StandardError.ReadToEnd();if(!process.WaitForExit(95000)){try{process.Kill();}catch{}error="地址插件搜索超时";return false;}if(process.ExitCode==0)return true;error=(stderr.Trim()!=""?stderr:output).Trim();if(error=="")error="地址插件执行失败";return false;}}
+        catch(Exception ex){error=ex.Message;return false;}
+    }
     private static System.Diagnostics.Process StartBackgroundSync(){try{return System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(Application.ExecutablePath,"Sync"){UseShellExecute=false,CreateNoWindow=true});}catch{return null;}}
 
     private static bool SaveLocalEvent(Dictionary<string,object> e,Dictionary<string,object> state)

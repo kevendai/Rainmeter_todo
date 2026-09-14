@@ -7,6 +7,8 @@ param(
 $ErrorActionPreference = 'Stop'
 
 $projectRoot = Split-Path $PSScriptRoot -Parent
+$UpdaterVersion = [IO.File]::ReadAllText((Join-Path $PSScriptRoot 'updater-version.txt'), [Text.UTF8Encoding]::new($false)).Trim()
+if ($UpdaterVersion -notmatch '^\d+\.\d+$') { throw 'Updater version must use major.minor format.' }
 if ([string]::IsNullOrWhiteSpace($Version)) {
     $Version = [IO.File]::ReadAllText((Join-Path $projectRoot 'VERSION'), [Text.UTF8Encoding]::new($false)).Trim()
 }
@@ -29,6 +31,7 @@ function Copy-Tree {
         'caldav.secret',
         'PluginValues.inc',
         'ui-scale.txt',
+        'ui-window-scale.txt',
         'tasks.json',
         'calendar-cache.json',
         'calendar-state.json',
@@ -57,6 +60,7 @@ function Remove-ReleaseSecrets {
         'paper-sync.secret',
         'caldav.secret',
         'ui-scale.txt',
+        'ui-window-scale.txt',
         'tasks.json',
         'calendar-cache.json',
         'calendar-state.json',
@@ -101,6 +105,7 @@ function Set-SkinVersion {
 function New-UpdaterScript {
     param([string]$Path)
     Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'RainmeterDesktopWidgetsUpdater.ps1') -Destination $Path -Force
+    Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'updater-version.txt') -Destination (Join-Path (Split-Path $Path -Parent) 'updater-version.txt') -Force
 }
 
 function New-InstallScript {
@@ -235,6 +240,7 @@ function New-Package {
     & (Join-Path $PSScriptRoot 'Build-Backend.ps1') -Backend Plugin -OutputDirectory (Split-Path $pluginExe -Parent) | Out-Null
     & (Join-Path $PSScriptRoot 'Build-OfficialPlugins.ps1') -OutputDirectory (Join-Path $todoRoot '@Resources\BundledPlugins') -PackageDirectory (Join-Path $todoRoot '@Resources\BundledPluginPackages') -LockPath (Join-Path $todoRoot '@Resources\bundled-plugins.lock.json') | Out-Null
     Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'Install-RwPlugin.ps1') -Destination (Join-Path $todoRoot '@Resources\PluginInstaller.ps1') -Force
+    Copy-Item -LiteralPath (Join-Path $projectRoot 'plugin-registry-template\index-v1.json') -Destination (Join-Path $todoRoot '@Resources\plugin-registry-v1.json') -Force
 
     Copy-Item -LiteralPath $installer -Destination (Join-Path $packageRoot 'Rainmeter-4.5.26.exe') -Force
     Copy-Item -LiteralPath (Join-Path $projectRoot 'docs\RELEASE-DEPLOY.md') -Destination (Join-Path $packageRoot 'DEPLOY.md') -Force
@@ -245,12 +251,12 @@ function New-Package {
     $manifest = [ordered]@{
         name = $DisplayName
         version = $Version
-        updater_version = 1
+        updater_version = $UpdaterVersion
         rainmeter = '4.5.26.3894'
         paper_features = $true
         paper_features_runtime_switch = $true
         plugin_api = 1
-        excludes = @('translation.secret','paper-sync.secret','caldav.secret','ui-scale.txt','tasks.json','calendar-cache.json','calendar-state.json','PaperCache','PluginData','PluginLogs','PluginJobs')
+        excludes = @('translation.secret','paper-sync.secret','caldav.secret','ui-scale.txt','ui-window-scale.txt','tasks.json','calendar-cache.json','calendar-state.json','PaperCache','PluginData','PluginLogs','PluginJobs')
     } | ConvertTo-Json -Depth 4
     Set-Content -LiteralPath (Join-Path $packageRoot 'manifest.json') -Value $manifest -Encoding UTF8
 
@@ -263,30 +269,41 @@ function New-Package {
 New-Package -DisplayName 'Rainmeter Desktop Widgets'
 
 function New-LegacyBootstrapPackages {
-    $bootstrapRoot = Join-Path $OutputRoot ("legacy-updater-bootstrap-$Version")
-    New-Item -ItemType Directory -Path $bootstrapRoot -Force | Out-Null
-    $updaterRoot = Join-Path $bootstrapRoot 'Updater'
-    New-Item -ItemType Directory -Path $updaterRoot -Force | Out-Null
-    New-UpdaterScript (Join-Path $updaterRoot 'RainmeterDesktopWidgetsUpdater.ps1')
-    # Kept only inside the legacy full/lite bootstrap for pre-1.4.4 clients.
-    # It is not included in the user-facing unified zip.
-    New-InstallScript (Join-Path $bootstrapRoot 'Install-Skins.ps1')
-    $bootstrap = [ordered]@{
-        repository = 'kevendai/Rainmeter_todo'
-        tag = "v$Version"
-        version = $Version
-        asset = "rainmeter-desktop-widgets-$Version.zip"
-    } | ConvertTo-Json
-    [IO.File]::WriteAllText((Join-Path $bootstrapRoot 'unified-bootstrap.json'), $bootstrap, [Text.UTF8Encoding]::new($false))
-
-    $bootstrapZip = Join-Path $OutputRoot (".legacy-updater-bootstrap-$Version.zip")
-    Compress-Archive -Path (Join-Path $bootstrapRoot '*') -DestinationPath $bootstrapZip -Force
+    # v1.3.5 always selects the newest numeric tag and requests the old
+    # full/lite filename from raw.githubusercontent.com. Do not make that old
+    # updater perform the v2 data migration in the same invocation. Instead,
+    # publish the proven v1.4.4 compatibility bootstrap under the v2 filenames.
+    # The first check installs v1.4.4; a second check uses its unified updater
+    # to enter the SHA256-verified v2 update path.
+    $bridgeVersion = '1.4.4'
     foreach ($legacyFlavor in @('full','lite')) {
+        $bridgeName = "rainmeter-desktop-widgets-$legacyFlavor-$bridgeVersion.zip"
+        $bridgePath = Join-Path $cacheRoot $bridgeName
+        if (-not (Test-Path -LiteralPath $bridgePath)) {
+            $bridgeUrl = "https://github.com/kevendai/Rainmeter_todo/releases/download/v$bridgeVersion/$bridgeName"
+            Write-Host "Downloading legacy $bridgeVersion $legacyFlavor updater bridge..."
+            Invoke-WebRequest -Uri $bridgeUrl -OutFile $bridgePath
+        }
+        $verifyRoot = Join-Path $OutputRoot ("verify-legacy-$legacyFlavor-$bridgeVersion")
+        if (Test-Path -LiteralPath $verifyRoot) { Remove-Item -LiteralPath $verifyRoot -Recurse -Force }
+        Expand-Archive -LiteralPath $bridgePath -DestinationPath $verifyRoot -Force
+        try {
+            $bootstrapPath = Join-Path $verifyRoot 'unified-bootstrap.json'
+            $installPath = Join-Path $verifyRoot 'Install-Skins.ps1'
+            $updaterPath = Join-Path $verifyRoot 'Updater\RainmeterDesktopWidgetsUpdater.ps1'
+            if (-not (Test-Path -LiteralPath $bootstrapPath) -or -not (Test-Path -LiteralPath $installPath) -or -not (Test-Path -LiteralPath $updaterPath)) {
+                throw "Legacy $bridgeVersion $legacyFlavor bridge is incomplete."
+            }
+            $bootstrap = Get-Content -LiteralPath $bootstrapPath -Raw -Encoding UTF8 | ConvertFrom-Json
+            if ([string]$bootstrap.version -ne $bridgeVersion -or [string]$bootstrap.tag -ne "v$bridgeVersion" -or [string]$bootstrap.asset -ne "rainmeter-desktop-widgets-$bridgeVersion.zip") {
+                throw "Legacy $bridgeVersion $legacyFlavor bridge metadata is invalid."
+            }
+        }
+        finally { Remove-Item -LiteralPath $verifyRoot -Recurse -Force -ErrorAction SilentlyContinue }
         $target = Join-Path $OutputRoot "rainmeter-desktop-widgets-$legacyFlavor-$Version.zip"
-        Copy-Item -LiteralPath $bootstrapZip -Destination $target -Force
-        Write-Host "Created legacy updater bootstrap $target"
+        Copy-Item -LiteralPath $bridgePath -Destination $target -Force
+        Write-Host "Created two-step $legacyFlavor bridge: $Version -> $bridgeVersion -> $Version"
     }
-    Remove-Item -LiteralPath $bootstrapZip -Force
 }
 
 New-LegacyBootstrapPackages
@@ -307,7 +324,7 @@ function New-RawTransitionBootstrapPackage {
     $manifest = [ordered]@{
         name = 'Rainmeter Desktop Widgets updater transition'
         version = $Version
-        updater_version = 1
+        updater_version = $UpdaterVersion
     } | ConvertTo-Json
     [IO.File]::WriteAllText((Join-Path $transitionRoot 'manifest.json'), $manifest, [Text.UTF8Encoding]::new($false))
     $bootstrap = [ordered]@{
@@ -321,6 +338,17 @@ function New-RawTransitionBootstrapPackage {
     $transitionZip = Join-Path $OutputRoot ("rainmeter-desktop-widgets-raw-transition-$Version.zip")
     Compress-Archive -Path (Join-Path $transitionRoot '*') -DestinationPath $transitionZip -Force
     Write-Host "Created one-time raw updater transition $transitionZip"
+
+    # Old updaters resolve raw.githubusercontent.com at the newest tag. Keep
+    # these tiny repository-hosted aliases until pre-1.4.4 full/lite clients
+    # have had a chance to self-update; newer clients use the canonical alias.
+    $repositoryTransition = Join-Path $OutputRoot ("repository-transition-v$Version")
+    New-Item -ItemType Directory -Path $repositoryTransition -Force | Out-Null
+    Copy-Item -LiteralPath $transitionZip -Destination (Join-Path $repositoryTransition "rainmeter-desktop-widgets-$Version.zip") -Force
+    foreach ($legacyFlavor in @('full','lite')) {
+        Copy-Item -LiteralPath (Join-Path $OutputRoot "rainmeter-desktop-widgets-$legacyFlavor-$Version.zip") -Destination (Join-Path $repositoryTransition "rainmeter-desktop-widgets-$legacyFlavor-$Version.zip") -Force
+    }
+    Write-Host "Created raw updater compatibility set $repositoryTransition"
 }
 
 New-RawTransitionBootstrapPackage

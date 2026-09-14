@@ -22,11 +22,11 @@ internal static partial class CalendarApp
         if(!isNew&&originalCalDav&&B(original,"recurring")){Dictionary<string,object> master=JsonUtil.Object(JsonUtil.Get(original,"series_event"));if(master.Count>0){Dictionary<string,object> edit=new Dictionary<string,object>(master);foreach(string key in new[]{"href","etag","source","calendar","recurrence_preserve","series_event"})if(JsonUtil.Get(original,key)!=null)edit[key]=JsonUtil.Get(original,key);edit["recurring"]=true;original=edit;}}
         else if(!isNew&&!originalCalDav&&B(original,"recurring")){Dictionary<string,object> master=LocalSeriesMaster(state,original);if(master!=null)original=master;}
         bool hasCalDav=File.Exists(SecretPath);Action updateFooterHint=null;
-        Form f=LightUi.Form(isNew?"新建日程":"编辑日程",640,800);LightUi.Heading(f,isNew?"新建日程":"编辑日程",isNew?"创建本地日程或同步到 CalDAV 日历。":"编辑日程信息，删除入口位于窗口底部。",isNew?"new-calendar.svg":null);
+        Form f=LightUi.Form(isNew?"新建日程":"编辑日程",640,800);LightUi.Heading(f,isNew?"新建日程":"编辑日程",isNew?"创建本地日程或同步到 CalDAV 日历。":"编辑日程信息，删除入口位于窗口底部。",isNew?"new-calendar.svg":null);Button closeEditor=LightUi.CloseButton(f);f.Controls.Add(closeEditor);
         Func<string,int,int,int,int,string,TextBox> addField = delegate(string label,int x,int y,int width,int height,string text) {
-            f.Controls.Add(new Label{Text=label,Left=x,Top=y-26,Width=width,Height=22,BackColor=Color.Transparent,ForeColor=LightUi.Text,Font=new System.Drawing.Font("Microsoft YaHei UI",9.5F,System.Drawing.FontStyle.Bold)});
+            f.Controls.Add(new Label{Text=label,Left=x,Top=y-26,Width=width,Height=22,BackColor=Color.Transparent,ForeColor=LightUi.Text,Font=LightUi.UiFont(9.5F,System.Drawing.FontStyle.Bold)});
             Panel box=RoundedPanel(x,y,width,height,Color.FromArgb(252,254,255),Color.FromArgb(220,230,241),11);
-            TextBox input=new TextBox{Left=14,Top=Math.Max(8,(height-22)/2),Width=width-28,Height=height-16,AutoSize=false,BorderStyle=BorderStyle.None,BackColor=Color.FromArgb(252,254,255),ForeColor=LightUi.Text,Font=new System.Drawing.Font("Microsoft YaHei UI",10F),Text=text??""};
+            TextBox input=new TextBox{Left=14,Top=Math.Max(8,(height-22)/2),Width=width-28,Height=height-16,AutoSize=false,BorderStyle=BorderStyle.None,BackColor=Color.FromArgb(252,254,255),ForeColor=LightUi.Text,Font=LightUi.UiFont(10F),Text=text??""};
             input.GotFocus+=delegate{box.BackColor=Color.White;box.Invalidate();};
             input.LostFocus+=delegate{box.BackColor=Color.FromArgb(252,254,255);box.Invalidate();};
             box.Controls.Add(input);f.Controls.Add(box);return input;
@@ -34,14 +34,14 @@ internal static partial class CalendarApp
         Func<string,int,int,int,Button> addPicker = delegate(string text,int x,int y,int width) {
             Button b=LightUi.Button(text,x,y,width,DialogResult.None);b.Height=40;b.TextAlign=ContentAlignment.MiddleLeft;b.Padding=new Padding(12,0,8,0);b.BackColor=Color.FromArgb(252,254,255);b.FlatAppearance.BorderSize=1;b.FlatAppearance.BorderColor=Color.FromArgb(220,230,241);b.FlatAppearance.MouseOverBackColor=Color.White;return b;
         };
-        f.Controls.Add(new Label{Text="日历",Left=26,Top=92,Width=120,Height=22,BackColor=Color.Transparent,ForeColor=LightUi.Text,Font=new System.Drawing.Font("Microsoft YaHei UI",9.5F,System.Drawing.FontStyle.Bold)});
+        f.Controls.Add(new Label{Text="日历",Left=26,Top=92,Width=120,Height=22,BackColor=Color.Transparent,ForeColor=LightUi.Text,Font=LightUi.UiFont(9.5F,System.Drawing.FontStyle.Bold)});
         string selectedSource=originalCalDav?"caldav":isNew&&hasCalDav?"caldav":"local";
         bool allowSourceChange=isNew||(!originalCalDav&&hasCalDav);
         Button localSource=LightUi.Button("本地日历",26,118,110,DialogResult.None),caldavSource=LightUi.Button("CalDAV 日历",144,118,124,DialogResult.None);
         localSource.Height=caldavSource.Height=36;localSource.TextAlign=caldavSource.TextAlign=ContentAlignment.MiddleCenter;caldavSource.Visible=hasCalDav||originalCalDav;localSource.Enabled=caldavSource.Enabled=allowSourceChange;
-        Action paintSource=delegate{Button[] sourceButtons=new[]{localSource,caldavSource};foreach(Button b in sourceButtons){bool active=(b==localSource&&selectedSource=="local")||(b==caldavSource&&selectedSource=="caldav");b.BackColor=active?LightUi.AccentFill:Color.FromArgb(246,251,255);b.ForeColor=active?Color.White:LightUi.Text;b.FlatAppearance.BorderSize=0;b.FlatAppearance.BorderColor=b.BackColor;b.FlatAppearance.MouseOverBackColor=active?Color.FromArgb(38,118,222):Color.White;b.FlatAppearance.MouseDownBackColor=active?Color.FromArgb(25,94,185):Color.FromArgb(235,245,253);b.Font=new System.Drawing.Font(b.Font,active?System.Drawing.FontStyle.Bold:System.Drawing.FontStyle.Regular);}};localSource.MouseEnter+=delegate{paintSource();};caldavSource.MouseEnter+=delegate{paintSource();};localSource.MouseLeave+=delegate{paintSource();};caldavSource.MouseLeave+=delegate{paintSource();};localSource.Click+=delegate{selectedSource="local";paintSource();if(updateFooterHint!=null)updateFooterHint();};caldavSource.Click+=delegate{selectedSource="caldav";paintSource();if(updateFooterHint!=null)updateFooterHint();};paintSource();f.Controls.AddRange(new Control[]{localSource,caldavSource});
+        Action paintSource=delegate{Button[] sourceButtons=new[]{localSource,caldavSource};foreach(Button b in sourceButtons){bool active=(b==localSource&&selectedSource=="local")||(b==caldavSource&&selectedSource=="caldav");b.BackColor=active?LightUi.AccentFill:Color.FromArgb(246,251,255);b.ForeColor=active?Color.White:LightUi.Text;b.FlatAppearance.BorderSize=0;b.FlatAppearance.BorderColor=b.BackColor;b.FlatAppearance.MouseOverBackColor=active?Color.FromArgb(38,118,222):Color.White;b.FlatAppearance.MouseDownBackColor=active?Color.FromArgb(25,94,185):Color.FromArgb(235,245,253);b.Font=LightUi.RestyledFont(b.Font,active?System.Drawing.FontStyle.Bold:System.Drawing.FontStyle.Regular);}};localSource.MouseEnter+=delegate{paintSource();};caldavSource.MouseEnter+=delegate{paintSource();};localSource.MouseLeave+=delegate{paintSource();};caldavSource.MouseLeave+=delegate{paintSource();};localSource.Click+=delegate{selectedSource="local";paintSource();if(updateFooterHint!=null)updateFooterHint();};caldavSource.Click+=delegate{selectedSource="caldav";paintSource();if(updateFooterHint!=null)updateFooterHint();};paintSource();f.Controls.AddRange(new Control[]{localSource,caldavSource});
         TextBox title=addField("标题 *",26,178,588,38,isNew?"":CleanTitle(S(original,"title")));
-        f.Controls.Add(new Label{Text="日期与时间",Left=26,Top=240,Width=160,Height=22,BackColor=Color.Transparent,ForeColor=LightUi.Text,Font=new System.Drawing.Font("Microsoft YaHei UI",9.5F,System.Drawing.FontStyle.Bold)});
+        f.Controls.Add(new Label{Text="日期与时间",Left=26,Top=240,Width=160,Height=22,BackColor=Color.Transparent,ForeColor=LightUi.Text,Font=LightUi.UiFont(9.5F,System.Drawing.FontStyle.Bold)});
         DateTimeOffset s=isNew?DateTimeOffset.Now:RuntimeUtil.Date(original,"series_start_at")??RuntimeUtil.Date(original,"start_at")??DateTimeOffset.Now, en=isNew?s.AddHours(1):RuntimeUtil.Date(original,"series_end_at")??RuntimeUtil.Date(original,"end_at")??s.AddHours(1);
         DateTime selectedDate=s.DateTime.Date;TimeSpan selectedStart=new TimeSpan(s.Hour,s.Minute,0),selectedEnd=new TimeSpan(en.Hour,en.Minute,0);bool allDaySelected=!isNew&&(JsonUtil.Get(original,"series_all_day")!=null?B(original,"series_all_day"):B(original,"all_day"));
         Button prevDate=LightUi.Button("‹",26,268,38,DialogResult.None),dateButton=LightUi.Button(selectedDate.ToString("yyyy-MM-dd"),70,268,150,DialogResult.None),nextDate=LightUi.Button("›",226,268,38,DialogResult.None);
@@ -49,8 +49,8 @@ internal static partial class CalendarApp
         RecurrenceSpec recurrence=RecurrenceFromEvent(original);Button recurrenceButton=LightUi.Button("",382,268,232,DialogResult.None);recurrenceButton.Height=36;recurrenceButton.TextAlign=ContentAlignment.MiddleLeft;recurrenceButton.Padding=new Padding(12,0,8,0);recurrenceButton.BackColor=Color.FromArgb(246,251,255);
         Action paintRecurrence=delegate{recurrenceButton.Text="重复："+RecurrenceLabel(recurrence);recurrenceButton.ForeColor=recurrence.Frequency=="none"?LightUi.Muted:LightUi.Accent;};recurrenceButton.Click+=delegate{RecurrenceSpec next;if(ShowRecurrenceDialog(recurrence,selectedDate,out next)){recurrence=next;paintRecurrence();if(updateFooterHint!=null)updateFooterHint();}};paintRecurrence();f.Controls.AddRange(new Control[]{prevDate,dateButton,nextDate,allDay,recurrenceButton});
         Panel timeGroup=new Panel{Left=26,Top=314,Width=588,Height=66,BackColor=Color.Transparent};
-        Label startLabel=new Label{Text="开始时间  "+selectedStart.ToString(@"hh\:mm"),Left=0,Top=0,Width=240,Height=20,BackColor=Color.Transparent,ForeColor=LightUi.Muted,Font=new System.Drawing.Font("Microsoft YaHei UI",9F)};
-        Label endLabel=new Label{Text="结束时间  "+selectedEnd.ToString(@"hh\:mm"),Left=294,Top=0,Width=240,Height=20,BackColor=Color.Transparent,ForeColor=LightUi.Muted,Font=new System.Drawing.Font("Microsoft YaHei UI",9F)};
+        Label startLabel=new Label{Text="开始时间  "+selectedStart.ToString(@"hh\:mm"),Left=0,Top=0,Width=240,Height=20,BackColor=Color.Transparent,ForeColor=LightUi.Muted,Font=LightUi.UiFont(9F)};
+        Label endLabel=new Label{Text="结束时间  "+selectedEnd.ToString(@"hh\:mm"),Left=294,Top=0,Width=240,Height=20,BackColor=Color.Transparent,ForeColor=LightUi.Muted,Font=LightUi.UiFont(9F)};
         TimeSlider startSlider=new TimeSlider{Left=0,Top=24,Width=260,Value=Math.Min(95,Math.Max(0,(int)selectedStart.TotalMinutes/15))};
         TimeSlider endSlider=new TimeSlider{Left=294,Top=24,Width=260,Value=Math.Min(95,Math.Max(0,(int)selectedEnd.TotalMinutes/15))};
         timeGroup.Controls.AddRange(new Control[]{startLabel,endLabel,startSlider,endSlider});f.Controls.Add(timeGroup);
@@ -62,17 +62,17 @@ internal static partial class CalendarApp
         allDay.Click+=delegate{allDaySelected=!allDaySelected;updateAllDay();};updateAllDay();
         Action refreshDate=delegate{dateButton.Text=selectedDate.ToString("yyyy-MM-dd");};prevDate.Click+=delegate{selectedDate=selectedDate.AddDays(-1);refreshDate();};nextDate.Click+=delegate{selectedDate=selectedDate.AddDays(1);refreshDate();};dateButton.Click+=delegate{selectedDate=DateTime.Now.Date;refreshDate();};
         if(!isNew&&recurrence.Preserve){prevDate.Enabled=dateButton.Enabled=nextDate.Enabled=allDay.Enabled=startSlider.Enabled=endSlider.Enabled=false;recurrenceButton.Text="重复：保持现有周期（时间锁定）";}
-        TextBox location=addField("地点",26,548,588,38,isNew?"":S(original,"location"));location.Text=location.Text==""?"添加地点":location.Text;location.ForeColor=S(original,"location")==""?Color.FromArgb(150,165,185):LightUi.Text;location.GotFocus+=delegate{if(location.Text=="添加地点"){location.Text="";location.ForeColor=LightUi.Text;}};location.LostFocus+=delegate{if(location.Text.Trim()==""){location.Text="添加地点";location.ForeColor=Color.FromArgb(150,165,185);}};
-        TextBox url=addField("链接",26,612,588,38,isNew?"":S(original,"url"));url.Text=url.Text==""?"添加会议链接、网页或本地路径":url.Text;url.ForeColor=S(original,"url")==""?Color.FromArgb(150,165,185):LightUi.Text;url.GotFocus+=delegate{if(url.Text=="添加会议链接、网页或本地路径"){url.Text="";url.ForeColor=LightUi.Text;}};url.LostFocus+=delegate{if(url.Text.Trim()==""){url.Text="添加会议链接、网页或本地路径";url.ForeColor=Color.FromArgb(150,165,185);}};
-        f.Controls.Add(new Label{Text="提醒",Left=26,Top=404,Width=120,Height=22,BackColor=Color.Transparent,ForeColor=LightUi.Text,Font=new System.Drawing.Font("Microsoft YaHei UI",9.5F,System.Drawing.FontStyle.Bold)});
+        TextBox location=addField("地点",26,548,588,38,isNew?"":S(original,"location"));
+        TextBox url=addField("链接",26,612,588,38,isNew?"":S(original,"url"));
+        f.Controls.Add(new Label{Text="提醒",Left=26,Top=404,Width=120,Height=22,BackColor=Color.Transparent,ForeColor=LightUi.Text,Font=LightUi.UiFont(9.5F,System.Drawing.FontStyle.Bold)});
         int[] quickReminders=new[]{5,15,30,60,300,1440};
         List<int> reminderMinutes=isNew?new List<int>():Reminders(original);
         List<string> customAlarms=isNew?new List<string>():CustomAlarms(original);
         int originalCustomAlarmCount=customAlarms.Count;
         bool reminderExpanded=false;
         Panel reminderPanel=RoundedPanel(26,428,588,94,Color.FromArgb(248,252,255),Color.FromArgb(224,233,244),12);
-        Label bell=new Label{Text="\xE7ED",Left=16,Top=14,Width=26,Height=28,BackColor=Color.Transparent,ForeColor=LightUi.Accent,Font=new System.Drawing.Font("Segoe Fluent Icons",13F),TextAlign=ContentAlignment.MiddleCenter};
-        Label reminderText=new Label{Text="日程开始前提醒我",Left=50,Top=16,Width=172,Height=24,BackColor=Color.Transparent,ForeColor=LightUi.Text,Font=new System.Drawing.Font("Microsoft YaHei UI",10F)};
+        Label bell=new Label{Text="\xE7ED",Left=16,Top=14,Width=26,Height=28,BackColor=Color.Transparent,ForeColor=LightUi.Accent,Font=LightUi.IconFont(13F),TextAlign=ContentAlignment.MiddleCenter};
+        Label reminderText=new Label{Text="日程开始前提醒我",Left=50,Top=16,Width=172,Height=24,BackColor=Color.Transparent,ForeColor=LightUi.Text,Font=LightUi.UiFont(10F)};
         Button addReminder=LightUi.Button("+ 添加提醒",392,10,98,DialogResult.None);addReminder.Height=34;addReminder.TextAlign=ContentAlignment.MiddleCenter;addReminder.ForeColor=LightUi.Accent;addReminder.BackColor=Color.FromArgb(235,245,253);addReminder.UseVisualStyleBackColor=false;
         Button expandReminder=LightUi.Button("展开",500,10,66,DialogResult.None);expandReminder.Height=34;expandReminder.TextAlign=ContentAlignment.MiddleCenter;expandReminder.ForeColor=LightUi.Muted;expandReminder.BackColor=Color.FromArgb(235,245,253);
         expandReminder.UseVisualStyleBackColor=false;
@@ -84,9 +84,9 @@ internal static partial class CalendarApp
         reminderDrop.Controls.Add(extraReminderChips);reminderDrop.Visible=false;f.Controls.Add(reminderDrop);
         Func<int,string> reminderLabel=delegate(int m){if(m>=1440&&m%1440==0)return (m/1440)+" 天前";if(m>=60&&m%60==0)return (m/60)+" 小时前";return m+" 分钟前";};
         Action renderReminders=null;
-        Action showAddReminderDialog=delegate{Form rf=LightUi.Form("添加提醒",360,210);LightUi.Heading(rf,"添加提醒","只能添加日程开始前的提醒。");TextBox num=new TextBox{Left=36,Top=94,Width=110,Height=30,Text="15",Font=new System.Drawing.Font("Microsoft YaHei UI",11F)};ComboBox unit=new ComboBox{Left=158,Top=92,Width=100,Height=34,DropDownStyle=ComboBoxStyle.DropDownList,Font=new System.Drawing.Font("Microsoft YaHei UI",10F)};unit.Items.AddRange(new object[]{"分钟","小时","天"});unit.SelectedIndex=0;Button ok=LightUi.PrimaryButton("添加",204,150,72,DialogResult.OK);Button dialogCancel=LightUi.Button("取消",282,150,56,DialogResult.Cancel);rf.Controls.AddRange(new Control[]{num,unit,ok,dialogCancel});rf.AcceptButton=ok;rf.CancelButton=dialogCancel;if(rf.ShowDialog()==DialogResult.OK){int value;if(Int32.TryParse(num.Text.Trim(),out value)&&value>0){int minutes=value*(unit.SelectedIndex==2?1440:unit.SelectedIndex==1?60:1);if(!reminderMinutes.Contains(minutes))reminderMinutes.Add(minutes);renderReminders();}else LightUi.Error("请输入有效数字");}};
+        Action showAddReminderDialog=delegate{Form rf=LightUi.Form("添加提醒",360,210);LightUi.Heading(rf,"添加提醒","只能添加日程开始前的提醒。");TextBox num=LightUi.TextBox(36,94,110,"15");ComboBox unit=new ComboBox{Left=158,Top=92,Width=100,Height=34,DropDownStyle=ComboBoxStyle.DropDownList,Font=LightUi.UiFont(10F)};unit.Items.AddRange(new object[]{"分钟","小时","天"});unit.SelectedIndex=0;Button ok=LightUi.PrimaryButton("添加",204,150,72,DialogResult.OK);Button dialogCancel=LightUi.Button("取消",282,150,56,DialogResult.Cancel);rf.Controls.AddRange(new Control[]{num,unit,ok,dialogCancel});rf.AcceptButton=ok;rf.CancelButton=dialogCancel;if(rf.ShowDialog()==DialogResult.OK){int value;if(Int32.TryParse(num.Text.Trim(),out value)&&value>0){int minutes=value*(unit.SelectedIndex==2?1440:unit.SelectedIndex==1?60:1);if(!reminderMinutes.Contains(minutes))reminderMinutes.Add(minutes);renderReminders();}else LightUi.Error("请输入有效数字");}};
         Action<Button,Color,Color,Color> stabilizeChip=delegate(Button chip,Color back,Color fore,Color hover){chip.UseVisualStyleBackColor=false;chip.BackColor=back;chip.ForeColor=fore;chip.FlatAppearance.BorderSize=1;chip.FlatAppearance.BorderColor=Color.FromArgb(220,230,241);chip.FlatAppearance.MouseOverBackColor=hover;chip.FlatAppearance.MouseDownBackColor=hover;chip.MouseEnter+=delegate{chip.BackColor=hover;};chip.MouseLeave+=delegate{chip.BackColor=back;chip.ForeColor=fore;};};
-        renderReminders=delegate{reminderChips.Controls.Clear();extraReminderChips.Controls.Clear();foreach(int m in quickReminders){Button chip=LightUi.Button(reminderLabel(m),0,0,m>=1440?72:86,DialogResult.None);chip.Height=30;chip.Margin=new Padding(0,0,8,0);chip.Tag=m;bool active=reminderMinutes.Contains(m);Color back=active?LightUi.AccentFill:Color.FromArgb(252,254,255),fore=active?Color.White:LightUi.Accent,hover=active?Color.FromArgb(38,118,222):Color.FromArgb(235,245,253);stabilizeChip(chip,back,fore,hover);chip.Click+=delegate(object sender,EventArgs args){int value=(int)((Control)sender).Tag;if(reminderMinutes.Contains(value))reminderMinutes.Remove(value);else reminderMinutes.Add(value);renderReminders();};reminderChips.Controls.Add(chip);}int extraCount=0;foreach(int m in reminderMinutes.Where(x=>!quickReminders.Contains(x)).OrderBy(x=>x).ToList()){int labelWidth=Math.Max(78,Math.Min(118,TextRenderer.MeasureText(reminderLabel(m),new System.Drawing.Font("Microsoft YaHei UI",9F)).Width+24));Panel customWrap=new Panel{Width=labelWidth+30,Height=30,Margin=new Padding(0,0,8,8),BackColor=Color.Transparent,Tag=m};Button customStart=LightUi.Button(reminderLabel(m),0,0,labelWidth,DialogResult.None);customStart.Height=30;customStart.Tag=m;stabilizeChip(customStart,Color.FromArgb(252,254,255),LightUi.Text,Color.FromArgb(252,254,255));Button removeCustom=LightUi.Button("×",labelWidth+2,0,26,DialogResult.None);removeCustom.Height=30;removeCustom.Tag=m;stabilizeChip(removeCustom,Color.FromArgb(255,246,246),Color.FromArgb(205,70,70),Color.FromArgb(255,238,238));removeCustom.Click+=delegate(object sender,EventArgs args){int value=(int)((Control)sender).Tag;reminderMinutes.Remove(value);renderReminders();};customWrap.Controls.Add(customStart);customWrap.Controls.Add(removeCustom);extraReminderChips.Controls.Add(customWrap);extraCount++;}foreach(string raw in customAlarms.ToList()){Button custom=LightUi.Button("CalDAV提醒 ×",0,0,106,DialogResult.None);custom.Height=30;custom.Margin=new Padding(0,0,8,8);custom.Tag=raw;stabilizeChip(custom,Color.FromArgb(255,246,246),Color.FromArgb(205,70,70),Color.FromArgb(255,238,238));custom.Click+=delegate(object sender,EventArgs args){customAlarms.Remove(Convert.ToString(((Control)sender).Tag));renderReminders();};extraReminderChips.Controls.Add(custom);extraCount++;}int rows=Math.Max(1,(int)Math.Ceiling(extraCount/4.0));reminderDrop.Height=18+rows*38;extraReminderChips.Height=reminderDrop.Height-16;reminderDrop.Visible=reminderExpanded;reminderDrop.BringToFront();expandReminder.Text=reminderExpanded?"收起":"展开";};
+        renderReminders=delegate{reminderChips.Controls.Clear();extraReminderChips.Controls.Clear();foreach(int m in quickReminders){Button chip=LightUi.Button(reminderLabel(m),0,0,m>=1440?72:86,DialogResult.None);chip.Height=30;chip.Margin=new Padding(0,0,8,0);chip.Tag=m;bool active=reminderMinutes.Contains(m);Color back=active?LightUi.AccentFill:Color.FromArgb(252,254,255),fore=active?Color.White:LightUi.Accent,hover=active?Color.FromArgb(38,118,222):Color.FromArgb(235,245,253);stabilizeChip(chip,back,fore,hover);chip.Click+=delegate(object sender,EventArgs args){int value=(int)((Control)sender).Tag;if(reminderMinutes.Contains(value))reminderMinutes.Remove(value);else reminderMinutes.Add(value);renderReminders();};reminderChips.Controls.Add(chip);}int extraCount=0;foreach(int m in reminderMinutes.Where(x=>!quickReminders.Contains(x)).OrderBy(x=>x).ToList()){int labelWidth=Math.Max(78,Math.Min(118,TextRenderer.MeasureText(reminderLabel(m),LightUi.UiFont(9F)).Width+24));Panel customWrap=new Panel{Width=labelWidth+30,Height=30,Margin=new Padding(0,0,8,8),BackColor=Color.Transparent,Tag=m};Button customStart=LightUi.Button(reminderLabel(m),0,0,labelWidth,DialogResult.None);customStart.Height=30;customStart.Tag=m;stabilizeChip(customStart,Color.FromArgb(252,254,255),LightUi.Text,Color.FromArgb(252,254,255));Button removeCustom=LightUi.Button("×",labelWidth+2,0,26,DialogResult.None);removeCustom.Height=30;removeCustom.Tag=m;stabilizeChip(removeCustom,Color.FromArgb(255,246,246),Color.FromArgb(205,70,70),Color.FromArgb(255,238,238));removeCustom.Click+=delegate(object sender,EventArgs args){int value=(int)((Control)sender).Tag;reminderMinutes.Remove(value);renderReminders();};customWrap.Controls.Add(customStart);customWrap.Controls.Add(removeCustom);extraReminderChips.Controls.Add(customWrap);extraCount++;}foreach(string raw in customAlarms.ToList()){Button custom=LightUi.Button("CalDAV提醒 ×",0,0,106,DialogResult.None);custom.Height=30;custom.Margin=new Padding(0,0,8,8);custom.Tag=raw;stabilizeChip(custom,Color.FromArgb(255,246,246),Color.FromArgb(205,70,70),Color.FromArgb(255,238,238));custom.Click+=delegate(object sender,EventArgs args){customAlarms.Remove(Convert.ToString(((Control)sender).Tag));renderReminders();};extraReminderChips.Controls.Add(custom);extraCount++;}int rows=Math.Max(1,(int)Math.Ceiling(extraCount/4.0));reminderDrop.Height=18+rows*38;extraReminderChips.Height=reminderDrop.Height-16;reminderDrop.Visible=reminderExpanded;reminderDrop.BringToFront();expandReminder.Text=reminderExpanded?"收起":"展开";};
         Action renderReminderBase=renderReminders;
         renderReminders=delegate{
             renderReminderBase();
@@ -98,7 +98,7 @@ internal static partial class CalendarApp
         addReminder.Click+=delegate{showAddReminderDialog();};
         expandReminder.Click+=delegate{reminderExpanded=!reminderExpanded;renderReminders();};
         renderReminders();
-        TextBox description=addField("备注",26,674,588,42,isNew?"":S(original,"description"));description.Multiline=true;description.ScrollBars=ScrollBars.None;description.Text=description.Text==""?"添加备注":description.Text;description.ForeColor=S(original,"description")==""?Color.FromArgb(150,165,185):LightUi.Text;description.GotFocus+=delegate{if(description.Text=="添加备注"){description.Text="";description.ForeColor=LightUi.Text;}};description.LostFocus+=delegate{if(description.Text.Trim()==""){description.Text="添加备注";description.ForeColor=Color.FromArgb(150,165,185);}};
+        TextBox description=addField("备注",26,674,588,42,isNew?"":S(original,"description"));description.Multiline=true;description.ScrollBars=ScrollBars.None;
         bool recurringCalDav=!isNew&&originalCalDav&&B(original,"recurring"),recurringLocal=!isNew&&!originalCalDav&&B(original,"recurring");
         Panel footer=RoundedPanel(18,730,604,48,Color.FromArgb(248,252,255),Color.FromArgb(224,233,244),14);
         Label hint=LightUi.Label("",128,17,270);footer.Controls.Add(hint);updateFooterHint=delegate{if(originalCalDav&&!hasCalDav)hint.Text="CalDAV 凭据缺失，暂不能保存。";else if(recurringCalDav)hint.Text=recurrence.Preserve?"复杂周期的日期与时间已锁定。":"保存会改写整个 CalDAV 周期日程。";else if(recurringLocal)hint.Text=recurrence.Preserve?"复杂周期的日期与时间已锁定。":"保存会修改整个本地周期日程。";else if(recurrence.Frequency!="none")hint.Text=selectedSource=="caldav"?"周期规则会同步到 CalDAV。":"周期规则会保存在本机。";else hint.Text=hasCalDav?"CalDAV 已配置，可同步到远程日历。":"未填写 CalDAV 凭据时只创建本地日历。";};updateFooterHint();
@@ -118,7 +118,7 @@ internal static partial class CalendarApp
             if(recurringCalDav){DialogResult confirm=MessageBox.Show("这会修改整个周期日程，所有后续重复项都会一起更新。确定继续吗？","改写周期日程",MessageBoxButtons.YesNo,MessageBoxIcon.Warning);if(confirm!=DialogResult.Yes)return false;}
             if(recurringLocal){DialogResult confirm=MessageBox.Show("这会修改整个本地周期日程，所有重复项都会一起更新。确定继续吗？","改写周期日程",MessageBoxButtons.YesNo,MessageBoxIcon.Warning);if(confirm!=DialogResult.Yes)return false;}
             if(originalCustomAlarmCount>customAlarms.Count){DialogResult confirmCustom=MessageBox.Show("你删除了 CalDAV 额外提醒。保存后这些提醒会从远端日程删除，之后本界面也不支持重新创建这种格式的提醒。确定继续吗？","删除 CalDAV 额外提醒",MessageBoxButtons.YesNo,MessageBoxIcon.Warning);if(confirmCustom!=DialogResult.Yes)return false;}
-            string locationText=location.Text.Trim()=="添加地点"?"":location.Text.Trim(),urlText=url.Text.Trim()=="添加会议链接、网页或本地路径"?"":url.Text.Trim(),descriptionText=description.Text.Trim()=="添加备注"?"":description.Text.Trim();
+            string locationText=location.Text.Trim(),urlText=url.Text.Trim(),descriptionText=description.Text.Trim();
             List<int> editableReminders=reminderMinutes.Distinct().OrderBy(x=>x).ToList();
             string selected=selectedSource=="caldav"?"caldav":"local";Dictionary<string,object> draft=DraftEvent(original,selected,cleanTitle,start,end,allDaySelected,locationText,urlText,descriptionText,editableReminders,customAlarms,recurrence);
             draft["time_changed"]=timingChanged;if((recurringCalDav||recurringLocal)&&timingChanged&&!recurrence.Preserve){recurrence.Changed=true;draft["rrule"]=BuildRecurrenceRule(recurrence,start,allDaySelected);draft["rrule_changed"]=true;}
@@ -152,48 +152,37 @@ internal static partial class CalendarApp
     {
         calendarCredentialsLoadError = "";
         if (!File.Exists(SecretPath)) return new Dictionary<string,object>();
-        try { return JsonUtil.ReadDpapiJson(SecretPath); }
+        try
+        {
+            Dictionary<string,object> credentials=JsonUtil.ReadDpapiJson(SecretPath);string stored=JsonUtil.String(credentials,"Server","");credentials["_StoredServer"]=stored;credentials["Server"]=DynamicPluginValues.BindForTarget(stored,"calendar.caldav");return credentials;
+        }
         catch (Exception ex) { calendarCredentialsLoadError = "CalDAV 凭据无法解密或已损坏：" + ex.Message.Replace("\r", " ").Replace("\n", " "); return new Dictionary<string,object>(); }
     }
 
-    private static void SaveCredentials(TextBox server, TextBox username, TextBox password, Dictionary<string,object> cache)
+    private static void SaveCredentials(string server, string username, string password, Dictionary<string,object> cache)
     {
-        string s = server.Text.Trim(), u = username.Text.Trim(), p = password.Text;
+        string s = (server??"").Trim(), u = (username??"").Trim(), p = password??"";
         if (s == "") throw new Exception("CalDAV 地址不能为空");
         if (!s.StartsWith("http://", StringComparison.OrdinalIgnoreCase) && !s.StartsWith("https://", StringComparison.OrdinalIgnoreCase)) s = "https://" + s;
         if (u == "" || p == "") throw new Exception("账号和密码不能为空");
         s = s.TrimEnd('/');
         JsonUtil.WriteDpapiJson(SecretPath, new Dictionary<string,object>{{"Server",s},{"Username",u},{"Password",p}});
-        cache["calendar_url"] = "";
-        cache["events"] = new List<object>();
-        cache["fetched_at"] = "";
-        cache["status"] = "CalDAV 凭据已保存";
-        Save(CachePath, cache);
+        cache["calendar_url"] = "";cache["events"] = new List<object>();cache["fetched_at"] = "";cache["status"] = "CalDAV 凭据已保存";Save(CachePath, cache);
     }
 
-    private static Dictionary<string,object> CredentialsFromFields(TextBox server, TextBox username, TextBox password)
-    {
-        return CredentialsFromValues(server.Text, username.Text, password.Text);
-    }
-
+    private static Dictionary<string,object> CredentialsFromFields(TextBox server, TextBox username, TextBox password){return CredentialsFromValues(server.Text, username.Text, password.Text);}
     private static Dictionary<string,object> CredentialsFromValues(string server, string username, string password)
     {
         string s = (server ?? "").Trim(), u = (username ?? "").Trim(), p = password ?? "";
         if (s == "") throw new Exception("CalDAV 地址不能为空");
         if (!s.StartsWith("http://", StringComparison.OrdinalIgnoreCase) && !s.StartsWith("https://", StringComparison.OrdinalIgnoreCase)) s = "https://" + s;
-        if (u == "" || p == "") throw new Exception("账号和密码不能为空");
+        s=DynamicPluginValues.BindForTarget(s,"calendar.caldav");if (u == "" || p == "") throw new Exception("账号和密码不能为空");
         return new Dictionary<string,object>{{"Server",s},{"Username",u},{"Password",p}};
     }
-
-    private static string TestCredentials(TextBox server, TextBox username, TextBox password)
-    {
-        return TestCredentials(server.Text, username.Text, password.Text);
-    }
-
+    private static string TestCredentials(TextBox server, TextBox username, TextBox password){return TestCredentials(server.Text, username.Text, password.Text);}
     private static string TestCredentials(string server, string username, string password)
     {
-        CalendarInfo calendar = Discover(CredentialsFromValues(server, username, password));
-        return "连接成功：" + (calendar.Name == "" ? calendar.Uri : calendar.Name);
+        CalendarInfo calendar = Discover(CredentialsFromValues(server, username, password));return "连接成功：" + (calendar.Name == "" ? calendar.Uri : calendar.Name);
     }
 
     private static void ClearCredentials(Dictionary<string,object> cache)
@@ -215,7 +204,7 @@ internal static partial class CalendarApp
 
     private static void StyleRuleList(ListBox list)
     {
-        list.Font = new System.Drawing.Font("Microsoft YaHei UI", 10F);
+        list.Font = LightUi.UiFont( 10F);
         list.DrawMode = DrawMode.OwnerDrawFixed;
         list.IntegralHeight = false;
         list.ItemHeight = Math.Max(32, list.Font.Height + 14);
@@ -223,8 +212,8 @@ internal static partial class CalendarApp
             if (e.Index < 0) return;
             ListBox source = (ListBox)sender;
             bool selected = (e.State & DrawItemState.Selected) == DrawItemState.Selected;
-            Color back = selected ? Color.FromArgb(11, 128, 214) : source.BackColor;
-            Color fore = selected ? Color.White : source.ForeColor;
+            Color back = selected ? LightUi.Selected : source.BackColor;
+            Color fore = selected ? LightUi.Accent : source.ForeColor;
             using (SolidBrush background = new SolidBrush(back)) e.Graphics.FillRectangle(background, e.Bounds);
             string text = source.GetItemText(source.Items[e.Index]);
             int inset = Math.Max(2, UiScale.Logical(source, 4));
@@ -234,13 +223,6 @@ internal static partial class CalendarApp
         };
     }
 
-    private static void StyleTab(TabControl tabs)
-    {
-        tabs.Appearance = TabAppearance.FlatButtons;
-        tabs.ItemSize = new Size(118, 34);
-        tabs.SizeMode = TabSizeMode.Fixed;
-        tabs.Font = new System.Drawing.Font("Microsoft YaHei UI", 9F);
-    }
 
     private static void DrawRound(Graphics graphics, Pen pen, float x, float y, float width, float height, float radius)
     {
@@ -392,9 +374,24 @@ internal static partial class CalendarApp
         public int Value;
         public event EventHandler ValueChanged;
         private bool dragging;
-        public TimeSlider(){SetStyle(ControlStyles.AllPaintingInWmPaint|ControlStyles.OptimizedDoubleBuffer|ControlStyles.ResizeRedraw|ControlStyles.UserPaint,true);Height=34;Cursor=Cursors.Hand;}
+        public TimeSlider(){SetStyle(ControlStyles.AllPaintingInWmPaint|ControlStyles.OptimizedDoubleBuffer|ControlStyles.ResizeRedraw|ControlStyles.UserPaint,true);Height=34;Cursor=Cursors.Hand;TabStop=true;}
         private float PaintScale { get { return Math.Max(0.5F, Height / 34F); } }
-        protected override void OnPaint(PaintEventArgs e){base.OnPaint(e);e.Graphics.SmoothingMode=System.Drawing.Drawing2D.SmoothingMode.AntiAlias;float s=PaintScale,pad=10F*s,trackY=Height/2F,trackW=Math.Max(1F,Width-pad*2F),x=pad+(float)Math.Round(trackW*(Value/95.0));Color accent=Enabled?LightUi.Accent:Color.FromArgb(165,181,202),track=Enabled?Color.FromArgb(213,228,241):Color.FromArgb(226,235,243);using(Pen bg=new Pen(track,Math.Max(2F,6F*s))){bg.StartCap=bg.EndCap=System.Drawing.Drawing2D.LineCap.Round;e.Graphics.DrawLine(bg,pad,trackY,Width-pad,trackY);}using(Pen fg=new Pen(accent,Math.Max(2F,6F*s))){fg.StartCap=fg.EndCap=System.Drawing.Drawing2D.LineCap.Round;e.Graphics.DrawLine(fg,pad,trackY,x,trackY);}using(SolidBrush shadow=new SolidBrush(Enabled?Color.FromArgb(50,47,132,235):Color.FromArgb(35,120,135,155)))e.Graphics.FillEllipse(shadow,x-9F*s,trackY-8F*s,18F*s,18F*s);using(SolidBrush knob=new SolidBrush(Color.White))e.Graphics.FillEllipse(knob,x-8F*s,trackY-9F*s,16F*s,16F*s);using(Pen pen=new Pen(accent,Math.Max(1F,2F*s)))e.Graphics.DrawEllipse(pen,x-8F*s,trackY-9F*s,16F*s,16F*s);}
+        protected override void OnPaint(PaintEventArgs e){base.OnPaint(e);e.Graphics.SmoothingMode=System.Drawing.Drawing2D.SmoothingMode.AntiAlias;float s=PaintScale,pad=10F*s,trackY=Height/2F,trackW=Math.Max(1F,Width-pad*2F),x=pad+(float)Math.Round(trackW*(Value/95.0));Color accent=Enabled?LightUi.Accent:Color.FromArgb(165,181,202),track=Enabled?Color.FromArgb(213,228,241):Color.FromArgb(226,235,243);using(Pen bg=new Pen(track,Math.Max(2F,6F*s))){bg.StartCap=bg.EndCap=System.Drawing.Drawing2D.LineCap.Round;e.Graphics.DrawLine(bg,pad,trackY,Width-pad,trackY);}using(Pen fg=new Pen(accent,Math.Max(2F,6F*s))){fg.StartCap=fg.EndCap=System.Drawing.Drawing2D.LineCap.Round;e.Graphics.DrawLine(fg,pad,trackY,x,trackY);}using(SolidBrush shadow=new SolidBrush(Enabled?Color.FromArgb(50,47,132,235):Color.FromArgb(35,120,135,155)))e.Graphics.FillEllipse(shadow,x-9F*s,trackY-8F*s,18F*s,18F*s);using(SolidBrush knob=new SolidBrush(Color.White))e.Graphics.FillEllipse(knob,x-8F*s,trackY-9F*s,16F*s,16F*s);using(Pen pen=new Pen(accent,Math.Max(1F,2F*s)))e.Graphics.DrawEllipse(pen,x-8F*s,trackY-9F*s,16F*s,16F*s);if(Focused)ControlPaint.DrawFocusRectangle(e.Graphics,new Rectangle(1,1,Math.Max(1,Width-3),Math.Max(1,Height-3)),LightUi.Accent,BackColor);}
+        protected override bool IsInputKey(Keys keyData)
+        {
+            if (keyData == Keys.Left || keyData == Keys.Right) return true;
+            return base.IsInputKey(keyData);
+        }
+        protected override void OnKeyDown(KeyEventArgs e)
+        {
+            base.OnKeyDown(e);
+            int next = e.KeyCode == Keys.Left ? Math.Max(0, Value - 1) : e.KeyCode == Keys.Right ? Math.Min(95, Value + 1) : Value;
+            if (next == Value) return;
+            Value = next; Invalidate(); e.Handled = true;
+            if (ValueChanged != null) ValueChanged(this, EventArgs.Empty);
+        }
+        protected override void OnGotFocus(EventArgs e){base.OnGotFocus(e);Invalidate();}
+        protected override void OnLostFocus(EventArgs e){base.OnLostFocus(e);Invalidate();}
         private void SetFromX(int mouseX){float s=PaintScale,pad=10F*s,trackW=Math.Max(1F,Width-pad*2F);int next=(int)Math.Round(Math.Max(0F,Math.Min(trackW,mouseX-pad))/(trackW/95.0));if(next==Value)return;Value=next;Invalidate();if(ValueChanged!=null)ValueChanged(this,EventArgs.Empty);}
         protected override void OnMouseDown(MouseEventArgs e){base.OnMouseDown(e);dragging=true;Capture=true;SetFromX(e.X);}
         protected override void OnMouseMove(MouseEventArgs e){base.OnMouseMove(e);if(dragging)SetFromX(e.X);}
@@ -404,11 +401,31 @@ internal static partial class CalendarApp
     private sealed class CalendarDayCell : Control
     {
         public Color DayBackColor = Color.Transparent;
+        public bool KeyboardSelectionRequested;
         public CalendarDayCell()
         {
             SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer | ControlStyles.ResizeRedraw | ControlStyles.SupportsTransparentBackColor | ControlStyles.UserPaint, true);
             BackColor = Color.Transparent;
+            TabStop = true;
         }
+        protected override bool IsInputKey(Keys keyData)
+        {
+            if (keyData == Keys.Left || keyData == Keys.Right || keyData == Keys.Up || keyData == Keys.Down) return true;
+            return base.IsInputKey(keyData);
+        }
+        protected override void OnKeyDown(KeyEventArgs e)
+        {
+            base.OnKeyDown(e);
+            if (e.KeyCode == Keys.Enter || e.KeyCode == Keys.Space) { KeyboardSelectionRequested = true; OnClick(EventArgs.Empty); e.Handled = true; return; }
+            int days = e.KeyCode == Keys.Left ? -1 : e.KeyCode == Keys.Right ? 1 : e.KeyCode == Keys.Up ? -7 : e.KeyCode == Keys.Down ? 7 : 0;
+            if (days == 0 || !(Tag is DateTime) || Parent == null) return;
+            DateTime targetDate = ((DateTime)Tag).AddDays(days).Date;
+            CalendarDayCell target = Parent.Controls.OfType<CalendarDayCell>().FirstOrDefault(cell => cell.Tag is DateTime && ((DateTime)cell.Tag).Date == targetDate);
+            if (target != null) { target.KeyboardSelectionRequested = true; target.Focus(); target.OnClick(EventArgs.Empty); e.Handled = true; }
+            else { object current = Tag; KeyboardSelectionRequested = true; Tag = targetDate; OnClick(EventArgs.Empty); Tag = current; e.Handled = true; }
+        }
+        protected override void OnGotFocus(EventArgs e) { base.OnGotFocus(e); Invalidate(); }
+        protected override void OnLostFocus(EventArgs e) { base.OnLostFocus(e); Invalidate(); }
         protected override void OnPaint(PaintEventArgs e)
         {
             base.OnPaint(e);
@@ -420,15 +437,15 @@ internal static partial class CalendarApp
                 using (SolidBrush background = new SolidBrush(DayBackColor)) e.Graphics.FillEllipse(background, circle);
             }
             TextRenderer.DrawText(e.Graphics, Text, Font, ClientRectangle, ForeColor, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding | TextFormatFlags.NoPrefix | TextFormatFlags.SingleLine);
+            if (Focused) ControlPaint.DrawFocusRectangle(e.Graphics, new Rectangle(1, 1, Math.Max(1, Width - 3), Math.Max(1, Height - 3)), LightUi.Accent, BackColor);
         }
     }
-
     private static TextBox AddCredentialField(Panel parent, string icon, string label, int y, string text, bool password, out Panel reveal)
     {
         parent.Controls.Add(IconPanel(icon, 34, y + 13, 28, LightUi.Accent));
-        parent.Controls.Add(new Label { Text = label, Left = 84, Top = y + 13, Width = 180, Height = 24, ForeColor = LightUi.Text, BackColor = Color.Transparent, Font = new System.Drawing.Font("Microsoft YaHei UI", 9.5F) });
+        parent.Controls.Add(new Label { Text = label, Left = 84, Top = y + 13, Width = 180, Height = 24, ForeColor = LightUi.Text, BackColor = Color.Transparent, Font = LightUi.UiFont( 9.5F) });
         Panel box = RoundedPanel(84, y + 44, 560, 44, Color.FromArgb(252, 254, 255), Color.FromArgb(220, 230, 241), 10);
-        TextBox input = new TextBox { Left = 14, Top = 10, Width = password ? 480 : 532, Height = 24, AutoSize = false, BorderStyle = BorderStyle.None, BackColor = Color.FromArgb(252, 254, 255), ForeColor = Color.FromArgb(5, 16, 34), Font = new System.Drawing.Font("Microsoft YaHei UI", 10F), Text = text ?? "" };
+        TextBox input = new TextBox { Left = 14, Top = 10, Width = password ? 480 : 532, Height = 24, AutoSize = false, BorderStyle = BorderStyle.None, BackColor = Color.FromArgb(252, 254, 255), ForeColor = Color.FromArgb(5, 16, 34), Font = LightUi.UiFont( 10F), Text = text ?? "" };
         input.UseSystemPasswordChar = password;
         box.Controls.Add(input);
         parent.Controls.Add(box);
@@ -449,12 +466,9 @@ internal static partial class CalendarApp
         Form f = LightUi.Form("日程设置", 720, 560);
         Panel headerIcon = RoundedPanel(38, 34, 48, 48, Color.FromArgb(238,245,252), Color.FromArgb(205,224,241), 14);
         AddHeaderSvgIcon(headerIcon, "settings.svg", "shield", 8, 8, 32);
-        Label title = new Label { Text = "日程设置", Left = 112, Top = 34, Width = 240, Height = 40, BackColor = Color.Transparent, ForeColor = LightUi.Text, Font = new System.Drawing.Font("Microsoft YaHei UI", 18F, System.Drawing.FontStyle.Bold) };
-        Label subtitle = new Label { Text = "管理 CalDAV 同步账号和周期自动转入规则。", Left = 42, Top = 92, Width = 540, Height = 26, BackColor = Color.Transparent, ForeColor = Color.FromArgb(76, 94, 132), Font = new System.Drawing.Font("Microsoft YaHei UI", 10F) };
-        Button closeTop = LightUi.Button("×", 648, 38, 42, DialogResult.Cancel);
-        closeTop.Height = 42;
-        closeTop.Font = new System.Drawing.Font("Microsoft YaHei UI", 18F);
-        closeTop.ForeColor = Color.FromArgb(37, 52, 82);
+        Label title = new Label { Text = "日程设置", Left = 112, Top = 34, Width = 240, Height = 40, BackColor = Color.Transparent, ForeColor = LightUi.Text, Font = LightUi.UiFont( 18F, System.Drawing.FontStyle.Bold) };
+        Label subtitle = new Label { Text = "管理 CalDAV 同步账号和周期自动转入规则。", Left = 42, Top = 92, Width = 540, Height = 26, BackColor = Color.Transparent, ForeColor = Color.FromArgb(76, 94, 132), Font = LightUi.UiFont( 10F) };
+        Button closeTop = LightUi.CloseButton(f);
         f.Controls.AddRange(new Control[] { headerIcon, title, subtitle, closeTop });
         title.BringToFront();
         closeTop.BringToFront();
@@ -463,7 +477,7 @@ internal static partial class CalendarApp
         Button tabAccount = LightUi.Button("同步账号", 0, 0, 136, DialogResult.None);
         Button tabRules = LightUi.Button("自动转入", 136, 0, 136, DialogResult.None);
         tabAccount.Height = tabRules.Height = 44;
-        tabAccount.Font = tabRules.Font = new System.Drawing.Font("Microsoft YaHei UI", 10F, System.Drawing.FontStyle.Bold);
+        tabAccount.Font = tabRules.Font = LightUi.UiFont( 10F, System.Drawing.FontStyle.Bold);
         tabRail.Controls.AddRange(new Control[] { tabAccount, tabRules });
         f.Controls.Add(tabRail);
 
@@ -477,7 +491,13 @@ internal static partial class CalendarApp
         tabRules.Click += delegate { showAccount(false); };
 
         Panel reveal;
+        AddressProviderBinding calendarProvider=DynamicPluginValues.AddressProvider("calendar.caldav");string storedCalendarServer=S(credentials,"_StoredServer");if(storedCalendarServer=="")storedCalendarServer=S(credentials,"Server");
         TextBox server = AddCredentialField(accountPage, "globe", "CalDAV 地址", 10, S(credentials, "Server"), false, out reveal);
+        if(calendarProvider!=null)
+        {
+            server.ReadOnly=true;server.BackColor=Color.FromArgb(232,238,244);server.Cursor=Cursors.Hand;if(server.Parent!=null){server.Parent.BackColor=Color.FromArgb(232,238,244);server.Parent.Cursor=Cursors.Hand;}
+            EventHandler explain=delegate{MessageBox.Show("CalDAV 地址当前由“"+calendarProvider.PluginName+"”接管。系统只替换发送地址中的主机/IP，保留协议、端口和路径。\r\n\r\n如需手动修改，请先在待办设置中禁用该插件，再重新打开日程设置。","地址由插件接管",MessageBoxButtons.OK,MessageBoxIcon.Information);};server.Click+=explain;if(server.Parent!=null)server.Parent.Click+=explain;
+        }
         TextBox username = AddCredentialField(accountPage, "user", "账号", 92, S(credentials, "Username"), false, out reveal);
         TextBox password = AddCredentialField(accountPage, "lock", "密码", 174, S(credentials, "Password"), true, out reveal);
         if (reveal != null) reveal.Click += delegate { password.UseSystemPasswordChar = !password.UseSystemPasswordChar; reveal.Tag = password.UseSystemPasswordChar ? "eye-off" : "eye"; reveal.Invalidate(); };
@@ -487,21 +507,19 @@ internal static partial class CalendarApp
         LightUi.Round(list, 12);
         FillRules(list, state);
         rulePage.Controls.Add(list);
-        rulePage.Controls.Add(new Label { Text = "停止规则只影响未来周期，已经生成的待办保持不变。", Left = 34, Top = 232, Width = 420, Height = 24, ForeColor = Color.FromArgb(76, 94, 132), BackColor = Color.Transparent, Font = new System.Drawing.Font("Microsoft YaHei UI", 9F) });
+        rulePage.Controls.Add(new Label { Text = "停止规则只影响未来周期，已经生成的待办保持不变。", Left = 34, Top = 232, Width = 420, Height = 24, ForeColor = Color.FromArgb(76, 94, 132), BackColor = Color.Transparent, Font = LightUi.UiFont( 9F) });
         Button stop = LightUi.DangerButton("清除规则", 506, 224, 116, DialogResult.None);
         stop.Height = 40;
-        stop.Font = new System.Drawing.Font("Microsoft YaHei UI", 9F, System.Drawing.FontStyle.Bold);
+        stop.Font = LightUi.UiFont( 9F, System.Drawing.FontStyle.Bold);
         rulePage.Controls.Add(stop);
 
         string initialCredentialStatus = calendarCredentialsLoadError != "" ? calendarCredentialsLoadError : S(cache, "status");
-        bool insecureCalDav = server.Text.Trim().StartsWith("http://", StringComparison.OrdinalIgnoreCase) && (username.Text.Trim() != "" || password.Text != "");
-        if (insecureCalDav && calendarCredentialsLoadError == "") initialCredentialStatus = "安全警告：CalDAV 凭据正通过 HTTP 明文传输";
-        Label saveStatus = new Label { Text = initialCredentialStatus, Left = 64, Top = 502, Width = 280, Height = 28, BackColor = Color.Transparent, ForeColor = calendarCredentialsLoadError != "" || insecureCalDav ? LightUi.Danger : S(cache, "status").Contains("成功") || S(cache, "status").Contains("已同步") ? Color.FromArgb(63, 178, 119) : Color.FromArgb(76, 94, 132), Font = new System.Drawing.Font("Microsoft YaHei UI", 10F, System.Drawing.FontStyle.Bold) };
+        Label saveStatus = new Label { Text = initialCredentialStatus, Left = 64, Top = 502, Width = 280, Height = 28, BackColor = Color.Transparent, ForeColor = calendarCredentialsLoadError != "" ? LightUi.Danger : S(cache, "status").Contains("成功") || S(cache, "status").Contains("已同步") ? LightUi.Done : Color.FromArgb(76, 94, 132), Font = LightUi.UiFont( 10F, System.Drawing.FontStyle.Bold) };
         Button clearAccount = LightUi.DangerButton("清除设置", 364, 494, 98, DialogResult.None);
         Button testAccount = LightUi.Button("测试连接", 476, 494, 98, DialogResult.None);
         Button saveAccount = LightUi.PrimaryButton("保存凭据", 588, 494, 100, DialogResult.None);
         clearAccount.Height = testAccount.Height = saveAccount.Height = 38;
-        clearAccount.Font = testAccount.Font = saveAccount.Font = new System.Drawing.Font("Microsoft YaHei UI", 9F, System.Drawing.FontStyle.Bold);
+        clearAccount.Font = testAccount.Font = saveAccount.Font = LightUi.UiFont( 9F, System.Drawing.FontStyle.Bold);
         f.Controls.AddRange(new Control[] { saveStatus, clearAccount, testAccount, saveAccount });
         showAccount = delegate(bool account) {
             accountPage.Visible = account; accountPage.Enabled = account;
@@ -516,25 +534,25 @@ internal static partial class CalendarApp
             tabRail.BringToFront(); closeTop.BringToFront();
         };
         showAccount(true);
-        f.Shown += delegate { if (insecureCalDav) MessageBox.Show("当前 CalDAV 地址使用 http://，账号和密码可能以明文传输。建议尽快改用 https://。", "明文凭据警告", MessageBoxButtons.OK, MessageBoxIcon.Warning); };
+
 
         testAccount.Click += delegate {
             try
             {
                 string serverValue = server.Text, usernameValue = username.Text, passwordValue = password.Text;
-                if (serverValue.Trim().StartsWith("http://", StringComparison.OrdinalIgnoreCase) && MessageBox.Show("CalDAV 使用 http://，账号和密码会以明文通过网络传输。\r\n\r\n仍要测试吗？", "明文凭据警告", MessageBoxButtons.YesNo, MessageBoxIcon.Warning) != DialogResult.Yes) return;
+
                 testAccount.Enabled = false; saveStatus.Text = "正在测试…"; saveStatus.ForeColor = Color.FromArgb(76, 94, 132);
                 ThreadPool.QueueUserWorkItem(delegate {
                     string result = ""; Exception failure = null;
                     try { result = TestCredentials(serverValue, usernameValue, passwordValue); } catch (Exception ex) { failure = ex; }
                     if (f.IsDisposed || !f.IsHandleCreated) return;
-                    try { f.BeginInvoke(new Action(delegate { if (f.IsDisposed) return; testAccount.Enabled = true; if (failure != null) { LightUi.Error("连接失败：" + failure.Message); saveStatus.Text = "连接失败"; saveStatus.ForeColor = LightUi.Danger; } else { saveStatus.Text = result; saveStatus.ForeColor = Color.FromArgb(63, 178, 119); } })); } catch (InvalidOperationException) { }
+                    try { f.BeginInvoke(new Action(delegate { if (f.IsDisposed) return; testAccount.Enabled = true; if (failure != null) { LightUi.Error("连接失败：" + failure.Message); saveStatus.Text = "连接失败"; saveStatus.ForeColor = LightUi.Danger; } else { saveStatus.Text = result; saveStatus.ForeColor = LightUi.Done; } })); } catch (InvalidOperationException) { }
                 });
             }
             catch (Exception ex) { testAccount.Enabled = true; LightUi.Error("连接失败：" + ex.Message); saveStatus.Text = "连接失败"; saveStatus.ForeColor = LightUi.Danger; }
         };
         saveAccount.Click += delegate {
-            try { if (server.Text.Trim().StartsWith("http://", StringComparison.OrdinalIgnoreCase) && MessageBox.Show("CalDAV 使用 http://，账号和密码会以明文通过网络传输。\r\n\r\n仍要保存吗？", "明文凭据警告", MessageBoxButtons.YesNo, MessageBoxIcon.Warning) != DialogResult.Yes) return; SaveCredentials(server, username, password, cache); saveStatus.Text = "已保存"; saveStatus.ForeColor = Color.FromArgb(63, 178, 119); }
+            try { SaveCredentials(calendarProvider==null?server.Text:storedCalendarServer, username.Text, password.Text, cache); saveStatus.Text = "已保存"; saveStatus.ForeColor = LightUi.Done; }
             catch (Exception ex) { LightUi.Error(ex.Message); }
         };
         clearAccount.Click += delegate {
@@ -565,27 +583,28 @@ internal static partial class CalendarApp
         bool showLocal = true, showCalDav = true;
         DateTime selectedDate = DateTime.Now.Date;
         Action reload = null, renderCalendar = null;
+        DateTime? keyboardFocusDate = null;
         Form f = LightUi.Form("日程管理", 1180, 760);
         Panel headerIcon = RoundedPanel(30, 26, 42, 42, Color.FromArgb(238,245,252), Color.FromArgb(205,224,241), 12);
         AddHeaderSvgIcon(headerIcon, "calendar.svg", "calendar", 7, 7, 28);
-        Label title = new Label { Text = "日程管理", Left = 90, Top = 24, Width = 220, Height = 38, BackColor = Color.Transparent, ForeColor = LightUi.Text, Font = new System.Drawing.Font("Microsoft YaHei UI", 18F, System.Drawing.FontStyle.Bold) };
-        Label subtitle = new Label { Text = "查看、编辑和同步你的本地日历与 CalDAV 日历。", Left = 92, Top = 70, Width = 520, Height = 22, BackColor = Color.Transparent, ForeColor = LightUi.Muted, Font = new System.Drawing.Font("Microsoft YaHei UI", 9.5F) };
+        Label title = new Label { Text = "日程管理", Left = 90, Top = 24, Width = 220, Height = 38, BackColor = Color.Transparent, ForeColor = LightUi.Text, Font = LightUi.UiFont( 18F, System.Drawing.FontStyle.Bold) };
+        Label subtitle = new Label { Text = "查看、编辑和同步你的本地日历与 CalDAV 日历。", Left = 92, Top = 70, Width = 520, Height = 22, BackColor = Color.Transparent, ForeColor = LightUi.Muted, Font = LightUi.UiFont( 9.5F) };
         Panel searchBox = RoundedPanel(760, 30, 300, 42, Color.FromArgb(252,254,255), Color.FromArgb(220,230,241), 13);
-        Label searchIcon = new Label { Text = "\xE721", Left = 14, Top = 10, Width = 22, Height = 22, BackColor = Color.Transparent, ForeColor = LightUi.Muted, Font = new System.Drawing.Font("Segoe Fluent Icons", 10F), TextAlign = ContentAlignment.MiddleCenter };
-        TextBox search = new TextBox { Left = 44, Top = 10, Width = 238, Height = 22, BorderStyle = BorderStyle.None, BackColor = Color.FromArgb(252,254,255), ForeColor = LightUi.Text, Font = new System.Drawing.Font("Microsoft YaHei UI", 10F) };
+        Label searchIcon = new Label { Text = "\xE721", Left = 14, Top = 10, Width = 22, Height = 22, BackColor = Color.Transparent, ForeColor = LightUi.Muted, Font = LightUi.IconFont(10F), TextAlign = ContentAlignment.MiddleCenter };
+        TextBox search = new TextBox { Left = 44, Top = 10, Width = 238, Height = 22, BorderStyle = BorderStyle.None, BackColor = Color.FromArgb(252,254,255), ForeColor = LightUi.Text, Font = LightUi.UiFont( 10F) };
         searchBox.Controls.Add(searchIcon); searchBox.Controls.Add(search);
-        Button close = LightUi.Button("×", 1100, 30, 42, DialogResult.Cancel); close.Height = 42; close.Font = new System.Drawing.Font("Segoe UI Symbol", 14F, System.Drawing.FontStyle.Bold); close.TextAlign = ContentAlignment.MiddleCenter; close.Padding = new Padding(0, 0, 0, 2);
+        Button close = LightUi.CloseButton(f);
         f.Controls.AddRange(new Control[] { headerIcon, title, subtitle, searchBox, close });
 
         Panel left = RoundedPanel(28, 112, 330, 540, Color.FromArgb(248,252,255), Color.FromArgb(224,233,244), 18);
         Button prevMonth = LightUi.Button("‹", 22, 22, 38, DialogResult.None);
         Button nextMonth = LightUi.Button("›", 270, 22, 38, DialogResult.None);
-        Label monthTitle = new Label { Left = 70, Top = 29, Width = 190, Height = 24, BackColor = Color.Transparent, ForeColor = LightUi.Text, TextAlign = ContentAlignment.MiddleCenter, Font = new System.Drawing.Font("Microsoft YaHei UI", 12F, System.Drawing.FontStyle.Bold) };
+        Label monthTitle = new Label { Left = 70, Top = 29, Width = 190, Height = 24, BackColor = Color.Transparent, ForeColor = LightUi.Text, TextAlign = ContentAlignment.MiddleCenter, Font = LightUi.UiFont( 12F, System.Drawing.FontStyle.Bold) };
         Button todayButton = LightUi.Button("今天", 238, 66, 70, DialogResult.None); todayButton.Height = 32;
         Panel calendarGrid = new Panel { Left = 22, Top = 102, Width = 286, Height = 250, BackColor = Color.Transparent };
         left.Controls.AddRange(new Control[] { prevMonth, nextMonth, monthTitle, todayButton, calendarGrid });
         Panel filters = RoundedPanel(20, 370, 288, 88, Color.FromArgb(252,254,255), Color.FromArgb(224,233,244), 14);
-        Label filterTitle = new Label { Text = "日历筛选", Left = 18, Top = 14, Width = 160, Height = 24, BackColor = Color.Transparent, ForeColor = LightUi.Text, Font = new System.Drawing.Font("Microsoft YaHei UI", 10.5F, System.Drawing.FontStyle.Bold) };
+        Label filterTitle = new Label { Text = "日历筛选", Left = 18, Top = 14, Width = 160, Height = 24, BackColor = Color.Transparent, ForeColor = LightUi.Text, Font = LightUi.UiFont( 10.5F, System.Drawing.FontStyle.Bold) };
         Button localFilter = LightUi.Button("✓  本地日历", 18, 48, 120, DialogResult.None);
         Button caldavFilter = LightUi.Button("✓  CalDAV 日历", 150, 48, 120, DialogResult.None);
         localFilter.Height = caldavFilter.Height = 28;
@@ -594,13 +613,13 @@ internal static partial class CalendarApp
         left.Controls.Add(filters); f.Controls.Add(left);
 
         Panel main = RoundedPanel(382, 112, 760, 540, Color.FromArgb(248,252,255), Color.FromArgb(224,233,244), 18);
-        Label dayHeader = new Label { Left = 22, Top = 24, Width = 430, Height = 30, BackColor = Color.Transparent, ForeColor = LightUi.Text, Font = new System.Drawing.Font("Microsoft YaHei UI", 12F, System.Drawing.FontStyle.Bold) };
+        Label dayHeader = new Label { Left = 22, Top = 24, Width = 430, Height = 30, BackColor = Color.Transparent, ForeColor = LightUi.Text, Font = LightUi.UiFont( 12F, System.Drawing.FontStyle.Bold) };
         int timeMode = 0;
         Panel timeTabs = RoundedPanel(488, 20, 234, 36, Color.FromArgb(235,245,253), Color.FromArgb(218,232,246), 12);
         Button todayTab = LightUi.Button("今天", 2, 2, 62, DialogResult.None);
         Button weekTab = LightUi.Button("未来7天", 66, 2, 76, DialogResult.None);
         Button allTimeTab = LightUi.Button("全部时间", 144, 2, 88, DialogResult.None);
-        foreach(Button tab in new[]{todayTab,weekTab,allTimeTab}){tab.Height=32;tab.Font=new System.Drawing.Font("Microsoft YaHei UI",8.5F,System.Drawing.FontStyle.Bold);tab.TextAlign=ContentAlignment.MiddleCenter;tab.Padding=Padding.Empty;tab.FlatAppearance.BorderSize=0;tab.UseVisualStyleBackColor=false;}
+        foreach(Button tab in new[]{todayTab,weekTab,allTimeTab}){tab.Height=32;tab.Font=LightUi.UiFont(8.5F,System.Drawing.FontStyle.Bold);tab.TextAlign=ContentAlignment.MiddleCenter;tab.Padding=Padding.Empty;tab.FlatAppearance.BorderSize=0;tab.UseVisualStyleBackColor=false;}
         timeTabs.Controls.AddRange(new Control[]{todayTab,weekTab,allTimeTab});
         FlowLayoutPanel list = new FlowLayoutPanel { Left = 20, Top = 72, Width = 720, Height = 446, BackColor = Color.Transparent, AutoScroll = true, FlowDirection = FlowDirection.TopDown, WrapContents = false };
         main.Controls.AddRange(new Control[] { dayHeader, timeTabs, list }); f.Controls.Add(main);
@@ -610,7 +629,7 @@ internal static partial class CalendarApp
         Button settings = LightUi.Button("设置", 758, 10, 92, DialogResult.None);
         Button sync = LightUi.Button("刷新同步", 858, 10, 112, DialogResult.None);
         Button add = LightUi.PrimaryButton("新建日程", 978, 10, 112, DialogResult.None);
-        settings.Font = sync.Font = add.Font = new System.Drawing.Font("Microsoft YaHei UI", 9F, System.Drawing.FontStyle.Bold);
+        settings.Font = sync.Font = add.Font = LightUi.UiFont( 9F, System.Drawing.FontStyle.Bold);
         settings.TextAlign = sync.TextAlign = add.TextAlign = ContentAlignment.MiddleCenter;
         Action<Button> paintFooterButton = delegate(Button b) {
             b.UseVisualStyleBackColor = false;
@@ -674,20 +693,22 @@ internal static partial class CalendarApp
             calendarGrid.Controls.Clear();
             monthTitle.Text=selectedDate.ToString("yyyy 年 M 月",CultureInfo.GetCultureInfo("zh-CN"));
             string[] names={"一","二","三","四","五","六","日"};
-            for(int i=0;i<7;i++)calendarGrid.Controls.Add(new Label{Text=names[i],Left=i*40,Top=0,Width=34,Height=24,TextAlign=ContentAlignment.MiddleCenter,BackColor=Color.Transparent,ForeColor=LightUi.Muted,Font=new System.Drawing.Font("Microsoft YaHei UI",9F,System.Drawing.FontStyle.Bold)});
+            for(int i=0;i<7;i++)calendarGrid.Controls.Add(new Label{Text=names[i],Left=i*40,Top=0,Width=34,Height=24,TextAlign=ContentAlignment.MiddleCenter,BackColor=Color.Transparent,ForeColor=LightUi.Muted,Font=LightUi.UiFont(9F,System.Drawing.FontStyle.Bold)});
             DateTime first=new DateTime(selectedDate.Year,selectedDate.Month,1);
             int offset=((int)first.DayOfWeek+6)%7;
             DateTime cursor=first.AddDays(-offset);
             DateTime today=DateTime.Now.Date;
+            CalendarDayCell keyboardFocusTarget=null;
             for(int cell=0;cell<42;cell++){
                 DateTime d=cursor.AddDays(cell);bool inMonth=d.Month==selectedDate.Month,selected=d.Date==selectedDate.Date,isToday=d.Date==today;List<string> daySources=sourcesOnDate(d);
                 Color dayBack=selected?LightUi.AccentFill:(isToday?Color.FromArgb(232,244,255):Color.Transparent);
                 int dayLeft=(cell%7)*40+1,dayTop=28+(cell/7)*35;
-                CalendarDayCell day=new CalendarDayCell{Text=d.Day.ToString(CultureInfo.InvariantCulture),Left=dayLeft,Top=dayTop,Width=32,Height=30,DayBackColor=dayBack,ForeColor=selected?Color.White:(isToday?LightUi.Accent:inMonth?LightUi.Text:Color.FromArgb(170,185,205)),Font=new System.Drawing.Font("Microsoft YaHei UI",10F,(selected||isToday)?System.Drawing.FontStyle.Bold:System.Drawing.FontStyle.Regular),Tag=d};
-                day.Cursor=Cursors.Hand;day.Click+=delegate(object sender,EventArgs args){selectedDate=((DateTime)((Control)sender).Tag).Date;reload();};calendarGrid.Controls.Add(day);
+                CalendarDayCell day=new CalendarDayCell{Text=d.Day.ToString(CultureInfo.InvariantCulture),Left=dayLeft,Top=dayTop,Width=32,Height=30,DayBackColor=dayBack,ForeColor=selected?Color.White:(isToday?LightUi.Accent:inMonth?LightUi.Text:Color.FromArgb(170,185,205)),Font=LightUi.UiFont(10F,(selected||isToday)?System.Drawing.FontStyle.Bold:System.Drawing.FontStyle.Regular),Tag=d};
+                day.Cursor=Cursors.Hand;day.Click+=delegate(object sender,EventArgs args){CalendarDayCell clicked=(CalendarDayCell)sender;selectedDate=((DateTime)clicked.Tag).Date;if(clicked.KeyboardSelectionRequested)keyboardFocusDate=selectedDate;reload();};calendarGrid.Controls.Add(day);if(keyboardFocusDate.HasValue&&d.Date==keyboardFocusDate.Value.Date)keyboardFocusTarget=day;
                 int dotCount=daySources.Count;int baseLeft=(cell%7)*40+17-(dotCount*8-2)/2, dotTop=dayTop+30;
                 for(int dotIndex=0;dotIndex<dotCount;dotIndex++){string source=daySources[dotIndex];Color dotColor=source=="caldav"?(selected?Color.White:LightUi.Accent):Color.FromArgb(63,178,119);Panel dot=new Panel{Left=baseLeft+dotIndex*8,Top=dotTop,Width=6,Height=6,BackColor=dotColor};LightUi.Round(dot,3);calendarGrid.Controls.Add(dot);dot.BringToFront();}
             }
+            if(keyboardFocusTarget!=null&&f.Visible){keyboardFocusDate=null;keyboardFocusTarget.Focus();}
         };
 
         reload = delegate {
@@ -712,19 +733,19 @@ internal static partial class CalendarApp
                 bool showEventDate=timeMode!=0;
                 string timeText=B(e,"all_day")?"全天":es.ToString("HH:mm")+" - "+ee.ToString("HH:mm");
                 if(showEventDate)timeText=es.ToString("M/d ddd",CultureInfo.GetCultureInfo("zh-CN"))+"\r\n"+timeText;
-                Label time=new Label{Text=timeText,Left=36,Top=showEventDate?20:30,Width=128,Height=showEventDate?46:24,BackColor=Color.Transparent,ForeColor=LightUi.Text,Font=new System.Drawing.Font("Microsoft YaHei UI",showEventDate?9F:10F,System.Drawing.FontStyle.Bold)};
-                Label name=new Label{Text=CleanTitle(S(e,"title")),Left=172,Top=16,Width=310,Height=24,BackColor=Color.Transparent,ForeColor=LightUi.Text,Font=new System.Drawing.Font("Microsoft YaHei UI",11F,System.Drawing.FontStyle.Bold)};
+                Label time=new Label{Text=timeText,Left=36,Top=showEventDate?20:30,Width=128,Height=showEventDate?46:24,BackColor=Color.Transparent,ForeColor=LightUi.Text,Font=LightUi.UiFont(showEventDate?9F:10F,System.Drawing.FontStyle.Bold)};
+                Label name=new Label{Text=CleanTitle(S(e,"title")),Left=172,Top=16,Width=310,Height=24,BackColor=Color.Transparent,ForeColor=LightUi.Text,Font=LightUi.UiFont(11F,System.Drawing.FontStyle.Bold)};
                 bool noLocation=S(e,"location")=="";
-                Label loc=new Label{Text=noLocation?"无地点":S(e,"location"),Left=172,Top=43,Width=310,Height=18,BackColor=Color.Transparent,ForeColor=noLocation?Color.FromArgb(165,181,202):LightUi.Muted,Font=new System.Drawing.Font("Microsoft YaHei UI",noLocation?8F:9F)};
-                Label badge=new Label{Text=caldav?"CalDAV 日历":"本地日历",Left=172,Top=60,Width=118,Height=22,BackColor=caldav?Color.FromArgb(221,237,255):Color.FromArgb(218,246,231),ForeColor=caldav?LightUi.Accent:Color.FromArgb(35,145,89),TextAlign=ContentAlignment.MiddleCenter,Font=new System.Drawing.Font("Microsoft YaHei UI",9F)};
+                Label loc=new Label{Text=noLocation?"无地点":S(e,"location"),Left=172,Top=43,Width=310,Height=18,BackColor=Color.Transparent,ForeColor=noLocation?Color.FromArgb(165,181,202):LightUi.Muted,Font=LightUi.UiFont(noLocation?8F:9F)};
+                Label badge=new Label{Text=caldav?"CalDAV 日历":"本地日历",Left=172,Top=60,Width=118,Height=22,BackColor=caldav?Color.FromArgb(221,237,255):Color.FromArgb(218,246,231),ForeColor=caldav?LightUi.Accent:LightUi.Done,TextAlign=ContentAlignment.MiddleCenter,Font=LightUi.UiFont(9F)};
                 LightUi.Round(badge,8);
-                Button editRow=LightUi.Button("",610,24,42,DialogResult.None);editRow.Font=new System.Drawing.Font("Segoe Fluent Icons",10F);editRow.Tag=S(e,"id");
+                Button editRow=LightUi.Button("\xE70F",610,24,42,DialogResult.None);editRow.Font=LightUi.IconFont(10F);editRow.Tag=S(e,"id");
                 row.Controls.AddRange(new Control[]{time,name,loc,badge,editRow});
                 EventHandler editEvent=delegate(object sender,EventArgs args){Dictionary<string,object> ev=FindEvent(cache,state,Convert.ToString(((Control)editRow).Tag));if(ev!=null&&EditInteractive(ev,state,cache)){Save(StatePath,state);Save(CachePath,cache);changed=true;reload();}};
                 row.DoubleClick+=editEvent;editRow.Click+=editEvent;
                 list.Controls.Add(row);
             }
-            if(rows.Count==0){Panel empty=RoundedPanel(0,0,694,86,Color.FromArgb(252,254,255),Color.FromArgb(224,233,244),14);empty.Controls.Add(new Label{Text="这一天没有日程安排",Left=230,Top=30,Width=240,Height=24,TextAlign=ContentAlignment.MiddleCenter,BackColor=Color.Transparent,ForeColor=LightUi.Muted,Font=new System.Drawing.Font("Microsoft YaHei UI",10F)});list.Controls.Add(empty);}
+            if(rows.Count==0){Panel empty=RoundedPanel(0,0,694,86,Color.FromArgb(252,254,255),Color.FromArgb(224,233,244),14);empty.Controls.Add(new Label{Text="这一天没有日程安排",Left=230,Top=30,Width=240,Height=24,TextAlign=ContentAlignment.MiddleCenter,BackColor=Color.Transparent,ForeColor=LightUi.Muted,Font=LightUi.UiFont(10F)});list.Controls.Add(empty);}
         };
         prevMonth.Click += delegate { selectedDate=selectedDate.AddMonths(-1); reload(); };
         nextMonth.Click += delegate { selectedDate=selectedDate.AddMonths(1); reload(); };

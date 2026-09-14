@@ -71,8 +71,11 @@ internal static partial class TodoApp
                         bool guarded = ConsumeGuard();
                         Save(state);
                         refresh |= Render(state) && !guarded;
-                        StartPluginCommand("SyncAll", "startup");
-                        StartPluginCommand("ValuesAll", "startup");
+                        if (!guarded)
+                        {
+                            StartPluginCommand("SyncAll", "startup");
+                            StartPluginCommand("ValuesAll", "startup");
+                        }
                         break;
                     case "Rollover": refresh |= Render(state); break;
                     case "Refresh":
@@ -119,7 +122,7 @@ internal static partial class TodoApp
 
 
 
-    private static bool ConsumeGuard(){if(!File.Exists(GuardPath))return false;try{bool fresh=(DateTime.Now-File.GetLastWriteTime(GuardPath)).TotalSeconds<20;File.Delete(GuardPath);return fresh;}catch{return true;}}
+    private static bool ConsumeGuard(){if(!File.Exists(GuardPath))return false;try{bool fresh=(DateTime.Now-File.GetLastWriteTime(GuardPath)).TotalSeconds<20;if(!fresh)File.Delete(GuardPath);return fresh;}catch{return true;}}
     private static void StartPluginCommand(string action,string pluginId)
     {
         if(!File.Exists(PluginHostPath))return;

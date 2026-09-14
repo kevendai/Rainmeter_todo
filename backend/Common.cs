@@ -9,6 +9,7 @@ using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Reflection;
+using System.Net;
 using System.Runtime.CompilerServices;
 using System.Security.Cryptography;
 using System.Text;
@@ -30,6 +31,7 @@ namespace RainmeterBackend
         private sealed class ControlScaleState { public bool Scaled; public bool Watching; }
         private static readonly ConditionalWeakTable<Form, FormScaleState> FormScales = new ConditionalWeakTable<Form, FormScaleState>();
         private static readonly ConditionalWeakTable<Control, ControlScaleState> ControlScales = new ConditionalWeakTable<Control, ControlScaleState>();
+        private static readonly Dictionary<string, Font> ScaledFonts = new Dictionary<string, Font>();
 
         [DllImport("user32.dll")]
         private static extern bool SetProcessDPIAware();
@@ -43,39 +45,49 @@ namespace RainmeterBackend
             catch { }
         }
 
-        private static string ConfigPath
+        private static string ConfigPathFor(string fileName)
         {
-            get
-            {
-                string baseDir = AppDomain.CurrentDomain.BaseDirectory.TrimEnd(Path.DirectorySeparatorChar);
-                string local = Path.Combine(baseDir, "ui-scale.txt");
-                if (File.Exists(local) || !String.Equals(new DirectoryInfo(baseDir).Name, "@Resources", StringComparison.OrdinalIgnoreCase))
-                    return local;
-                DirectoryInfo skin = Directory.GetParent(baseDir);
-                DirectoryInfo skins = skin == null ? null : skin.Parent;
-                if (skin != null && skins != null && String.Equals(skin.Name, "Calendar", StringComparison.OrdinalIgnoreCase))
-                    return Path.Combine(skins.FullName, "Todo", "@Resources", "ui-scale.txt");
+            string baseDir = AppDomain.CurrentDomain.BaseDirectory.TrimEnd(Path.DirectorySeparatorChar);
+            string local = Path.Combine(baseDir, fileName);
+            if (File.Exists(local) || !String.Equals(new DirectoryInfo(baseDir).Name, "@Resources", StringComparison.OrdinalIgnoreCase))
                 return local;
-            }
+            DirectoryInfo skin = Directory.GetParent(baseDir);
+            DirectoryInfo skins = skin == null ? null : skin.Parent;
+            // Calendar currently shares Todo's scale files by the fixed sibling skin names below. Keep this coupling explicit until both skins persist and update the settings together.
+            if (skin != null && skins != null && String.Equals(skin.Name, "Calendar", StringComparison.OrdinalIgnoreCase))
+                return Path.Combine(skins.FullName, "Todo", "@Resources", fileName);
+            return local;
         }
 
-        public static string Mode
+        private static string ConfigPath { get { return ConfigPathFor("ui-scale.txt"); } }
+        private static string WindowConfigPath { get { return ConfigPathFor("ui-window-scale.txt"); } }
+
+        private static string ReadMode(string path, string fallback)
+        {
+            try
+            {
+                if (File.Exists(path))
+                {
+                    string value = File.ReadAllText(path, Encoding.UTF8).Trim().ToLowerInvariant();
+                    if (value == AutoMode) return AutoMode;
+                    float parsed;
+                    if (Single.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out parsed))
+                        return Clamp(parsed).ToString("0.00", CultureInfo.InvariantCulture);
+                }
+            }
+            catch { }
+            return fallback;
+        }
+
+        public static string Mode { get { return ReadMode(ConfigPath, AutoMode); } }
+
+        public static string WindowMode
         {
             get
             {
-                try
-                {
-                    if (File.Exists(ConfigPath))
-                    {
-                        string value = File.ReadAllText(ConfigPath, Encoding.UTF8).Trim().ToLowerInvariant();
-                        if (value == AutoMode) return AutoMode;
-                        float parsed;
-                        if (Single.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out parsed))
-                            return Clamp(parsed).ToString("0.00", CultureInfo.InvariantCulture);
-                    }
-                }
-                catch { }
-                return AutoMode;
+                // Preserve pre-v2 behavior until the user explicitly saves a separate window scale.
+                string fallback = Mode == AutoMode ? AutoMode : "1.00";
+                return ReadMode(WindowConfigPath, fallback);
             }
         }
 
@@ -87,8 +99,10 @@ namespace RainmeterBackend
                 float overrideValue;
                 if (!String.IsNullOrWhiteSpace(overrideText) && Single.TryParse(overrideText, NumberStyles.Float, CultureInfo.InvariantCulture, out overrideValue))
                     return Clamp(overrideValue);
-                // Manual values control tile size only; opened windows stay at design size.
-                if (Mode != AutoMode) return 1F;
+                string mode = WindowMode;
+                float manual;
+                if (mode != AutoMode && Single.TryParse(mode, NumberStyles.Float, CultureInfo.InvariantCulture, out manual))
+                    return Clamp(manual);
                 return AutoScale();
             }
         }
@@ -111,7 +125,8 @@ namespace RainmeterBackend
 
         private static float AutoScale()
         {
-            Rectangle bounds = Screen.PrimaryScreen == null ? new Rectangle(0, 0, 2560, 1440) : Screen.PrimaryScreen.Bounds;
+            Screen activeScreen = Screen.FromPoint(Cursor.Position);
+            Rectangle bounds = activeScreen == null ? new Rectangle(0, 0, 2560, 1440) : activeScreen.Bounds;
             float scale = Math.Min(bounds.Width / BaseWidth, bounds.Height / BaseHeight);
             scale = (float)Math.Round(scale * 20F, MidpointRounding.AwayFromZero) / 20F;
             return Clamp(scale);
@@ -122,6 +137,16 @@ namespace RainmeterBackend
 
         public static void SaveMode(string mode)
         {
+            SaveModeFile(ConfigPath, mode);
+        }
+
+        public static void SaveWindowMode(string mode)
+        {
+            SaveModeFile(WindowConfigPath, mode);
+        }
+
+        private static void SaveModeFile(string path, string mode)
+        {
             string normalized = String.IsNullOrWhiteSpace(mode) ? AutoMode : mode.Trim().ToLowerInvariant();
             if (normalized != AutoMode)
             {
@@ -130,11 +155,10 @@ namespace RainmeterBackend
                     throw new ArgumentException("无效的界面缩放比例");
                 normalized = Clamp(parsed).ToString("0.00", CultureInfo.InvariantCulture);
             }
-            string directory = Path.GetDirectoryName(ConfigPath);
+            string directory = Path.GetDirectoryName(path);
             if (!String.IsNullOrEmpty(directory)) Directory.CreateDirectory(directory);
-            File.WriteAllText(ConfigPath, normalized, new UTF8Encoding(false));
+            File.WriteAllText(path, normalized, new UTF8Encoding(false));
         }
-
         public static string RainmeterOption(string option, float scale)
         {
             if (String.IsNullOrEmpty(option)) return option;
@@ -146,6 +170,16 @@ namespace RainmeterBackend
                 if (Double.TryParse(option.Substring(prefix.Length), NumberStyles.Float, CultureInfo.InvariantCulture, out value))
                     return prefix + (value * scale).ToString("0.###", CultureInfo.InvariantCulture);
                 return option;
+            }
+            if (option.StartsWith("Padding=", StringComparison.OrdinalIgnoreCase))
+            {
+                string[] values = option.Substring(8).Split(',');
+                for (int i = 0; i < values.Length; i++)
+                {
+                    double value;
+                    if (Double.TryParse(values[i], NumberStyles.Float, CultureInfo.InvariantCulture, out value)) values[i] = (value * scale).ToString("0.###", CultureInfo.InvariantCulture);
+                }
+                return "Padding=" + String.Join(",", values);
             }
             if (!option.StartsWith("Shape=", StringComparison.OrdinalIgnoreCase)) return option;
             int pipe = option.IndexOf('|');
@@ -177,12 +211,15 @@ namespace RainmeterBackend
             form.ResumeLayout(true);
             MarkScaledTree(form);
             InstallDynamicScaling(form);
-            if (Math.Abs(scale - 1F) >= 0.001F)
+            Screen screen = Screen.FromControl(form);
+            Rectangle area = screen.WorkingArea;
+            form.Left = area.Left + Math.Max(0, (area.Width - form.Width) / 2);
+            form.Top = area.Top + Math.Max(0, (area.Height - form.Height) / 2);
+            if (form.Height > area.Height - 40)
             {
-                Screen screen = Screen.FromControl(form);
-                Rectangle area = screen.WorkingArea;
-                form.Left = area.Left + Math.Max(0, (area.Width - form.Width) / 2);
-                form.Top = area.Top + Math.Max(0, (area.Height - form.Height) / 2);
+                form.Height = Math.Max(200, area.Height - 40);
+                form.AutoScroll = true;
+                form.Top = area.Top + 20;
             }
         }
 
@@ -281,6 +318,16 @@ namespace RainmeterBackend
             PropertyDescriptor fontProperty = TypeDescriptor.GetProperties(control)["Font"];
             if (control.Font != null && fontProperty != null && fontProperty.ShouldSerializeValue(control))
                 control.Font = ScaleFont(control.Font, scale);
+            // Compact fixed-height labels can become one or two pixels shorter
+            // than Microsoft YaHei UI after deterministic point-to-pixel font
+            // conversion. Grow only single-line labels so glyph bottoms are not
+            // clipped; wrapped and explicitly constrained labels stay unchanged.
+            Label label = control as Label;
+            if (label != null && !label.AutoSize && label.Font != null && label.MaximumSize.Height == 0 && label.Text.IndexOf('\n') < 0)
+            {
+                int minimumLabelHeight = label.Font.Height + 4 + label.Padding.Vertical;
+                if (label.Height < minimumLabelHeight) label.Height = minimumLabelHeight;
+            }
             ListView list = control as ListView;
             if (list != null)
                 foreach (ColumnHeader column in list.Columns) column.Width = Math.Max(24, (int)Math.Round(column.Width * scale));
@@ -332,7 +379,14 @@ namespace RainmeterBackend
             // preventing Windows 150%-200% DPI from enlarging text without the
             // fixed-pixel control bounds.
             float logicalPixels = font.Unit == GraphicsUnit.Pixel ? font.Size : font.SizeInPoints * DesignDpi / 72F;
-            return new Font(font.FontFamily, Math.Max(8F, logicalPixels * scale), font.Style, GraphicsUnit.Pixel, font.GdiCharSet, font.GdiVerticalFont);
+            float pixels = Math.Max(8F, logicalPixels * scale);
+            string key = font.FontFamily.Name + ":" + pixels.ToString("0.###", CultureInfo.InvariantCulture) + ":" + ((int)font.Style).ToString(CultureInfo.InvariantCulture) + ":" + font.GdiCharSet.ToString(CultureInfo.InvariantCulture) + ":" + font.GdiVerticalFont.ToString(CultureInfo.InvariantCulture);
+            lock (ScaledFonts)
+            {
+                Font scaled;
+                if (!ScaledFonts.TryGetValue(key, out scaled)) { scaled = new Font(font.FontFamily, pixels, font.Style, GraphicsUnit.Pixel, font.GdiCharSet, font.GdiVerticalFont); ScaledFonts[key] = scaled; }
+                return scaled;
+            }
         }
 
         private static float Clamp(float value)
@@ -436,8 +490,64 @@ namespace RainmeterBackend
         }
     }
 
+    internal sealed class AddressProviderBinding
+    {
+        public string PluginId="",PluginName="",ValueKey="",Value="";public int Priority;
+    }
+
+    internal static class DynamicPluginValues
+    {
+        public const string SsdpPluginId = "io.github.kevendai.ssdp-server-ip";
+        private static string Root { get { string configured=Environment.GetEnvironmentVariable("RAINMETER_PLUGIN_ROOT");return String.IsNullOrWhiteSpace(configured)?Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),"RainmeterDesktopWidgets"):Path.GetFullPath(configured); } }
+        private static string ValuesPath { get { return Path.Combine(Root,"PluginValues.json"); } }
+        private static string SsdpConfigPath { get { return Path.Combine(Root,"PluginData",SsdpPluginId,"config.json"); } }
+        public static AddressProviderBinding AddressProvider(string target)
+        {
+            string plugins=Path.Combine(Root,"Plugins");if(String.IsNullOrWhiteSpace(target)||!Directory.Exists(plugins))return null;Dictionary<string,object> entries=ReadEntries();List<AddressProviderBinding> candidates=new List<AddressProviderBinding>();
+            foreach(string pluginRoot in Directory.GetDirectories(plugins))try
+            {
+                string id=Path.GetFileName(pluginRoot),currentPath=Path.Combine(pluginRoot,"current.json");if(!File.Exists(currentPath))continue;Dictionary<string,object> current=JsonUtil.LoadObject(currentPath);if(!JsonUtil.Bool(current,"enabled",false))continue;string version=JsonUtil.String(current,"version","");string manifestPath=Path.Combine(pluginRoot,"versions",version,"plugin.json");if(!File.Exists(manifestPath))continue;Dictionary<string,object> manifest=JsonUtil.LoadObject(manifestPath),address=JsonUtil.Object(JsonUtil.Get(manifest,"address_provider"));List<string> targets=JsonUtil.Array(JsonUtil.Get(address,"targets")).Select(Convert.ToString).Where(x=>!String.IsNullOrWhiteSpace(x)).ToList();if(!targets.Contains(target,StringComparer.OrdinalIgnoreCase))continue;string key=JsonUtil.String(address,"value","");if(key=="")continue;
+                candidates.Add(new AddressProviderBinding{PluginId=id,PluginName=JsonUtil.String(manifest,"name",id),ValueKey=key,Priority=JsonUtil.Int(address,"priority",0),Value=EntryValue(entries,id,key)});
+            }catch{}
+            return candidates.OrderByDescending(x=>x.Priority).ThenBy(x=>x.PluginId,StringComparer.OrdinalIgnoreCase).FirstOrDefault();
+        }
+        public static string BindForTarget(string value,string target){AddressProviderBinding provider=AddressProvider(target);return provider==null||String.IsNullOrWhiteSpace(provider.Value)?Resolve(value):ReplaceAnyHost(value,provider.Value);}
+        public static string Resolve(string value)
+        {
+            if(String.IsNullOrEmpty(value))return value;Dictionary<string,object> entries=ReadEntries();
+            string resolved=System.Text.RegularExpressions.Regex.Replace(value,@"\{\{plugin:([a-z0-9.-]+):([A-Za-z0-9_.-]+)\}\}",delegate(System.Text.RegularExpressions.Match match){string replacement=JsonUtil.String(JsonUtil.Object(JsonUtil.Get(entries,VariableName(match.Groups[1].Value,match.Groups[2].Value))),"value","");return replacement==""?match.Value:replacement;},System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+            string current=EntryValue(entries,SsdpPluginId,"server_ip");if(current=="")return resolved;Dictionary<string,object> config=File.Exists(SsdpConfigPath)?SafeLoad(SsdpConfigPath):new Dictionary<string,object>();
+            foreach(string old in new[]{JsonUtil.String(config,"previous_ip",""),JsonUtil.String(config,"last_ip","")}.Where(x=>x!=""&&x!=current).Distinct(StringComparer.OrdinalIgnoreCase))resolved=ReplaceHost(resolved,old,current);return resolved;
+        }
+        public static void ResolveObject(Dictionary<string,object> value){foreach(string key in value.Keys.ToList()){string text=value[key] as string;if(text!=null)value[key]=Resolve(text);else{Dictionary<string,object> nested=value[key] as Dictionary<string,object>;if(nested!=null)ResolveObject(nested);}}}
+        public static string CurrentSsdpIp(){return EntryValue(ReadEntries(),SsdpPluginId,"server_ip");}
+        public static bool UsesSsdp(string value)
+        {
+            if(String.IsNullOrEmpty(value))return false;if(value.IndexOf("{{plugin:"+SsdpPluginId+":server_ip}}",StringComparison.OrdinalIgnoreCase)>=0)return true;Dictionary<string,object> config=File.Exists(SsdpConfigPath)?SafeLoad(SsdpConfigPath):new Dictionary<string,object>();
+            return new[]{JsonUtil.String(config,"previous_ip",""),JsonUtil.String(config,"last_ip","")}.Any(ip=>ip!=""&&value.IndexOf(ip,StringComparison.OrdinalIgnoreCase)>=0);
+        }
+        private static Dictionary<string,object> ReadEntries(){try{return File.Exists(ValuesPath)?JsonUtil.Object(JsonUtil.Get(JsonUtil.LoadObject(ValuesPath),"entries")):new Dictionary<string,object>();}catch{return new Dictionary<string,object>();}}
+        private static Dictionary<string,object> SafeLoad(string path){try{return JsonUtil.LoadObject(path);}catch{return new Dictionary<string,object>();}}
+        private static string EntryValue(Dictionary<string,object> entries,string pluginId,string key){return JsonUtil.String(JsonUtil.Object(JsonUtil.Get(entries,VariableName(pluginId,key))),"value","");}
+        private static string VariableName(string pluginId,string key){return System.Text.RegularExpressions.Regex.Replace("Plugin_"+pluginId+"_"+key,@"[^A-Za-z0-9_]","_");}
+        private static string ReplaceAnyHost(string value,string newIp)
+        {
+            if(String.IsNullOrWhiteSpace(value))return value;IPAddress address;if(IPAddress.TryParse(value,out address))return newIp;Uri uri;if(Uri.TryCreate(value,UriKind.Absolute,out uri)){bool slash=value.EndsWith("/",StringComparison.Ordinal);UriBuilder builder=new UriBuilder(uri);builder.Host=newIp;string changed=builder.Uri.AbsoluteUri;return slash?changed:changed.TrimEnd('/');}return value;
+        }
+        private static string ReplaceHost(string value,string oldIp,string newIp)
+        {
+            if(String.Equals(value,oldIp,StringComparison.OrdinalIgnoreCase))return newIp;Uri uri;if(Uri.TryCreate(value,UriKind.Absolute,out uri)&&String.Equals(uri.Host,oldIp,StringComparison.OrdinalIgnoreCase)){bool slash=value.EndsWith("/",StringComparison.Ordinal);UriBuilder builder=new UriBuilder(uri);builder.Host=newIp;string changed=builder.Uri.AbsoluteUri;return slash?changed:changed.TrimEnd('/');}return value;
+        }
+    }
     internal static class RuntimeUtil
     {
+        private const int MoveFileReplaceExisting = 0x1;
+        private const int MoveFileWriteThrough = 0x8;
+
+        [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool MoveFileEx(string existingFileName, string newFileName, int flags);
+
         public static readonly UTF8Encoding Utf8NoBom = new UTF8Encoding(false);
 
         public static DateTimeOffset? Date(Dictionary<string, object> value, string key)
@@ -463,7 +573,31 @@ namespace RainmeterBackend
             Buffer.BlockCopy(preamble, 0, bytes, 0, preamble.Length);
             Buffer.BlockCopy(body, 0, bytes, preamble.Length, body.Length);
             if (File.Exists(path) && File.ReadAllBytes(path).SequenceEqual(bytes)) return false;
-            File.WriteAllBytes(path, bytes);
+            string temporary = path + ".tmp-" + Process.GetCurrentProcess().Id.ToString(CultureInfo.InvariantCulture) + "-" + Guid.NewGuid().ToString("N");
+            try
+            {
+                using (FileStream stream = new FileStream(temporary, FileMode.CreateNew, FileAccess.Write, FileShare.None))
+                {
+                    stream.Write(bytes, 0, bytes.Length);
+                    stream.Flush(true);
+                }
+                int lastError = 0;
+                for (int attempt = 0; attempt < 10; attempt++)
+                {
+                    if (MoveFileEx(temporary, path, MoveFileReplaceExisting | MoveFileWriteThrough))
+                    {
+                        lastError = 0;
+                        break;
+                    }
+                    lastError = Marshal.GetLastWin32Error();
+                    if (attempt < 9) System.Threading.Thread.Sleep(15);
+                }
+                if (lastError != 0) throw new Win32Exception(lastError, "Unable to atomically replace " + path);
+            }
+            finally
+            {
+                if (File.Exists(temporary)) File.Delete(temporary);
+            }
             return true;
         }
 
@@ -569,9 +703,38 @@ namespace RainmeterBackend
         public static readonly Color Border = Color.FromArgb(198, 216, 232);
         public static readonly Color Text = Color.FromArgb(21, 32, 48);
         public static readonly Color Muted = Color.FromArgb(92, 108, 130);
-        public static readonly Color Accent = Color.FromArgb(47, 132, 235);
-        public static readonly Color AccentFill = Color.FromArgb(50, 136, 236);
-        public static readonly Color Danger = Color.FromArgb(238, 69, 78);
+        public static readonly Color Accent = Color.FromArgb(25, 108, 212);
+        public static readonly Color AccentFill = Color.FromArgb(32, 112, 214);
+        public static readonly Color Danger = Color.FromArgb(198, 52, 60);
+        public static readonly Color Done = Color.FromArgb(20, 118, 66);
+        public static readonly Color Selected = Color.FromArgb(220, 238, 255);
+        public static readonly string IconFontName = HasFont("Segoe Fluent Icons") ? "Segoe Fluent Icons" : "Segoe MDL2 Assets";
+
+        private static bool HasFont(string name)
+        {
+            try { using (FontFamily family = new FontFamily(name)) return family.Name.Length > 0; }
+            catch { return false; }
+        }
+
+        private static readonly Dictionary<string, Font> SharedFonts = new Dictionary<string, Font>();
+        private static Font SharedFont(string family, float size, FontStyle style, GraphicsUnit unit)
+        {
+            string key = family + ":" + size.ToString("0.###", CultureInfo.InvariantCulture) + ":" + ((int)style).ToString(CultureInfo.InvariantCulture) + ":" + ((int)unit).ToString(CultureInfo.InvariantCulture);
+            lock (SharedFonts)
+            {
+                Font font;
+                if (!SharedFonts.TryGetValue(key, out font)) { font = new Font(family, size, style, unit); SharedFonts[key] = font; }
+                return font;
+            }
+        }
+        public static Font UiFont(float size) { return UiFont(size, FontStyle.Regular); }
+        public static Font UiFont(float size, FontStyle style) { return SharedFont("Microsoft YaHei UI", size, style, GraphicsUnit.Point); }
+        public static Font IconFont(float size) { return SharedFont(IconFontName, size, FontStyle.Regular, GraphicsUnit.Point); }
+        public static Font RestyledFont(Font source, FontStyle style)
+        {
+            if (source == null) return UiFont(9F, style);
+            return SharedFont(source.FontFamily.Name, source.Size, style, source.Unit);
+        }
 
         private sealed class StyledForm : Form
         {
@@ -584,7 +747,7 @@ namespace RainmeterBackend
 
             protected override CreateParams CreateParams
             {
-                get { CreateParams value = base.CreateParams; value.ClassStyle |= 0x00020000; value.ExStyle |= 0x02000000; return value; }
+                get { CreateParams value = base.CreateParams; value.ClassStyle |= 0x00020000; return value; }
             }
 
             protected override void OnMouseDown(MouseEventArgs e)
@@ -615,7 +778,7 @@ namespace RainmeterBackend
             if (enabled) control.Invalidate(true);
         }
 
-        private static GraphicsPath RoundedPath(Rectangle bounds, int radius)
+        public static GraphicsPath RoundedPath(Rectangle bounds, int radius)
         {
             int safeRadius = Math.Max(1, Math.Min(radius, Math.Max(1, Math.Min(bounds.Width, bounds.Height) / 2)));
             int diameter = safeRadius * 2;
@@ -630,7 +793,7 @@ namespace RainmeterBackend
 
         private static void ApplyRoundedRegion(Form form)
         {
-            int radius = Math.Max(1, (int)Math.Round(14F * UiScale.For(form)));
+            int radius = Math.Max(1, (int)Math.Round(18F * UiScale.For(form)));
             using (GraphicsPath path = RoundedPath(new Rectangle(0, 0, form.Width, form.Height), radius))
             {
                 Region previous = form.Region;
@@ -671,10 +834,10 @@ namespace RainmeterBackend
             form.StartPosition = FormStartPosition.CenterScreen;
             form.BackColor = Back;
             form.ForeColor = Text;
-            form.Font = new Font("Microsoft YaHei UI", 9F);
+            form.Font = UiFont(9F);
             form.FormBorderStyle = FormBorderStyle.None;
             form.MaximizeBox = false;
-            form.MinimizeBox = true;
+            form.MinimizeBox = false;
             form.ShowInTaskbar = true;
             form.AutoScaleMode = AutoScaleMode.None;
             form.Padding = new Padding(1);
@@ -720,7 +883,7 @@ namespace RainmeterBackend
             }
             else
             {
-                Label fallback = new Label { Text = "□", Left = 0, Top = 0, Width = size, Height = size, BackColor = Color.Transparent, ForeColor = Accent, TextAlign = ContentAlignment.MiddleCenter, Font = new Font("Microsoft YaHei UI", 14F, FontStyle.Bold) };
+                Label fallback = new Label { Text = "□", Left = 0, Top = 0, Width = size, Height = size, BackColor = Color.Transparent, ForeColor = Accent, TextAlign = ContentAlignment.MiddleCenter, Font = UiFont(14F, FontStyle.Bold) };
                 box.Controls.Add(fallback);
             }
             return box;
@@ -738,12 +901,12 @@ namespace RainmeterBackend
             else
             {
                 string glyph = HeadingGlyph(title, subtitle);
-                Font iconFont = glyph == "✓" ? new Font("Microsoft YaHei UI", 14F, FontStyle.Bold) : new Font("Segoe Fluent Icons", 12F);
+                Font iconFont = glyph == "✓" ? UiFont(14F, FontStyle.Bold) : IconFont(12F);
                 icon = new Label { Text = glyph, Left = 24, Top = 22, Width = 34, Height = 34, ForeColor = Color.White, BackColor = AccentFill, Font = iconFont, TextAlign = ContentAlignment.MiddleCenter };
                 Round(icon, 9);
             }
-            Label heading = new Label { Text = title, Left = 68, Top = 22, Width = form.ClientSize.Width - 120, Height = 32, ForeColor = Text, BackColor = Color.Transparent, Font = new Font("Microsoft YaHei UI", 15F, FontStyle.Bold) };
-            Label sub = new Label { Text = subtitle, Left = 25, Top = 62, Width = form.ClientSize.Width - 50, Height = 22, ForeColor = Muted, BackColor = Color.Transparent, Font = new Font("Microsoft YaHei UI", 9F) };
+            Label heading = new Label { Text = title, Left = 68, Top = 22, Width = form.ClientSize.Width - 140, Height = 32, ForeColor = Text, BackColor = Color.Transparent, Font = UiFont(15F, FontStyle.Bold) };
+            Label sub = new Label { Text = subtitle, Left = 25, Top = 62, Width = form.ClientSize.Width - 50, Height = 22, ForeColor = Muted, BackColor = Color.Transparent, Font = UiFont(9F) };
             icon.MouseDown += delegate(object sender, MouseEventArgs e) { if (e.Button == MouseButtons.Left) BeginDrag(form); };
             heading.MouseDown += delegate(object sender, MouseEventArgs e) { if (e.Button == MouseButtons.Left) BeginDrag(form); };
             sub.MouseDown += delegate(object sender, MouseEventArgs e) { if (e.Button == MouseButtons.Left) BeginDrag(form); };
@@ -762,18 +925,18 @@ namespace RainmeterBackend
 
         public static Label Label(string text, int x, int y, int width)
         {
-            return new Label { Text = text, Left = x, Top = y, Width = width, Height = 22, ForeColor = Muted, BackColor = Color.Transparent, Font = new Font("Microsoft YaHei UI", 9F) };
+            return new Label { Text = text, Left = x, Top = y, Width = width, Height = 22, ForeColor = Muted, BackColor = Color.Transparent, Font = UiFont(9F) };
         }
 
         public static TextBox TextBox(int x, int y, int width, string text)
         {
-            TextBox box = new TextBox { Left = x, Top = y, Width = width, Height = 36, AutoSize = false, Text = text ?? "", BackColor = Panel, ForeColor = Text, BorderStyle = BorderStyle.None, Font = new Font("Microsoft YaHei UI", 10F) };
+            TextBox box = new TextBox { Left = x, Top = y, Width = width, Height = 36, AutoSize = false, Text = text ?? "", BackColor = Panel, ForeColor = Text, BorderStyle = BorderStyle.None, Font = UiFont(10F) };
             Round(box, 9); return box;
         }
 
         public static Button Button(string text, int x, int y, int width, DialogResult result)
         {
-            Button button = new Button { Text = text, Left = x, Top = y, Width = width, Height = 38, DialogResult = result, FlatStyle = FlatStyle.Flat, BackColor = Panel, ForeColor = Text, Cursor = Cursors.Hand, Font = new Font("Microsoft YaHei UI", 9F) };
+            Button button = new Button { Text = text, Left = x, Top = y, Width = width, Height = 38, DialogResult = result, FlatStyle = FlatStyle.Flat, BackColor = Panel, ForeColor = Text, Cursor = Cursors.Hand, Font = UiFont(9F) };
             button.FlatAppearance.BorderColor = Panel; button.FlatAppearance.BorderSize = 0;
             button.FlatAppearance.MouseDownBackColor = Color.FromArgb(218, 236, 251);
             button.FlatAppearance.MouseOverBackColor = Color.FromArgb(235, 246, 255);
@@ -795,6 +958,23 @@ namespace RainmeterBackend
             return button;
         }
 
+        public static Button CloseButton(Form form)
+        {
+            Button button = Button("×", form.ClientSize.Width - 60, 22, 36, DialogResult.Cancel);
+            button.Height = 34;
+            button.Font = UiFont(12F);
+            form.CancelButton = button;
+            return button;
+        }
+
+        public static void StyleTab(TabControl tabs)
+        {
+            tabs.Appearance = TabAppearance.FlatButtons;
+            tabs.ItemSize = new Size(118, 34);
+            tabs.SizeMode = TabSizeMode.Fixed;
+            tabs.Font = UiFont(9F);
+        }
+
         public static Button DangerButton(string text, int x, int y, int width, DialogResult result)
         {
             Button button = Button(text, x, y, width, result);
@@ -807,7 +987,7 @@ namespace RainmeterBackend
         public static void StyleList(ListView list)
         {
             list.BackColor = Color.FromArgb(247, 251, 255); list.ForeColor = Text; list.BorderStyle = BorderStyle.FixedSingle;
-            list.Font = new Font("Microsoft YaHei UI", 9F); list.FullRowSelect = true; list.HideSelection = false;
+            list.Font = UiFont(9F); list.FullRowSelect = true; list.HideSelection = false;
             list.HeaderStyle = ColumnHeaderStyle.Nonclickable; list.GridLines = true;
             Round(list, 10);
         }
@@ -815,9 +995,9 @@ namespace RainmeterBackend
         public static bool Confirm(string text, string title)
         {
             Form form = Form(title, 480, 250); Heading(form, title, "此操作无法撤销。");
-            Label message = new Label { Text = text, Left = 26, Top = 98, Width = 428, Height = 56, ForeColor = Text, BackColor = Surface, Padding = new Padding(14, 14, 14, 8), Font = new Font("Microsoft YaHei UI", 10F) };
+            Label message = new Label { Text = text, Left = 26, Top = 98, Width = 428, Height = 72, ForeColor = Text, BackColor = Surface, Padding = new Padding(14, 14, 14, 8), Font = UiFont(10F) };
             Round(message, 10); form.Controls.Add(message);
-            Button cancel = Button("取消", 278, 184, 84, DialogResult.Cancel), confirm = DangerButton("确认删除", 372, 184, 82, DialogResult.Yes);
+            Button cancel = Button("取消", 264, 184, 84, DialogResult.Cancel), confirm = DangerButton("确认删除", 358, 184, 96, DialogResult.Yes);
             form.Controls.AddRange(new Control[] { cancel, confirm }); form.CancelButton = cancel;
             return form.ShowDialog() == DialogResult.Yes;
         }
@@ -825,7 +1005,7 @@ namespace RainmeterBackend
         public static void Error(string text)
         {
             Form form = Form("操作未完成", 480, 240); Heading(form, "操作未完成", "请检查输入后再试一次。");
-            Label message = new Label { Text = text, Left = 26, Top = 98, Width = 428, Height = 52, ForeColor = Text, BackColor = Surface, Padding = new Padding(14, 13, 14, 8), Font = new Font("Microsoft YaHei UI", 10F) };
+            Label message = new Label { Text = text, Left = 26, Top = 98, Width = 428, Height = 52, ForeColor = Text, BackColor = Surface, Padding = new Padding(14, 13, 14, 8), Font = UiFont(10F) };
             Round(message, 10); form.Controls.Add(message);
             Button close = PrimaryButton("知道了", 370, 174, 84, DialogResult.OK); form.Controls.Add(close); form.AcceptButton = close; form.CancelButton = close;
             form.ShowDialog();

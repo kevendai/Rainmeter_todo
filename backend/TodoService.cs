@@ -69,7 +69,7 @@ internal static partial class TodoApp
     private static int SettingsInteractive()
     {
         try { ShowSettings(); return 0; }
-        catch (Exception ex) { LightUi.Error("设置失败：" + ex.Message); return 1; }
+        catch (Exception ex) { if (Environment.GetEnvironmentVariable("RAINMETER_UI_SMOKE") == "1") Console.Error.WriteLine("Settings failed: " + ex.GetType().FullName + ": " + ex.Message); else LightUi.Error("设置失败：" + ex.Message); return 1; }
     }
 
     private delegate void LockedStateAction(Dictionary<string, object> state, ref bool refresh);

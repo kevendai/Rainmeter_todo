@@ -29,11 +29,12 @@ namespace RainmeterBackend
 
     internal sealed class PluginManifest
     {
-        public string Id, Name, Version, MinHostVersion, Entry, SettingsSchema, Homepage;
-        public int ApiVersion;
+        public string Id, Name, Version, MinHostVersion, Entry, SettingsSchema, Homepage, AddressValueKey;
+        public int ApiVersion, AddressPriority;
         public bool DefaultEnabled;
         public List<string> Capabilities = new List<string>();
         public List<string> Permissions = new List<string>();
+        public List<string> AddressTargets = new List<string>();
         public List<Dictionary<string,object>> Actions = new List<Dictionary<string,object>>();
 
         public static PluginManifest Load(string root)
@@ -49,7 +50,7 @@ namespace RainmeterBackend
             };
             m.Capabilities=JsonUtil.Array(JsonUtil.Get(v,"capabilities")).Select(Convert.ToString).Where(x=>!String.IsNullOrWhiteSpace(x)).ToList();
             m.Permissions=JsonUtil.Array(JsonUtil.Get(v,"permissions")).Select(Convert.ToString).Where(x=>!String.IsNullOrWhiteSpace(x)).ToList();
-            m.Actions=JsonUtil.Array(JsonUtil.Get(v,"actions")).Select(JsonUtil.Object).ToList();
+            m.Actions=JsonUtil.Array(JsonUtil.Get(v,"actions")).Select(JsonUtil.Object).ToList();Dictionary<string,object> address=JsonUtil.Object(JsonUtil.Get(v,"address_provider"));m.AddressPriority=JsonUtil.Int(address,"priority",0);m.AddressValueKey=JsonUtil.String(address,"value","");m.AddressTargets=JsonUtil.Array(JsonUtil.Get(address,"targets")).Select(Convert.ToString).Where(x=>!String.IsNullOrWhiteSpace(x)).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
             m.Validate(root); return m;
         }
 
@@ -61,7 +62,7 @@ namespace RainmeterBackend
             if(!Regex.IsMatch(MinHostVersion??"",@"^\d+\.\d+\.\d+$")||CompareVersion(MinHostVersion,PluginRuntime.HostVersion)>0)throw new InvalidDataException("插件要求更高版本的宿主");
             if(String.IsNullOrWhiteSpace(Name))throw new InvalidDataException("插件名称不能为空");
             HashSet<string> allowed=new HashSet<string>(new[]{"todo_source","todo_transform","value_provider"},StringComparer.OrdinalIgnoreCase);
-            if(Capabilities.Count==0||Capabilities.Any(x=>!allowed.Contains(x)))throw new InvalidDataException("插件 capability 无效");
+            if(Capabilities.Count==0||Capabilities.Any(x=>!allowed.Contains(x)))throw new InvalidDataException("插件 capability 无效");if(AddressTargets.Count>0&&(!Capabilities.Contains("value_provider")||!Regex.IsMatch(AddressValueKey??"",@"^[A-Za-z0-9_.-]{1,80}$")))throw new InvalidDataException("地址提供者声明无效");
             if(!File.Exists(SafeChildPath(root,Entry,"插件入口")))throw new InvalidDataException("插件入口不存在");
             if(!String.IsNullOrWhiteSpace(SettingsSchema)&&!File.Exists(SafeChildPath(root,SettingsSchema,"设置 Schema")))throw new InvalidDataException("设置 Schema 不存在");
         }
@@ -86,8 +87,9 @@ namespace RainmeterBackend
 
     internal static class PluginRuntime
     {
-        public const string HostVersion = "2.0.0";
+        public static readonly string HostVersion = LoadHostVersion();
         private const int MaxLineChars=1024*1024,MaxOutputChars=4*1024*1024,MaxLogChars=1024*1024;
+        private static string LoadHostVersion(){string path=Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"app-version.txt");if(File.Exists(path)){string value=File.ReadAllText(path,Encoding.UTF8).Trim();if(Regex.IsMatch(value,@"^\d+\.\d+\.\d+$"))return value;}return "0.0.0";}
         public static Dictionary<string,object> Current(string id){string p=Path.Combine(PluginPaths.PluginRoot(id),"current.json");return File.Exists(p)?JsonUtil.LoadObject(p):new Dictionary<string,object>();}
         public static PluginManifest Resolve(string id,bool enabled)
         {
@@ -100,24 +102,27 @@ namespace RainmeterBackend
 
         public static PluginCallResult Invoke(string id,string action,object input,string trigger,int timeoutSeconds,Action<Dictionary<string,object>> progress)
         {
-            PluginPaths.Ensure();PluginManifest m=Resolve(id,!String.Equals(action,"validate_settings",StringComparison.OrdinalIgnoreCase));string root=PluginPaths.VersionRoot(id,m.Version);
+            PluginPaths.Ensure();bool settingsAction=String.Equals(action,"validate_settings",StringComparison.OrdinalIgnoreCase)||String.Equals(action,"configure_account",StringComparison.OrdinalIgnoreCase)||String.Equals(action,"configure_discovery",StringComparison.OrdinalIgnoreCase);PluginManifest m=Resolve(id,!settingsAction);string root=PluginPaths.VersionRoot(id,m.Version);
             string entry=PluginManifest.SafeChildPath(root,m.Entry,"插件入口"),requestId=Guid.NewGuid().ToString("N");
+            Dictionary<string,object> resolvedConfig=ReadObject(Path.Combine(PluginPaths.DataRoot(id),"config.json"));if(id=="io.github.kevendai.arxiv")resolvedConfig["file_url"]=DynamicPluginValues.BindForTarget(JsonUtil.String(resolvedConfig,"file_url",""),"arxiv.file_server");DynamicPluginValues.ResolveObject(resolvedConfig);
             Dictionary<string,object> request=new Dictionary<string,object>{
                 {"api_version",1},{"request_id",requestId},{"plugin_id",id},{"action",action},
                 {"context",new Dictionary<string,object>{{"host_version",HostVersion},{"locale",CultureInfo.CurrentUICulture.Name},{"now",DateTimeOffset.Now.ToString("o",CultureInfo.InvariantCulture)},{"trigger",trigger??"manual"}}},
-                {"config",ReadObject(Path.Combine(PluginPaths.DataRoot(id),"config.json"))},{"secret",ReadSecret(Path.Combine(PluginPaths.DataRoot(id),"secret.dat"))},{"input",input??new Dictionary<string,object>()}};
-            List<string> lines=new List<string>();StringBuilder errors=new StringBuilder();object gate=new object();
+                {"config",resolvedConfig},{"secret",ReadSecret(Path.Combine(PluginPaths.DataRoot(id),"secret.dat"))},{"input",input??new Dictionary<string,object>()}};
+            List<string> lines=new List<string>();StringBuilder errors=new StringBuilder();object gate=new object();Exception progressError=null;
             ProcessStartInfo info=new ProcessStartInfo(entry){WorkingDirectory=root,UseShellExecute=false,CreateNoWindow=true,RedirectStandardInput=true,RedirectStandardOutput=true,RedirectStandardError=true};
             info.EnvironmentVariables["RW_PLUGIN_DATA_DIR"]=PluginPaths.DataRoot(id);
+            info.EnvironmentVariables["RW_WINDOW_SCALE"]=UiScale.Current.ToString("0.###",CultureInfo.InvariantCulture);
             using(Process p=new Process{StartInfo=info,EnableRaisingEvents=true})
             {
                 int total=0;
                 if(!p.Start())throw new InvalidOperationException("无法启动插件");if(progress!=null)progress(new Dictionary<string,object>{{"type","host_start"},{"pid",p.Id},{"entry",entry},{"process_started_at",p.StartTime.ToUniversalTime().ToString("o",CultureInfo.InvariantCulture)},{"current",0},{"total",0},{"message","插件进程已启动"}});
                 StreamReader stdout=new StreamReader(p.StandardOutput.BaseStream,Encoding.UTF8,false,4096),stderr=new StreamReader(p.StandardError.BaseStream,Encoding.UTF8,false,4096);
-                Thread outputThread=new Thread(delegate(){string line;while((line=stdout.ReadLine())!=null)lock(gate){total+=line.Length;if(line.Length>MaxLineChars||total>MaxOutputChars)lines.Add("__OVERSIZE__");else lines.Add(line);}}),errorThread=new Thread(delegate(){char[] buffer=new char[2048];int count;while((count=stderr.Read(buffer,0,buffer.Length))>0)lock(gate){if(errors.Length<MaxLogChars)errors.Append(buffer,0,Math.Min(count,MaxLogChars-errors.Length));}});outputThread.IsBackground=true;errorThread.IsBackground=true;outputThread.Start();errorThread.Start();
+                Thread outputThread=new Thread(delegate(){string line;while((line=stdout.ReadLine())!=null){Dictionary<string,object> liveProgress=null;lock(gate){total+=line.Length;if(line.Length>MaxLineChars||total>MaxOutputChars)lines.Add("__OVERSIZE__");else{lines.Add(line);try{Dictionary<string,object> live=JsonUtil.Object(JsonUtil.Deserialize(line));if(JsonUtil.String(live,"type","")=="progress"&&JsonUtil.String(live,"request_id","")==requestId)liveProgress=live;}catch{}}}if(liveProgress!=null&&progress!=null)try{progress(liveProgress);}catch(Exception ex){lock(gate){if(progressError==null)progressError=ex;}}}}),errorThread=new Thread(delegate(){char[] buffer=new char[2048];int count;while((count=stderr.Read(buffer,0,buffer.Length))>0)lock(gate){if(errors.Length<MaxLogChars)errors.Append(buffer,0,Math.Min(count,MaxLogChars-errors.Length));}});outputThread.IsBackground=true;errorThread.IsBackground=true;outputThread.Start();errorThread.Start();
                 byte[] requestBytes=Encoding.UTF8.GetBytes(JsonUtil.Serialize(request)+"\n");p.StandardInput.BaseStream.Write(requestBytes,0,requestBytes.Length);p.StandardInput.BaseStream.Close();
                 if(!p.WaitForExit(Math.Max(1,timeoutSeconds)*1000)){try{p.Kill();}catch{}throw new TimeoutException("插件执行超时");}
                 p.WaitForExit();outputThread.Join(2000);errorThread.Join(2000);File.WriteAllText(Path.Combine(PluginPaths.Logs,id+".log"),errors.ToString(),RuntimeUtil.Utf8NoBom);
+                if(progressError!=null)throw new InvalidOperationException("插件进度处理失败",progressError);
                 PluginCallResult result=null;
                 foreach(string line in lines)
                 {
@@ -125,12 +130,13 @@ namespace RainmeterBackend
                     Dictionary<string,object> msg;try{msg=JsonUtil.Object(JsonUtil.Deserialize(line));}catch{throw new InvalidDataException("插件 stdout 包含非法 JSON");}
                     if(JsonUtil.String(msg,"request_id","")!=requestId)throw new InvalidDataException("插件响应 request_id 不匹配");
                     string type=JsonUtil.String(msg,"type","");
-                    if(type=="progress"){if(progress!=null)progress(msg);continue;}
+                    if(type=="progress")continue;
                     if(type!="result")throw new InvalidDataException("未知插件响应类型");
                     if(result!=null)throw new InvalidDataException("插件返回了多个最终结果");
                     result=new PluginCallResult{Ok=JsonUtil.Bool(msg,"ok",false),Payload=JsonUtil.Object(JsonUtil.Get(msg,"payload")),Error=JsonUtil.String(msg,"error","")};
                 }
                 if(result==null)throw new InvalidDataException("插件未返回最终结果");
+                if(result.Ok){ApplyConfigUpdates(id,result.Payload);ApplySecretUpdates(id,result.Payload);}
                 if(p.ExitCode!=0&&result.Ok)throw new InvalidDataException("插件异常退出："+p.ExitCode.ToString(CultureInfo.InvariantCulture));
                 return result;
             }
@@ -149,6 +155,7 @@ namespace RainmeterBackend
                 Directory.CreateDirectory(PluginPaths.DataRoot(m.Id));
                 if(m.Id=="io.github.kevendai.arxiv")MigrateLegacyPaperSettings(Path.GetDirectoryName(bundledRoot),PluginPaths.DataRoot(m.Id));
             }
+            RemoveObsoleteIpPluginPrograms();
         }
         private static int CompareSemver(string left,string right){int[] a,b;try{a=left.Split('.').Select(Int32.Parse).ToArray();b=right.Split('.').Select(Int32.Parse).ToArray();}catch{return -1;}for(int i=0;i<3;i++){int value=a[i].CompareTo(b[i]);if(value!=0)return value;}return 0;}
         public static void MigrateInstallation(string resourceRoot,string todoPath,string calendarStatePath)
@@ -178,6 +185,41 @@ namespace RainmeterBackend
         private static void CopyDirectory(string source,string destination){Directory.CreateDirectory(destination);foreach(string f in Directory.GetFiles(source))File.Copy(f,Path.Combine(destination,Path.GetFileName(f)),false);foreach(string d in Directory.GetDirectories(source))CopyDirectory(d,Path.Combine(destination,Path.GetFileName(d)));}
         private static Dictionary<string,object> ReadObject(string p){return File.Exists(p)?JsonUtil.LoadObject(p):new Dictionary<string,object>();}
         private static Dictionary<string,object> ReadSecret(string p){if(!File.Exists(p))return new Dictionary<string,object>();try{return JsonUtil.ReadDpapiJson(p);}catch{throw new InvalidDataException("插件敏感配置无法解密");}}
+        private static void ApplyConfigUpdates(string id,Dictionary<string,object> payload)
+        {
+            Dictionary<string,object> updates=JsonUtil.Object(JsonUtil.Get(payload,"config_updates"));payload.Remove("config_updates");if(updates.Count==0)return;
+            if(updates.Count>64||JsonUtil.Serialize(updates).Length>65536)throw new InvalidDataException("插件配置更新超过限制");
+            foreach(KeyValuePair<string,object> pair in updates){if(!Regex.IsMatch(pair.Key??"",@"^[A-Za-z0-9_.-]{1,80}$"))throw new InvalidDataException("插件配置键无效");if(pair.Value is Dictionary<string,object>||pair.Value is object[])throw new InvalidDataException("插件配置值必须是字符串、数字或布尔值");}
+            string data=PluginPaths.DataRoot(id),path=Path.Combine(data,"config.json");Directory.CreateDirectory(data);
+            using(Mutex mutex=new Mutex(false,@"Global\RainmeterPluginConfig_"+Regex.Replace(id,@"[^A-Za-z0-9]","_")))
+            {
+                bool held=false;try{try{held=mutex.WaitOne(TimeSpan.FromSeconds(5));}catch(AbandonedMutexException){held=true;}if(!held)throw new TimeoutException("插件配置正忙");Dictionary<string,object> config=ReadObject(path);foreach(KeyValuePair<string,object> pair in updates)config[pair.Key]=pair.Value;JsonUtil.SaveAtomic(path,config);}finally{if(held)mutex.ReleaseMutex();}
+            }
+        }
+        private static void ApplySecretUpdates(string id,Dictionary<string,object> payload)
+        {
+            Dictionary<string,object> updates=JsonUtil.Object(JsonUtil.Get(payload,"secret_updates"));payload.Remove("secret_updates");if(updates.Count==0)return;
+            if(updates.Count>64||JsonUtil.Serialize(updates).Length>65536)throw new InvalidDataException("插件敏感配置更新超过限制");
+            foreach(string key in updates.Keys)if(!Regex.IsMatch(key??"",@"^[A-Za-z0-9_.-]{1,80}$"))throw new InvalidDataException("插件敏感配置键无效");
+            string data=PluginPaths.DataRoot(id),path=Path.Combine(data,"secret.dat");Directory.CreateDirectory(data);
+            using(Mutex mutex=new Mutex(false,@"Global\RainmeterPluginSecret_"+Regex.Replace(id,@"[^A-Za-z0-9]","_")))
+            {
+                bool held=false;try{try{held=mutex.WaitOne(TimeSpan.FromSeconds(5));}catch(AbandonedMutexException){held=true;}if(!held)throw new TimeoutException("插件敏感配置正忙");Dictionary<string,object> secret=ReadSecret(path);foreach(KeyValuePair<string,object> pair in updates){string text=pair.Value as string;if(pair.Value==null||(text!=null&&text.Length==0))secret.Remove(pair.Key);else secret[pair.Key]=pair.Value;}JsonUtil.WriteDpapiJson(path,secret);}finally{if(held)mutex.ReleaseMutex();}
+            }
+        }
+        private static void RemoveObsoleteIpPluginPrograms()
+        {
+            foreach(string oldId in new[]{"io.github.kevendai.network-ip","io.github.kevendai.xiaomi-router-wan-ip"})
+            {
+                string oldRoot=PluginPaths.PluginRoot(oldId);if(Directory.Exists(oldRoot))Directory.Delete(oldRoot,true);
+            }
+            if(File.Exists(PluginPaths.Values))
+            {
+                Dictionary<string,object> values=JsonUtil.LoadObject(PluginPaths.Values),entries=JsonUtil.Object(JsonUtil.Get(values,"entries")),providers=JsonUtil.Object(JsonUtil.Get(values,"providers"));
+                foreach(string prefix in new[]{"Plugin_io_github_kevendai_network_ip","Plugin_io_github_kevendai_xiaomi_router_wan_ip"})foreach(string key in entries.Keys.Where(k=>k.StartsWith(prefix,StringComparison.OrdinalIgnoreCase)).ToList())entries.Remove(key);
+                providers.Remove("io.github.kevendai.network-ip");providers.Remove("io.github.kevendai.xiaomi-router-wan-ip");values["entries"]=entries;values["providers"]=providers;JsonUtil.SaveAtomic(PluginPaths.Values,values);
+            }
+        }
         public static void WritePluginTaskSnapshots(Dictionary<string,object> state)
         {
             List<Dictionary<string,object>> tasks=JsonUtil.Array(JsonUtil.Get(state,"tasks")).Select(JsonUtil.Object).ToList();foreach(string id in new[]{"io.github.kevendai.arxiv"})

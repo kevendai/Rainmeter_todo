@@ -29,8 +29,9 @@
 
 ### 插件与动态变量
 
-- 内置 arXiv、Calendar-to-Todo 和默认关闭的 Network IP 三个官方独立进程插件。
+- 内置 arXiv、Calendar-to-Todo 和默认关闭的“SSDP 服务器 IP”三个官方独立进程插件。
 - Todo 设置中可安装、启用、禁用、配置、更新、卸载插件，并可从本地安装 `.rwplugin`。
+- 桌面磁贴缩放与管理/编辑窗口缩放可以分别调整；窗口比例在下次打开窗口时生效。
 - 官方市场索引通过 GitHub Pages 提供，插件二进制来自各自 GitHub Release 并校验 SHA256；v2.0 市场只展示官方插件。
 - 动态值写入 `PluginValues.inc`，失败时保留最后成功值并提供 `_Stale` 和 `_UpdatedAt` 变量。
 - 第三方插件是普通 Windows 程序；permissions 用于声明和提示，并不是系统级沙箱。仅安装你信任的插件。
@@ -64,7 +65,7 @@
 - CalDAV、DeepSeek、文件服务器和腾讯翻译凭据
 - 论文设置与本地缓存
 
-为兼容旧版 full/lite 升级器，每个版本仍发布 full 和 lite 引导 zip。它们会先更新旧升级器，再下载同一份统一完整包；full 和 lite 不再代表不同功能。
+为兼容 v1.3.5 的旧版 full/lite 升级器，v2.0.0 的 full 和 lite 引导 zip 会先安装 v1.4.4。第一次更新结束后请再次点击“检查更新”，再由 v1.4.4 的统一更新器校验 SHA256 并安装 v2.0.0；full 和 lite 不再代表不同功能。
 
 ## 初次使用
 

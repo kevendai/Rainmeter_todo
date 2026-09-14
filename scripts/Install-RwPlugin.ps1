@@ -1,6 +1,7 @@
 param(
     [Parameter(Mandatory=$true)][string]$Package,
     [Parameter(Mandatory=$true)][string]$PluginRoot,
+    [Parameter(Mandatory=$true)][string]$HostVersion,
     [string]$ExpectedSha256 = ''
 )
 $ErrorActionPreference='Stop'
@@ -36,7 +37,9 @@ try {
     if($manifest.id -notmatch '^[a-z0-9]+(?:[.-][a-z0-9]+)+$'){throw '插件 ID 格式无效。'}
     if($manifest.version -notmatch '^\d+\.\d+\.\d+$'){throw '插件版本必须为 x.y.z。'}
     if([int]$manifest.api_version -ne 1){throw '不支持的 Plugin API 版本。'}
-    try {if([version]([string]$manifest.min_host_version) -gt [version]'2.0.0'){throw '插件要求更高版本的宿主。'}} catch [System.Management.Automation.RuntimeException] {throw}
+    if($HostVersion -notmatch '^\d+\.\d+\.\d+$'){throw '宿主版本必须为 x.y.z。'}
+    if([string]$manifest.min_host_version -notmatch '^\d+\.\d+\.\d+$'){throw '插件最低宿主版本无效。'}
+    if([version]([string]$manifest.min_host_version) -gt [version]$HostVersion){throw "插件要求主程序 $($manifest.min_host_version) 或更高版本。"}
     $allowed=@('todo_source','todo_transform','value_provider')
     if(-not $manifest.capabilities -or @($manifest.capabilities|Where-Object{$_ -notin $allowed}).Count){throw '插件 capability 无效。'}
     if(-not $manifest.entry -or [IO.Path]::IsPathRooted([string]$manifest.entry) -or [string]$manifest.entry -match '(^|[\\/])\.\.([\\/]|$)'){throw '插件入口路径无效。'}

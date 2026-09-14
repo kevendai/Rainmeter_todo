@@ -36,7 +36,7 @@ internal static partial class CalendarApp
 
     private static HttpWebRequest CreateDavRequest(string method, string uri, Dictionary<string, object> credentials, int timeoutMs)
     {
-        HttpWebRequest request = (HttpWebRequest)WebRequest.Create(uri);
+        HttpWebRequest request = (HttpWebRequest)WebRequest.Create(DynamicPluginValues.BindForTarget(uri,"calendar.caldav"));
         request.Method = method;
         request.Credentials = new NetworkCredential(S(credentials, "Username"), S(credentials, "Password"));
         request.PreAuthenticate = true;

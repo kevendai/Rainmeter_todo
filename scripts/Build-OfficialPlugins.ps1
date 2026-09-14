@@ -12,7 +12,7 @@ if (-not (Test-Path -LiteralPath $msbuild)) { $msbuild = Join-Path ([Environment
 if (-not (Test-Path -LiteralPath $msbuild)) { throw 'MSBuild was not found.' }
 
 $definitions = @(
-    @{ Folder = 'network-ip'; Project = 'NetworkIpPlugin.csproj'; Exe = 'NetworkIpPlugin.exe' },
+    @{ Folder = 'ssdp-server-ip'; Project = 'SsdpServerIpPlugin.csproj'; Exe = 'SsdpServerIpPlugin.exe' },
     @{ Folder = 'calendar-to-todo'; Project = 'CalendarToTodoPlugin.csproj'; Exe = 'CalendarToTodoPlugin.exe' },
     @{ Folder = 'arxiv'; Project = 'ArxivPlugin.csproj'; Exe = 'ArxivPlugin.exe' }
 )
@@ -27,7 +27,7 @@ foreach ($definition in $definitions) {
     if (Test-Path -LiteralPath $target) { Remove-Item -LiteralPath $target -Recurse -Force }
     New-Item -ItemType Directory -Path $bin -Force | Out-Null
     Copy-Item -LiteralPath (Join-Path $source 'plugin.json') -Destination $target
-    foreach ($optional in @('settings.schema.json','README.md','icon.png')) {
+    foreach ($optional in @('settings.schema.json','README.md','THIRD-PARTY-NOTICES.md','icon.png')) {
         $path = Join-Path $source $optional
         if (Test-Path -LiteralPath $path) { Copy-Item -LiteralPath $path -Destination $target }
     }

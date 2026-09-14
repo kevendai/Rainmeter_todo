@@ -1,0 +1,11 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "properties": {
+    "scan_ip": {"type":"string","title":"扫描范围中的 IP","default":"","x-order":1},
+    "subnet_mask": {"type":"string","title":"子网掩码","default":"255.255.255.0","x-order":2},
+    "probe_timeout_ms": {"type":"integer","title":"单播等待（毫秒）","default":800,"minimum":200,"maximum":5000,"x-order":3,"x-advanced":true},
+    "scan_wait_ms": {"type":"integer","title":"全段发送后等待（毫秒）","default":1500,"minimum":300,"maximum":10000,"x-order":4,"x-advanced":true},
+    "ttl": {"type":"integer","title":"刷新周期（秒）","default":60,"minimum":30,"maximum":86400,"x-order":5}
+  }
+}

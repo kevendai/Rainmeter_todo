@@ -25,7 +25,7 @@ $preservedHashes = @{}
 try {
     New-Item -ItemType Directory -Path $stage -Force | Out-Null
     Copy-Item -Path (Join-Path $source '*') -Destination $stage -Recurse -Force
-    foreach ($name in @('tasks.json','ui-scale.txt','caldav.secret','translation.secret','paper-sync.secret')) {
+    foreach ($name in @('tasks.json','ui-scale.txt','ui-window-scale.txt','caldav.secret','translation.secret','paper-sync.secret')) {
         $current = Join-Path $target ('@Resources\' + $name)
         if (Test-Path -LiteralPath $current) { $preservedHashes[$name] = (Get-FileHash -LiteralPath $current -Algorithm SHA256).Hash; $destination = Join-Path $stage ('@Resources\' + $name); New-Item -ItemType Directory -Path (Split-Path $destination -Parent) -Force | Out-Null; Copy-Item -LiteralPath $current -Destination $destination -Force }
     }
@@ -45,6 +45,7 @@ try {
     & (Join-Path $PSScriptRoot 'Build-Backend.ps1') -Backend Plugin -OutputDirectory (Join-Path $stage '@Resources') | Out-Null
     & (Join-Path $PSScriptRoot 'Build-OfficialPlugins.ps1') -OutputDirectory (Join-Path $stage '@Resources\BundledPlugins') | Out-Null
     Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'Install-RwPlugin.ps1') -Destination (Join-Path $stage '@Resources\PluginInstaller.ps1') -Force
+    Copy-Item -LiteralPath (Join-Path $projectRoot 'plugin-registry-template\index-v1.json') -Destination (Join-Path $stage '@Resources\plugin-registry-v1.json') -Force
     foreach ($name in $preservedHashes.Keys) { $stagedData = Join-Path $stage ('@Resources\' + $name); if (-not (Test-Path -LiteralPath $stagedData) -or (Get-FileHash -LiteralPath $stagedData -Algorithm SHA256).Hash -ne $preservedHashes[$name]) { throw "Staged user data verification failed: $name" } }
     Remove-Item -LiteralPath (Join-Path $stage '@Resources\Todo.ps1') -Force -ErrorAction SilentlyContinue
     Remove-Item -LiteralPath (Join-Path $stage '@Resources\TodoHost.cs') -Force -ErrorAction SilentlyContinue

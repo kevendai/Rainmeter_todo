@@ -23,7 +23,7 @@
 
 - CalDAV 凭据位于 `Skins\Todo\@Resources\caldav.secret`。
 - 论文和翻译设置分别位于 `paper-sync.secret`、`translation.secret`，均使用 Windows DPAPI CurrentUser 加密。
-- 自动更新会保留 `tasks.json`、各类 secret、`calendar-cache.json`、`calendar-state.json` 与 `ui-scale.txt`。
+- 自动更新会保留 `tasks.json`、各类 secret、`calendar-cache.json`、`calendar-state.json`、磁贴缩放 `ui-scale.txt` 与窗口缩放 `ui-window-scale.txt`。
 
 ## 从源码打包
 
