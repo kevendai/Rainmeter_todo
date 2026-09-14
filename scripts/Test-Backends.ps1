@@ -119,6 +119,12 @@ try {
         $backupProcess=Start-Process -FilePath $todo -ArgumentList 'BackupSelfTest' -WindowStyle Hidden -PassThru -Wait
         if ($backupProcess.ExitCode -ne 0) { throw "Encrypted backup self-tests failed with exit code $($backupProcess.ExitCode)" }
         Write-Host 'Encrypted portable backup config v2.0 round-trip, v1.0 compatibility, DPAPI rewrap, rollback, wrong-password, and tamper tests passed'
+$updaterPath = Join-Path $projectRoot 'scripts\RainmeterDesktopWidgetsUpdater.ps1'
+$updaterText = [IO.File]::ReadAllText($updaterPath)
+if ($updaterText -notmatch '\$checksumContent -is \[byte\[\]\]' -or $updaterText -notmatch "\(\?i\)\^\(\[0-9a-f\]\{64\}\)") {
+    throw 'Updater checksum parser must support byte[] responses and Windows PowerShell 5.1 regex semantics.'
+}
+Write-Host 'Updater SHA256 response parsing compatibility guard passed'
         & $calendarRecurrence
         if ($LASTEXITCODE -ne 0) { throw "Calendar recurrence tests failed with exit code $LASTEXITCODE" }
     } finally {

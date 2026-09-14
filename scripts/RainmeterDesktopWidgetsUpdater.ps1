@@ -447,8 +447,13 @@ function Get-VerifiedReleaseAsset {
     if ($asset.Count -eq 0) { throw "GitHub Release asset not found: $AssetName" }
     if ($checksumAsset.Count -eq 0) { throw "GitHub Release checksum not found: $checksumName" }
     $checksumResponse = Invoke-WebRequestCompat -Uri ([string]$checksumAsset[0].browser_download_url) -Headers @{ 'User-Agent' = $UserAgent } -TimeoutSec 20
-    $checksumText = [string]$checksumResponse.Content
-    $match = [regex]::Match($checksumText.Trim(), '^(?i)([0-9a-f]{64})(?:\s+\*?.+)?$')
+    $checksumContent = $checksumResponse.Content
+    $checksumText = if ($checksumContent -is [byte[]]) {
+        [Text.Encoding]::UTF8.GetString($checksumContent)
+    } else {
+        [string]$checksumContent
+    }
+    $match = [regex]::Match($checksumText.Trim(), '(?i)^([0-9a-f]{64})(?:\s+\*?.+)?$')
     if (-not $match.Success) { throw "Invalid SHA256 file: $checksumName" }
     return [pscustomobject]@{ Url = [string]$asset[0].browser_download_url; Sha256 = $match.Groups[1].Value.ToUpperInvariant() }
 }
