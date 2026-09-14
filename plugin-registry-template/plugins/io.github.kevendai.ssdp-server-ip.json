@@ -1,0 +1,16 @@
+{
+  "id": "io.github.kevendai.ssdp-server-ip",
+  "name": "SSDP 服务器 IP 同步",
+  "description": "私人插件，不随主程序捆绑；仅供需要 SSDP 服务器地址接管的用户手动安装。",
+  "channel": "stable",
+  "official": true,
+  "version": "1.0.4",
+  "api_version": 1,
+  "min_host_version": "2.0.0",
+  "capability": "value_provider",
+  "permissions": "network",
+  "download": "https://github.com/kevendai/Rainmeter_todo-plugin-registry/releases/download/ssdp-server-ip-v1.0.4/ssdp-server-ip-1.0.4.rwplugin",
+  "sha256": "b6c8a5369170cf236cf62c8272b83f4f97256e2052eb5148eddf6ab175121ca6",
+  "release_notes": "私人插件：通过 SSDP 搜索并按 USN 锁定服务器 IP。",
+  "homepage": "https://github.com/kevendai/Rainmeter_todo-plugin-registry/tree/master/official-plugins/ssdp-server-ip"
+}

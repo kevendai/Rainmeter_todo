@@ -12,7 +12,8 @@ if ($outputRoot.TrimEnd('\') -eq $projectRoot.TrimEnd('\')) {
 
 $definitions = @(
     @{ Folder='arxiv' },
-    @{ Folder='calendar-to-todo' }
+    @{ Folder='calendar-to-todo' },
+    @{ Folder='ssdp-server-ip' }
 )
 
 $buildScript = @'
@@ -35,7 +36,7 @@ try {
         if (Test-Path -LiteralPath $source) { Copy-Item -LiteralPath $source -Destination $stage }
     }
     New-Item -ItemType Directory -Path $OutputDirectory -Force | Out-Null
-    $slug = if ($manifest.id -eq 'io.github.kevendai.arxiv') { 'arxiv' } else { 'calendar-to-todo' }
+    $slug = if ($manifest.id -eq 'io.github.kevendai.arxiv') { 'arxiv' } elseif ($manifest.id -eq 'io.github.kevendai.ssdp-server-ip') { 'ssdp-server-ip' } else { 'calendar-to-todo' }
     $baseName = $slug + '-' + $manifest.version
     $zip = Join-Path $OutputDirectory ($baseName + '.zip')
     $package = Join-Path $OutputDirectory ($baseName + '.rwplugin')

@@ -1,7 +1,8 @@
 param(
     [string]$OutputDirectory = (Join-Path (Split-Path $PSScriptRoot -Parent) 'plugin-build'),
     [string]$PackageDirectory = '',
-    [string]$LockPath = ''
+    [string]$LockPath = '',
+    [switch]$IncludePrivate
 )
 
 $ErrorActionPreference = 'Stop'
@@ -12,10 +13,12 @@ if (-not (Test-Path -LiteralPath $msbuild)) { $msbuild = Join-Path ([Environment
 if (-not (Test-Path -LiteralPath $msbuild)) { throw 'MSBuild was not found.' }
 
 $definitions = @(
-    @{ Folder = 'ssdp-server-ip'; Project = 'SsdpServerIpPlugin.csproj'; Exe = 'SsdpServerIpPlugin.exe' },
     @{ Folder = 'calendar-to-todo'; Project = 'CalendarToTodoPlugin.csproj'; Exe = 'CalendarToTodoPlugin.exe' },
     @{ Folder = 'arxiv'; Project = 'ArxivPlugin.csproj'; Exe = 'ArxivPlugin.exe' }
 )
+if ($IncludePrivate) {
+    $definitions = @(@{ Folder = 'ssdp-server-ip'; Project = 'SsdpServerIpPlugin.csproj'; Exe = 'SsdpServerIpPlugin.exe' }) + $definitions
+}
 
 New-Item -ItemType Directory -Path $OutputDirectory -Force | Out-Null
 $lockEntries = @()

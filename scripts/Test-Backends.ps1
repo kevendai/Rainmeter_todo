@@ -33,7 +33,7 @@ try {
     & (Join-Path $PSScriptRoot 'Build-Backend.ps1') -Backend Calendar -OutputDirectory $build | Out-Null
     & (Join-Path $PSScriptRoot 'Build-Backend.ps1') -Backend Plugin -OutputDirectory $build | Out-Null
     Set-Content -LiteralPath (Join-Path $build 'app-version.txt') -Value '2.0.0' -Encoding UTF8
-    & (Join-Path $PSScriptRoot 'Build-OfficialPlugins.ps1') -OutputDirectory $bundledPlugins | Out-Null
+    & (Join-Path $PSScriptRoot 'Build-OfficialPlugins.ps1') -OutputDirectory $bundledPlugins -IncludePrivate | Out-Null
     & (Join-Path $tests 'Test-PluginInstaller.ps1') -Installer (Join-Path $PSScriptRoot 'Install-RwPlugin.ps1') -PluginSource (Join-Path $bundledPlugins 'calendar-to-todo')
     & $csc /nologo /target:exe /optimize+ /r:System.Web.Extensions.dll "/out:$smoke" (Join-Path $backend 'SmokeTests.cs')
     if ($LASTEXITCODE -ne 0) { throw 'Smoke test compilation failed' }

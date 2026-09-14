@@ -8,7 +8,7 @@ jobs:
     runs-on: windows-latest
     strategy:
       matrix:
-        plugin: [arxiv, calendar-to-todo]
+        plugin: [arxiv, calendar-to-todo, ssdp-server-ip]
     steps:
       - uses: actions/checkout@v4
       - name: Build package

@@ -1,10 +1,16 @@
 # Release Notes
 
+## 2.0.1 - 2026-09-14
+
+- “SSDP 服务器 IP”改为插件市场中的私人插件，简介明确标注不随主程序捆绑；新安装包只捆绑 arXiv 与 Calendar-to-Todo。
+- 插件市场列表显示注册表 description，方便在安装前识别私人插件及其用途。
+- v1.3.5 继续通过 full/lite 先升级到 v1.4.4，再由统一更新器校验 SHA256 后升级到当前版本。
+
 ## 2.0.0 - 2026-09-14
 
 - 新增按需启动的 `PluginHost.exe`、Plugin API v1、JSON Lines 进程协议、UTF-8 管道、超时/取消、任务状态、错误日志和插件级同步互斥。
 - Todo 数据升级为 v3：外部身份统一使用 `origin.plugin_id + external_id`，行为使用 `policy`，核心不再识别 arXiv/CalDAV 业务名；迁移前创建时间戳备份并写入幂等完成标记。
-- arXiv、Calendar-to-Todo 和“SSDP 服务器 IP”成为三个独立进程官方插件；TodoHost 不再编译论文抓取/RSS 服务，CalendarHost 不再直接读写 `tasks.json`。
+- arXiv、Calendar-to-Todo 成为主程序捆绑的独立进程插件；“SSDP 服务器 IP”作为市场中的私人插件按需安装，不随主程序捆绑。TodoHost 不再编译论文抓取/RSS 服务，CalendarHost 不再直接读写 `tasks.json`。
 - 新增插件管理 UI：安装、启用、禁用、Schema 配置、actions、取消、更新、卸载及二次删除数据确认；市场仅显示 `official=true` 条目并强制 GitHub HTTPS 与 SHA256。
 - 新增 `.rwplugin` 安全 staging 安装器、官方插件包/哈希/锁文件构建、GitHub Pages 注册表模板和公开 Schema/API 文档。
 - 新增 `PluginValues.json` / `PluginValues.inc` 桥接、TTL 调度以及失败时保留最后成功值的 Stale 标记。

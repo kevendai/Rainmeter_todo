@@ -485,8 +485,8 @@ internal static partial class TodoApp
             Dictionary<string,object> p=JsonUtil.Object(raw);if(!JsonUtil.Bool(p,"official",false))continue;
             string id=JsonUtil.String(p,"id","");if(id=="io.github.kevendai.network-ip")continue;string required;bool compatible=MarketCompatible(p,out required),installedPlugin=Directory.Exists(PluginPaths.PluginRoot(id));
             PluginRow row=new PluginRow();row.Title=JsonUtil.String(p,"name",id);row.Tag=p;
-            string permissions=JsonUtil.String(p,"permissions","");
-            row.Subtitle="v"+JsonUtil.String(p,"version","")+"  ·  "+JsonUtil.String(p,"capability","")+(permissions==""?"":"  ·  权限 "+permissions);
+            string permissions=JsonUtil.String(p,"permissions",""),description=JsonUtil.String(p,"description","");
+            row.Subtitle="v"+JsonUtil.String(p,"version","")+(description==""?"":"  ·  "+description)+"  ·  "+JsonUtil.String(p,"capability","")+(permissions==""?"":"  ·  权限 "+permissions);
             if(!compatible){row.Badge="需要主程序 "+required;row.BadgeFore=LightUi.Muted;row.BadgeBack=PluginBadgeBackOff;row.Dimmed=true;}
             else if(installedPlugin){row.Badge="已安装";row.BadgeFore=PluginDoneGreen;row.BadgeBack=PluginBadgeBackOn;}
             else{row.Badge="可安装";row.BadgeFore=LightUi.Accent;row.BadgeBack=Color.FromArgb(232,244,255);}

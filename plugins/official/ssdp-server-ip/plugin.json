@@ -1,7 +1,8 @@
 {
   "id": "io.github.kevendai.ssdp-server-ip",
   "name": "SSDP 服务器 IP 同步",
-  "version": "1.0.3",
+  "description": "私人插件，不随主程序捆绑；请从插件市场按需安装。",
+  "version": "1.0.4",
   "api_version": 1,
   "min_host_version": "2.0.0",
   "entry": "bin/SsdpServerIpPlugin.exe",
@@ -12,7 +13,7 @@
     "network"
   ],
   "settings_schema": "settings.schema.json",
-  "homepage": "https://github.com/kevendai/Rainmeter_todo",
+  "homepage": "https://github.com/kevendai/Rainmeter_todo-plugin-registry/tree/master/official-plugins/ssdp-server-ip",
   "default_enabled": false,
   "actions": [
     {
