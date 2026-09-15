@@ -32,6 +32,8 @@ try {
     $updaterTarget = Join-Path $stage '@Resources\Updater'
     New-Item -ItemType Directory -Path $updaterTarget -Force | Out-Null
     Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'RainmeterDesktopWidgetsUpdater.ps1') -Destination (Join-Path $updaterTarget 'RainmeterDesktopWidgetsUpdater.ps1') -Force
+    Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'updater-version.txt') -Destination (Join-Path $updaterTarget 'updater-version.txt') -Force
+    & (Join-Path $PSScriptRoot 'Build-Backend.ps1') -Backend Updater -OutputDirectory $updaterTarget | Out-Null
     Remove-Item -LiteralPath (Join-Path $stage '@Resources\UiScale.inc') -Force -ErrorAction SilentlyContinue
     & (Join-Path $PSScriptRoot 'New-RefreshArrow.ps1') -OutputDirectory (Join-Path $stage '@Resources\RefreshFrames')
 

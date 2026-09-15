@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Drawing;
@@ -17,15 +17,14 @@ internal static partial class TodoApp
     private static string translationCredentialsLoadError = "";
     private static void StartExternalUpdater()
     {
-        if (!File.Exists(UpdaterScript)) throw new Exception("未找到独立升级器：" + UpdaterScript);
-        string arguments = "-NoProfile -ExecutionPolicy Bypass -File " + QuoteArg(UpdaterScript)
-            + " -Mode CheckAndInstall"
+        if (!File.Exists(UpdaterExecutable)) throw new Exception("未找到独立升级器：" + UpdaterExecutable);
+        string arguments = "-Mode CheckAndInstall"
             + " -Repository " + QuoteArg(GitHubRepository)
             + " -CurrentVersion " + QuoteArg(AppVersion)
             + " -RainmeterRoot " + QuoteArg(CurrentRainmeterRoot())
             + " -Activate"
             + " -AssumeYes";
-        Process.Start(new ProcessStartInfo("powershell.exe", arguments) { UseShellExecute = false, CreateNoWindow = false });
+        Process.Start(new ProcessStartInfo(UpdaterExecutable, arguments) { UseShellExecute = false, CreateNoWindow = false });
     }
 
     private sealed class UpdateCheckResult
@@ -38,24 +37,26 @@ internal static partial class TodoApp
     private static UpdateCheckResult CheckLatestUpdate()
     {
         ServicePointManager.SecurityProtocol |= (SecurityProtocolType)3072;
-        string raw = GitHubGet("https://api.github.com/repos/" + GitHubRepository + "/tags");
-        string tag = LatestTag(raw);
+        string tag = GitHubLatestReleaseTag();
         if (tag == "") throw new Exception("GitHub 上没有可用版本标签");
         int compare = CompareVersions(NormalizeVersion(tag), AppVersion);
         return new UpdateCheckResult { Tag = tag, CompareResult = compare, IsNewer = compare > 0 };
     }
 
-    private static string GitHubGet(string url)
+    private static string GitHubLatestReleaseTag()
     {
-        HttpWebRequest request = (HttpWebRequest)WebRequest.Create(url);
-        request.Method = "GET";
+        ServicePointManager.SecurityProtocol |= (SecurityProtocolType)3072;
+        HttpWebRequest request = (HttpWebRequest)WebRequest.Create("https://github.com/" + GitHubRepository + "/releases/latest");
+        request.Method = "HEAD";
+        request.AllowAutoRedirect = true;
         request.Timeout = 10000;
         request.ReadWriteTimeout = 10000;
         request.UserAgent = "RainmeterDesktopWidgets/" + AppVersion;
-        request.Accept = "application/vnd.github+json";
         using (HttpWebResponse response = (HttpWebResponse)request.GetResponse())
-        using (StreamReader reader = new StreamReader(response.GetResponseStream(), Encoding.UTF8))
-            return reader.ReadToEnd();
+        {
+            string tag = response.ResponseUri.Segments.Last().Trim('/');
+            return Uri.UnescapeDataString(tag);
+        }
     }
 
     private static string LatestTag(string raw)

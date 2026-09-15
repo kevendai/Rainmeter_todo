@@ -21,7 +21,7 @@ internal static partial class TodoApp
     private static string StatePath { get { return Path.Combine(ResourceDir, "tasks.json"); } }
     private static string IncludePath { get { return Path.Combine(ResourceDir, "Generated.inc"); } }
     private static string GuardPath { get { return Path.Combine(ResourceDir, ".refresh-guard"); } }
-    private static string UpdaterScript { get { return Path.Combine(ResourceDir, "Updater", "RainmeterDesktopWidgetsUpdater.ps1"); } }
+    private static string UpdaterExecutable { get { return Path.Combine(ResourceDir, "Updater", "UpdaterHost.exe"); } }
     private static string PaperSyncSecret { get { return Path.Combine(ResourceDir, "paper-sync.secret"); } }
     private static string TranslationSecret { get { return Path.Combine(ResourceDir, "translation.secret"); } }
     private static string PluginHostPath { get { return Path.Combine(ResourceDir, "PluginHost.exe"); } }

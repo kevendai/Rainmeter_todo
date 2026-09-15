@@ -22,6 +22,8 @@ if (-not (Test-Path -LiteralPath $installer)) {
 
 if (Test-Path -LiteralPath $OutputRoot) { Remove-Item -LiteralPath $OutputRoot -Recurse -Force }
 New-Item -ItemType Directory -Path $OutputRoot -Force | Out-Null
+$updaterBuild = Join-Path $OutputRoot '.updater-build'
+& (Join-Path $PSScriptRoot 'Build-Backend.ps1') -Backend Updater -OutputDirectory $updaterBuild | Out-Null
 
 function Copy-Tree {
     param([string]$Source, [string]$Destination)
@@ -104,8 +106,11 @@ function Set-SkinVersion {
 
 function New-UpdaterScript {
     param([string]$Path)
+    $target = Split-Path $Path -Parent
+    New-Item -ItemType Directory -Path $target -Force | Out-Null
     Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'RainmeterDesktopWidgetsUpdater.ps1') -Destination $Path -Force
-    Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'updater-version.txt') -Destination (Join-Path (Split-Path $Path -Parent) 'updater-version.txt') -Force
+    Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'updater-version.txt') -Destination (Join-Path $target 'updater-version.txt') -Force
+    Copy-Item -LiteralPath (Join-Path $updaterBuild 'UpdaterHost.exe') -Destination (Join-Path $target 'UpdaterHost.exe') -Force
 }
 
 function New-InstallScript {
@@ -119,13 +124,14 @@ param(
 
 $ErrorActionPreference = 'Stop'
 $packageRoot = $PSScriptRoot
-$updater = Join-Path $packageRoot 'Updater\RainmeterDesktopWidgetsUpdater.ps1'
-if (-not (Test-Path -LiteralPath $updater)) { throw 'Updater script not found in package.' }
-$args = @('-NoProfile','-ExecutionPolicy','Bypass','-File',$updater,'-Mode','InstallPackage','-PackageRoot',$packageRoot)
+$updater = Join-Path $packageRoot 'Updater\UpdaterHost.exe'
+if (-not (Test-Path -LiteralPath $updater)) { throw 'UpdaterHost.exe not found in package.' }
+$args = @('-Mode','InstallPackage','-PackageRoot',$packageRoot)
 if (-not [string]::IsNullOrWhiteSpace($RainmeterRoot)) { $args += @('-RainmeterRoot',$RainmeterRoot) }
-$args += @('-WaitForProcessId',$WaitForProcessId)
 if ($Activate) { $args += '-Activate' }
-& powershell @args
+$escaped = @($args | ForEach-Object { if ($_ -match '[\s"]') { '"' + ($_ -replace '"', '\"') + '"' } else { $_ } })
+$process = Start-Process -FilePath $updater -ArgumentList $escaped -Wait -PassThru
+exit $process.ExitCode
 '@
     Set-Content -LiteralPath $Path -Value $content -Encoding UTF8
 }
@@ -177,10 +183,8 @@ function New-RmskinPackage {
     Copy-Item -Path (Join-Path $PackageRoot 'Skins') -Destination (Join-Path $rmskinRoot 'Skins') -Recurse -Force
 
     $targetUpdater = Join-Path $rmskinRoot 'Skins\Todo\@Resources\Updater'
-    New-Item -ItemType Directory -Path $targetUpdater -Force | Out-Null
-    $rmskinUpdater = Join-Path $targetUpdater 'RainmeterDesktopWidgetsUpdater.ps1'
-    Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'RainmeterDesktopWidgetsUpdater.ps1') -Destination $rmskinUpdater -Force
-    if (-not (Test-Path -LiteralPath $rmskinUpdater)) { throw 'Updater was not staged in the rmskin package.' }
+    New-UpdaterScript (Join-Path $targetUpdater 'RainmeterDesktopWidgetsUpdater.ps1')
+    if (-not (Test-Path -LiteralPath (Join-Path $targetUpdater 'UpdaterHost.exe'))) { throw 'UpdaterHost.exe was not staged in the rmskin package.' }
 
     $rmskinIni = @"
 [rmskin]
@@ -285,6 +289,9 @@ function New-LegacyBootstrapPackages {
             tag = "v$bridgeVersion"
             version = $bridgeVersion
             asset = "rainmeter-desktop-widgets-$bridgeVersion.zip"
+            # v1.4.4 predates Release checksum assets. This verified historical
+            # hash is deliberately scoped to the one mandatory compatibility hop.
+            sha256 = '0975c7ba84fecdcfcaa311a0202bbee5f9c3967af6e341bc2c583931b12ef934'
         } | ConvertTo-Json
         [IO.File]::WriteAllText((Join-Path $bridgeRoot 'unified-bootstrap.json'), $bootstrap, [Text.UTF8Encoding]::new($false))
 
@@ -297,16 +304,17 @@ function New-LegacyBootstrapPackages {
             $installPath = Join-Path $verifyRoot 'Install-Skins.ps1'
             $updaterPath = Join-Path $verifyRoot 'Updater\RainmeterDesktopWidgetsUpdater.ps1'
             $updaterVersionPath = Join-Path $verifyRoot 'Updater\updater-version.txt'
-            if (-not (Test-Path -LiteralPath $bootstrapPath) -or -not (Test-Path -LiteralPath $installPath) -or -not (Test-Path -LiteralPath $updaterPath) -or -not (Test-Path -LiteralPath $updaterVersionPath)) {
+            $updaterExePath = Join-Path $verifyRoot 'Updater\UpdaterHost.exe'
+            if (-not (Test-Path -LiteralPath $bootstrapPath) -or -not (Test-Path -LiteralPath $installPath) -or -not (Test-Path -LiteralPath $updaterPath) -or -not (Test-Path -LiteralPath $updaterVersionPath) -or -not (Test-Path -LiteralPath $updaterExePath)) {
                 throw "Generated $legacyFlavor bridge is incomplete."
             }
             $verifiedBootstrap = Get-Content -LiteralPath $bootstrapPath -Raw -Encoding UTF8 | ConvertFrom-Json
-            if ([string]$verifiedBootstrap.version -ne $bridgeVersion -or [string]$verifiedBootstrap.tag -ne "v$bridgeVersion" -or [string]$verifiedBootstrap.asset -ne "rainmeter-desktop-widgets-$bridgeVersion.zip") {
+            if ([string]$verifiedBootstrap.version -ne $bridgeVersion -or [string]$verifiedBootstrap.tag -ne "v$bridgeVersion" -or [string]$verifiedBootstrap.asset -ne "rainmeter-desktop-widgets-$bridgeVersion.zip" -or [string]$verifiedBootstrap.sha256 -ne '0975c7ba84fecdcfcaa311a0202bbee5f9c3967af6e341bc2c583931b12ef934') {
                 throw "Generated $legacyFlavor bridge metadata is invalid."
             }
             $verifiedUpdater = [IO.File]::ReadAllText($updaterPath, [Text.UTF8Encoding]::new($false))
-            if (-not $verifiedUpdater.Contains('-WaitPid 0') -or -not $verifiedUpdater.Contains('last-error.log')) {
-                throw "Generated $legacyFlavor bridge does not contain the current handoff fix."
+            if ($verifiedUpdater.Contains('Invoke-WebRequest') -or $verifiedUpdater.Contains('Expand-Archive') -or -not $verifiedUpdater.Contains('UpdaterHost.exe')) {
+                throw "Generated $legacyFlavor bridge does not use the EXE-only updater implementation."
             }
         }
         finally { Remove-Item -LiteralPath $verifyRoot -Recurse -Force -ErrorAction SilentlyContinue }

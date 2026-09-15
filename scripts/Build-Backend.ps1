@@ -1,6 +1,6 @@
 param(
     [Parameter(Mandatory = $true)]
-    [ValidateSet('Todo', 'Calendar', 'Plugin')]
+    [ValidateSet('Todo', 'Calendar', 'Plugin', 'Updater')]
     [string]$Backend,
     [Parameter(Mandatory = $true)]
     [string]$OutputDirectory

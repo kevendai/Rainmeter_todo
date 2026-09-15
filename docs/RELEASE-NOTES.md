@@ -1,5 +1,11 @@
 # Release Notes
 
+## 2.0.3 - 2026-09-15
+
+- 更新器改为随包携带的 `UpdaterHost.exe`；下载、TLS、SHA256 校验、安全解压、事务安装和回滚不再依赖 PowerShell 版本。
+- 最新版本发现改用 `releases/latest` 重定向；安装包与 SHA256 使用固定 Release 下载地址，不再查询易受共享限流影响的 GitHub API。
+- 正式 ZIP、RMSKIN、full/lite 兼容包都保留同名 PowerShell 启动壳，仅供 v1.x 宿主启动 EXE；该启动壳不联网、不解压、不安装。
+- 保留 v2.0.2 的进程交接、子进程退出码检查和本地错误日志修复。
 ## 2.0.2 - 2026-09-15
 
 - 修复 v1.4.4 更新到 v2.x 时，外部更新器可能在下载后等待旧 TodoHost 进程并直接退出的问题。

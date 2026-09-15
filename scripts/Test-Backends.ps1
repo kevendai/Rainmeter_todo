@@ -13,6 +13,7 @@ try {
     $todo = Join-Path $build 'TodoHost.exe'
     $calendar = Join-Path $build 'CalendarHost.exe'
     $plugin = Join-Path $build 'PluginHost.exe'
+    $updater = Join-Path $build 'UpdaterHost.exe'
     $bundledPlugins = Join-Path $build 'BundledPlugins'
     $smoke = Join-Path $build 'SmokeTests.exe'
     $todoLayout = Join-Path $build 'TodoLayoutProbe.exe'
@@ -32,6 +33,9 @@ try {
     & (Join-Path $PSScriptRoot 'Build-Backend.ps1') -Backend Todo -OutputDirectory $build | Out-Null
     & (Join-Path $PSScriptRoot 'Build-Backend.ps1') -Backend Calendar -OutputDirectory $build | Out-Null
     & (Join-Path $PSScriptRoot 'Build-Backend.ps1') -Backend Plugin -OutputDirectory $build | Out-Null
+    & (Join-Path $PSScriptRoot 'Build-Backend.ps1') -Backend Updater -OutputDirectory $build | Out-Null
+    $updaterProbe = Start-Process -FilePath $updater -ArgumentList @('-Mode','SelfTest') -WindowStyle Hidden -PassThru -Wait
+    if ($updaterProbe.ExitCode -ne 0) { throw 'UpdaterHost self-test failed' }
     Set-Content -LiteralPath (Join-Path $build 'app-version.txt') -Value '2.0.0' -Encoding UTF8
     & (Join-Path $PSScriptRoot 'Build-OfficialPlugins.ps1') -OutputDirectory $bundledPlugins -IncludePrivate | Out-Null
     & (Join-Path $tests 'Test-PluginInstaller.ps1') -Installer (Join-Path $PSScriptRoot 'Install-RwPlugin.ps1') -PluginSource (Join-Path $bundledPlugins 'calendar-to-todo')
@@ -121,10 +125,10 @@ try {
         Write-Host 'Encrypted portable backup config v2.0 round-trip, v1.0 compatibility, DPAPI rewrap, rollback, wrong-password, and tamper tests passed'
 $updaterPath = Join-Path $projectRoot 'scripts\RainmeterDesktopWidgetsUpdater.ps1'
 $updaterText = [IO.File]::ReadAllText($updaterPath)
-if ($updaterText -notmatch '\$checksumContent -is \[byte\[\]\]' -or $updaterText -notmatch "\(\?i\)\^\(\[0-9a-f\]\{64\}\)") {
-    throw 'Updater checksum parser must support byte[] responses and Windows PowerShell 5.1 regex semantics.'
+if ($updaterText -match 'Invoke-WebRequest|Expand-Archive|Get-FileHash' -or $updaterText -notmatch 'UpdaterHost\.exe') {
+    throw 'PowerShell compatibility launcher contains update implementation instead of delegating to UpdaterHost.exe.'
 }
-Write-Host 'Updater SHA256 response parsing compatibility guard passed'
+Write-Host 'UpdaterHost EXE and minimal legacy PowerShell launcher passed'
         & $calendarRecurrence
         if ($LASTEXITCODE -ne 0) { throw "Calendar recurrence tests failed with exit code $LASTEXITCODE" }
     } finally {

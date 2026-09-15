@@ -17,7 +17,9 @@ internal static partial class TodoApp
     private static string PaperCache { get { return Path.Combine(PluginDataDir,"cache"); } }
     private static string PaperSyncSecret { get { return Path.Combine(PluginDataDir,"runtime-paper.secret"); } }
     private static string TranslationSecret { get { return Path.Combine(PluginDataDir,"runtime-translation.secret"); } }
-    private static string UpdaterScript { get { return ""; } }
+    // TodoUpdateService is shared with the host for translation helpers; this
+    // plugin never launches the host updater.
+    private static string UpdaterExecutable { get { return ""; } }
     private static readonly string AppVersion="2.0.0";
     private static Dictionary<string,object> PluginState;
     private sealed class EditorResult { public string Title,Target,Note,Available,Due;public List<string> Labels; }
