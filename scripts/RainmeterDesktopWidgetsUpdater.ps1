@@ -29,10 +29,13 @@ if (-not [string]::IsNullOrWhiteSpace($RainmeterRoot)) { $forward += @('-Rainmet
 if ($Activate) { $forward += '-Activate' }
 if ($AssumeYes) { $forward += '-AssumeYes' }
 $escaped = @($forward | ForEach-Object { if ($_ -match '[\s"]') { '"' + ($_ -replace '"', '\"') + '"' } else { $_ } })
-# v1.4.4 calls this script from a directory about to be replaced.  For its
-# InstallPackage handoff, the updater chosen above lives in the extracted
-# package, so detach before the legacy script file is swapped out.
-if ($Mode -eq 'InstallPackage' -and $packageUpdaterSelected) {
+# A legacy raw-transition package contains unified-bootstrap.json.  Its EXE
+# must finish before the v1.x caller removes the extraction directory: it uses
+# its own adjacent updater files as the fallback while it installs the 1.4.4
+# hop.  Regular full packages can still detach before replacing the installed
+# updater script.
+$isBootstrapPackage = -not [string]::IsNullOrWhiteSpace($PackageRoot) -and (Test-Path -LiteralPath (Join-Path $PackageRoot 'unified-bootstrap.json'))
+if ($Mode -eq 'InstallPackage' -and $packageUpdaterSelected -and -not $isBootstrapPackage) {
     Start-Process -FilePath $updater -ArgumentList $escaped | Out-Null
     exit 0
 }

@@ -128,6 +128,9 @@ $updaterText = [IO.File]::ReadAllText($updaterPath)
 if ($updaterText -match 'Invoke-WebRequest|Expand-Archive|Get-FileHash' -or $updaterText -notmatch 'UpdaterHost\.exe') {
     throw 'PowerShell compatibility launcher contains update implementation instead of delegating to UpdaterHost.exe.'
 }
+if ($updaterText -notmatch '\$isBootstrapPackage' -or $updaterText -notmatch '\$packageUpdaterSelected -and -not \$isBootstrapPackage') {
+    throw 'Legacy bootstrap launcher would detach before its temporary bridge package has completed.'
+}
 Write-Host 'UpdaterHost EXE and minimal legacy PowerShell launcher passed'
         & $calendarRecurrence
         if ($LASTEXITCODE -ne 0) { throw "Calendar recurrence tests failed with exit code $LASTEXITCODE" }
