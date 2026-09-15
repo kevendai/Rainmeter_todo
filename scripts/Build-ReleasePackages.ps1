@@ -270,39 +270,47 @@ New-Package -DisplayName 'Rainmeter Desktop Widgets'
 
 function New-LegacyBootstrapPackages {
     # v1.3.5 always selects the newest numeric tag and requests the old
-    # full/lite filename from raw.githubusercontent.com. Do not make that old
-    # updater perform the v2 data migration in the same invocation. Instead,
-    # publish the proven v1.4.4 compatibility bootstrap under the v2 filenames.
-    # The first check installs v1.4.4; a second check uses its unified updater
-    # to enter the SHA256-verified v2 update path.
+    # full/lite filename from raw.githubusercontent.com. Keep the first hop at
+    # v1.4.4, but build the bridge with the current updater so handoff fixes are
+    # available before any released package replaces the installed updater.
     $bridgeVersion = '1.4.4'
     foreach ($legacyFlavor in @('full','lite')) {
-        $bridgeName = "rainmeter-desktop-widgets-$legacyFlavor-$bridgeVersion.zip"
-        $bridgePath = Join-Path $cacheRoot $bridgeName
-        if (-not (Test-Path -LiteralPath $bridgePath)) {
-            $bridgeUrl = "https://github.com/kevendai/Rainmeter_todo/releases/download/v$bridgeVersion/$bridgeName"
-            Write-Host "Downloading legacy $bridgeVersion $legacyFlavor updater bridge..."
-            Invoke-WebRequest -Uri $bridgeUrl -OutFile $bridgePath
-        }
-        $verifyRoot = Join-Path $OutputRoot ("verify-legacy-$legacyFlavor-$bridgeVersion")
-        if (Test-Path -LiteralPath $verifyRoot) { Remove-Item -LiteralPath $verifyRoot -Recurse -Force }
-        Expand-Archive -LiteralPath $bridgePath -DestinationPath $verifyRoot -Force
+        $bridgeRoot = Join-Path $OutputRoot ("legacy-$legacyFlavor-bridge-$Version")
+        $updaterRoot = Join-Path $bridgeRoot 'Updater'
+        New-Item -ItemType Directory -Path $updaterRoot -Force | Out-Null
+        New-UpdaterScript (Join-Path $updaterRoot 'RainmeterDesktopWidgetsUpdater.ps1')
+        New-InstallScript (Join-Path $bridgeRoot 'Install-Skins.ps1')
+        $bootstrap = [ordered]@{
+            repository = 'kevendai/Rainmeter_todo'
+            tag = "v$bridgeVersion"
+            version = $bridgeVersion
+            asset = "rainmeter-desktop-widgets-$bridgeVersion.zip"
+        } | ConvertTo-Json
+        [IO.File]::WriteAllText((Join-Path $bridgeRoot 'unified-bootstrap.json'), $bootstrap, [Text.UTF8Encoding]::new($false))
+
+        $target = Join-Path $OutputRoot "rainmeter-desktop-widgets-$legacyFlavor-$Version.zip"
+        Compress-Archive -Path (Join-Path $bridgeRoot '*') -DestinationPath $target -Force
+        $verifyRoot = Join-Path $OutputRoot ("verify-legacy-$legacyFlavor-$Version")
+        Expand-Archive -LiteralPath $target -DestinationPath $verifyRoot -Force
         try {
             $bootstrapPath = Join-Path $verifyRoot 'unified-bootstrap.json'
             $installPath = Join-Path $verifyRoot 'Install-Skins.ps1'
             $updaterPath = Join-Path $verifyRoot 'Updater\RainmeterDesktopWidgetsUpdater.ps1'
-            if (-not (Test-Path -LiteralPath $bootstrapPath) -or -not (Test-Path -LiteralPath $installPath) -or -not (Test-Path -LiteralPath $updaterPath)) {
-                throw "Legacy $bridgeVersion $legacyFlavor bridge is incomplete."
+            $updaterVersionPath = Join-Path $verifyRoot 'Updater\updater-version.txt'
+            if (-not (Test-Path -LiteralPath $bootstrapPath) -or -not (Test-Path -LiteralPath $installPath) -or -not (Test-Path -LiteralPath $updaterPath) -or -not (Test-Path -LiteralPath $updaterVersionPath)) {
+                throw "Generated $legacyFlavor bridge is incomplete."
             }
-            $bootstrap = Get-Content -LiteralPath $bootstrapPath -Raw -Encoding UTF8 | ConvertFrom-Json
-            if ([string]$bootstrap.version -ne $bridgeVersion -or [string]$bootstrap.tag -ne "v$bridgeVersion" -or [string]$bootstrap.asset -ne "rainmeter-desktop-widgets-$bridgeVersion.zip") {
-                throw "Legacy $bridgeVersion $legacyFlavor bridge metadata is invalid."
+            $verifiedBootstrap = Get-Content -LiteralPath $bootstrapPath -Raw -Encoding UTF8 | ConvertFrom-Json
+            if ([string]$verifiedBootstrap.version -ne $bridgeVersion -or [string]$verifiedBootstrap.tag -ne "v$bridgeVersion" -or [string]$verifiedBootstrap.asset -ne "rainmeter-desktop-widgets-$bridgeVersion.zip") {
+                throw "Generated $legacyFlavor bridge metadata is invalid."
+            }
+            $verifiedUpdater = [IO.File]::ReadAllText($updaterPath, [Text.UTF8Encoding]::new($false))
+            if (-not $verifiedUpdater.Contains('-WaitPid 0') -or -not $verifiedUpdater.Contains('last-error.log')) {
+                throw "Generated $legacyFlavor bridge does not contain the current handoff fix."
             }
         }
         finally { Remove-Item -LiteralPath $verifyRoot -Recurse -Force -ErrorAction SilentlyContinue }
-        $target = Join-Path $OutputRoot "rainmeter-desktop-widgets-$legacyFlavor-$Version.zip"
-        Copy-Item -LiteralPath $bridgePath -Destination $target -Force
-        Write-Host "Created two-step $legacyFlavor bridge: $Version -> $bridgeVersion -> $Version"
+        Write-Host "Created patched two-step $legacyFlavor bridge: $Version -> $bridgeVersion -> $Version"
     }
 }
 

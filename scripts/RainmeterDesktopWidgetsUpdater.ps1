@@ -13,6 +13,20 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+$UpdaterLogRoot = Join-Path ([Environment]::GetFolderPath([Environment+SpecialFolder]::LocalApplicationData)) 'RainmeterDesktopWidgets\Updater'
+$UpdaterErrorLog = Join-Path $UpdaterLogRoot 'last-error.log'
+trap {
+    $detail = ($_ | Out-String).Trim()
+    try {
+        New-Item -ItemType Directory -Path $UpdaterLogRoot -Force | Out-Null
+        [IO.File]::WriteAllText($UpdaterErrorLog, ((Get-Date).ToString('o') + "`r`n" + $detail + "`r`n"), [Text.UTF8Encoding]::new($false))
+    } catch {}
+    try {
+        Add-Type -AssemblyName System.Windows.Forms
+        [System.Windows.Forms.MessageBox]::Show("更新失败：$detail`r`n`r`n错误日志：$UpdaterErrorLog", 'Rainmeter Desktop Widgets Update', [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Error) | Out-Null
+    } catch { Write-Host "Update failed: $detail" }
+    exit 1
+}
 $UpdaterVersionPath = Join-Path $PSScriptRoot 'updater-version.txt'
 if (-not (Test-Path -LiteralPath $UpdaterVersionPath -PathType Leaf)) { throw 'Updater version file is missing.' }
 $UpdaterVersion = [IO.File]::ReadAllText($UpdaterVersionPath, [Text.UTF8Encoding]::new($false)).Trim()
@@ -560,12 +574,17 @@ function Check-And-Install {
         $newUpdater = Join-Path $newPackageRoot 'Updater\RainmeterDesktopWidgetsUpdater.ps1'
         if (-not (Test-Path -LiteralPath $newUpdater)) { throw 'Updater script not found in update package.' }
         & powershell -NoProfile -ExecutionPolicy Bypass -File $newUpdater -Mode UpdateUpdater -PackageRoot $newPackageRoot -RainmeterRoot $roots.RainmeterRoot
+        if ($LASTEXITCODE -ne 0) { throw "Updater self-update failed with exit code $LASTEXITCODE." }
 
         $installedUpdater = Join-Path $roots.SkinsRoot 'Todo\@Resources\Updater\RainmeterDesktopWidgetsUpdater.ps1'
         if (-not (Test-Path -LiteralPath $installedUpdater)) { throw 'Installed updater script was not found after self-update.' }
-        $installArgs = @('-NoProfile','-ExecutionPolicy','Bypass','-File',$installedUpdater,'-Mode','InstallPackage','-PackageRoot',$newPackageRoot,'-RainmeterRoot',$roots.RainmeterRoot,'-WaitForProcessId',$WaitForProcessId)
+        # This process is already the detached update worker. Waiting again for
+        # the WinForms launcher can stall or abort the handoff; Install-Package
+        # closes only the known host executables before replacing files.
+        $installArgs = @('-NoProfile','-ExecutionPolicy','Bypass','-File',$installedUpdater,'-Mode','InstallPackage','-PackageRoot',$newPackageRoot,'-RainmeterRoot',$roots.RainmeterRoot,'-WaitForProcessId','0')
         if ($Activate) { $installArgs += '-Activate' }
         & powershell @installArgs
+        if ($LASTEXITCODE -ne 0) { throw "Package installer failed with exit code $LASTEXITCODE." }
     }
     finally {
         Remove-Item -LiteralPath $extractRoot -Recurse -Force -ErrorAction SilentlyContinue
@@ -584,7 +603,10 @@ if ($Mode -eq 'UpdateUpdater') {
 }
 
 if ($Mode -eq 'InstallPackage') {
-    Install-Package -SourcePackageRoot $PackageRoot -Root $RainmeterRoot -ShouldActivate:$Activate -WaitPid $WaitForProcessId
+    # InstallPackage can be invoked by an older updater that still passes its
+    # TodoHost PID. The installer already closes only known host executables,
+    # so never wait on a possibly stale UI process before replacing files.
+    Install-Package -SourcePackageRoot $PackageRoot -Root $RainmeterRoot -ShouldActivate:$Activate -WaitPid 0
     return
 }
 
