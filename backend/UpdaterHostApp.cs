@@ -137,15 +137,9 @@ namespace RainmeterUpdater
             bool rainmeterWasRunning = false;
             try
             {
-                // Release every skin/host handle before staging or swapping
-                // directories.  The user can start Rainmeter manually after
-                // the update; restarting here would immediately re-lock the
-                // freshly installed files.
-                rainmeterWasRunning = IsExactProcessRunning("Rainmeter", rainmeterExe);
-                if (rainmeterWasRunning) StopRainmeter(rainmeterExe);
-                StopKnownHosts(roots.SkinsRoot);
-                StopManagedPluginProcesses();
-                RecoverInterruptedSkins(roots.SkinsRoot);
+                // Build the new skin tree before touching Rainmeter.  The
+                // actual swap is only a pair of fast Directory.Move calls, so
+                // it can happen the moment the directory locks are released.
                 pluginSnapshot = SnapshotPluginState(package.PluginIds, transaction);
                 foreach (string skin in new[] { "Todo", "Calendar" })
                 {
@@ -169,16 +163,35 @@ namespace RainmeterUpdater
                 }
                 CopyUpdaterFilesToStage(sourcePackageRoot, Path.Combine(transaction, "stage", "Todo", "@Resources", "Updater"));
                 VerifyPreserved(transaction, preserved, "stage");
+
+                // Release every skin/host handle before swapping directories.
+                rainmeterWasRunning = IsExactProcessRunning("Rainmeter", rainmeterExe);
+                if (rainmeterWasRunning) StopRainmeter(rainmeterExe);
+                StopKnownHosts(roots.SkinsRoot);
+                StopManagedPluginProcesses();
+                RecoverInterruptedSkins(roots.SkinsRoot);
+
+                // Make sure the target directories are actually unlocked
+                // before we try to move them; otherwise Directory.Move throws
+                // "access denied" while Rainmeter is still releasing handles.
+                foreach (string skin in new[] { "Todo", "Calendar" })
+                {
+                    string target = Path.Combine(roots.SkinsRoot, skin);
+                    if (Directory.Exists(target) && !WaitForDirectoryUnlocked(target, 30000))
+                        throw new TimeoutException(skin + " 目录在进程退出后仍处于锁定状态，请关闭 Rainmeter 后重试。");
+                }
+
                 foreach (string skin in new[] { "Todo", "Calendar" })
                 {
                     string target = Path.Combine(roots.SkinsRoot, skin), stage = Path.Combine(transaction, "stage", skin), backup = Path.Combine(transaction, "backup", skin);
-                    if (Directory.Exists(target)) { Directory.CreateDirectory(Path.GetDirectoryName(backup)); Directory.Move(target, backup); }
-                    Directory.Move(stage, target);
+                    MoveDirectoryWithRetry(target, backup);
+                    MoveDirectoryWithRetry(stage, target);
                     swapped.Add(skin);
                 }
                 VerifyPreserved(roots.SkinsRoot, preserved, null);
                 ValidateInstalledHosts(roots.SkinsRoot, package.RequiresPluginHost);
                 TryDeleteDirectory(transaction);
+                if (File.Exists(rainmeterExe)) StartAndRefreshRainmeter(rainmeterExe, activate);
             }
             catch
             {
@@ -340,7 +353,23 @@ namespace RainmeterUpdater
         private static void StopKnownHosts(string skinsRoot)
         {
             var allowed = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { Path.Combine(skinsRoot, "Todo", "@Resources", "TodoHost.exe"), Path.Combine(skinsRoot, "Calendar", "@Resources", "CalendarHost.exe"), Path.Combine(skinsRoot, "Todo", "@Resources", "PluginHost.exe") };
-            foreach (string name in new[] { "TodoHost", "CalendarHost", "PluginHost" }) foreach (Process p in Process.GetProcessesByName(name)) try { string path = p.MainModule.FileName; if (allowed.Contains(path)) { try { p.CloseMainWindow(); } catch { } if (!p.WaitForExit(800)) { p.Kill(); p.WaitForExit(3000); } } } catch { } finally { p.Dispose(); }
+            foreach (string name in new[] { "TodoHost", "CalendarHost", "PluginHost" })
+            {
+                foreach (Process p in Process.GetProcessesByName(name))
+                {
+                    try
+                    {
+                        string path = p.MainModule.FileName;
+                        if (allowed.Contains(path))
+                        {
+                            try { p.CloseMainWindow(); } catch { }
+                            if (!p.WaitForExit(2000)) { p.Kill(); p.WaitForExit(6000); }
+                        }
+                    }
+                    catch { }
+                    finally { p.Dispose(); }
+                }
+            }
         }
         private static void StopManagedPluginProcesses()
         {
@@ -385,9 +414,9 @@ namespace RainmeterUpdater
         {
             if (!File.Exists(exe)) return;
             TryStart(exe, "!Quit");
-            DateTime until = DateTime.UtcNow.AddSeconds(5);
+            DateTime until = DateTime.UtcNow.AddSeconds(10);
             while (DateTime.UtcNow < until && IsExactProcessRunning("Rainmeter", exe)) Thread.Sleep(250);
-            if (!IsExactProcessRunning("Rainmeter", exe)) return;
+            if (!IsExactProcessRunning("Rainmeter", exe)) { Thread.Sleep(500); return; }
             // Some Rainmeter builds do not process !Quit while a skin/plugin
             // modal action is active.  Only force-close the process whose
             // executable path exactly matches the discovered installation.
@@ -395,18 +424,55 @@ namespace RainmeterUpdater
             {
                 try
                 {
-                    // Rainmeter may deny access to MainModule while shutting
-                    // down.  At this point the updater has already sent
-                    // !Quit; terminate the remaining Rainmeter instance so
-                    // skin files cannot stay locked.
+                    string path = "";
+                    try { path = process.MainModule.FileName; } catch { }
+                    if (path.Length == 0 || !Path.GetFullPath(path).Equals(Path.GetFullPath(exe), StringComparison.OrdinalIgnoreCase)) continue;
                     try { process.CloseMainWindow(); } catch { }
-                    if (!process.WaitForExit(1500)) process.Kill();
-                    process.WaitForExit(5000);
+                    if (!process.WaitForExit(2000)) process.Kill();
+                    process.WaitForExit(10000);
                 }
                 catch { }
                 finally { process.Dispose(); }
             }
             if (IsExactProcessRunning("Rainmeter", exe)) throw new TimeoutException("Rainmeter 未能在退出超时后结束。");
+            // The process is gone, but Windows releases the file handles a
+            // moment later.  Give the file system time before the swap.
+            Thread.Sleep(1000);
+        }
+
+        private static void MoveDirectoryWithRetry(string source, string destination)
+        {
+            if (!Directory.Exists(source)) return;
+            Directory.CreateDirectory(Path.GetDirectoryName(destination));
+            Exception last = null;
+            DateTime until = DateTime.UtcNow.AddSeconds(30);
+            while (DateTime.UtcNow < until)
+            {
+                try { Directory.Move(source, destination); return; }
+                catch (IOException ex) { last = ex; }
+                catch (UnauthorizedAccessException ex) { last = ex; }
+                Thread.Sleep(250);
+            }
+            throw new IOException("无法移动目录：" + source + " -> " + destination + "（" + (last == null ? "未知原因" : last.Message) + "）");
+        }
+
+        private static bool WaitForDirectoryUnlocked(string directory, int timeoutMilliseconds)
+        {
+            if (!Directory.Exists(directory)) return true;
+            DateTime until = DateTime.UtcNow.AddMilliseconds(timeoutMilliseconds);
+            while (DateTime.UtcNow < until)
+            {
+                string probe = Path.Combine(directory, ".rw-unlock-probe-" + Guid.NewGuid().ToString("N"));
+                try
+                {
+                    Directory.CreateDirectory(probe);
+                    Directory.Delete(probe);
+                    return true;
+                }
+                catch { try { if (Directory.Exists(probe)) Directory.Delete(probe, true); } catch { } }
+                Thread.Sleep(250);
+            }
+            return false;
         }
         private static void StartAndRefreshRainmeter(string exe, bool activate)
         {

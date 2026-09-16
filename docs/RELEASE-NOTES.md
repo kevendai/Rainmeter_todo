@@ -3,8 +3,8 @@
 ## 2.0.2 - 2026-09-16
 
 - 修复插件市场打开时报“市场不可用：传入的对象无效”的问题：索引改为下载原始字节并按 UTF-8 显式解码，不再依赖系统默认代码页，避免中文条目被写成乱码后落盘。只有解析成功的索引才会写入 `registry-cache.json`；缓存本身损坏时自动删除并回退内置 `plugin-registry-v1.json`，市场不会再被一份坏缓存永久卡住。
+- 修复 2.0.1/2.0.2 更新器替换皮肤目录时“对路径 Skins\Todo 的访问被拒绝”的问题：先把新版本文件暂存到独立事务目录、保留用户数据，再关闭 Rainmeter / TodoHost / CalendarHost / PluginHost，等待目录锁释放后才执行原子目录交换，交换带 30 秒重试；安装完成后自动重新启动 Rainmeter。
 - v1.3.5 继续沿用单跳兼容通道：`full` / `lite` 兼容包不含任何程序本体，只有空壳 `Install-Skins.ps1` 和兼容更新器；更新时直接下载并校验 2.0.2 正式包后安装。
-- 升级替换前关闭 Rainmeter 与 TodoHost / CalendarHost / PluginHost，只定向结束确认属于当前安装的进程；替换完成后刷新皮肤，失败时从 `.widgets-update-backup` 回滚。
 - 汇总此前未随任何版本发布的更新器加固：自更新与安装子进程检查退出码，失败时弹窗并写入 `Updater/last-error.log`；正式包改由随包的 `UpdaterHost.exe` 负责下载、TLS、SHA256 校验、安全解压与事务安装。
 ## 2.0.1 - 2026-09-14
 
