@@ -68,3 +68,8 @@ releases/v2.0.4/*
 !releases/v2.0.4/rainmeter-desktop-widgets-2.0.4.zip
 !releases/v2.0.4/rainmeter-desktop-widgets-full-2.0.4.zip
 !releases/v2.0.4/rainmeter-desktop-widgets-lite-2.0.4.zip
+!releases/v2.0.5/
+releases/v2.0.5/*
+!releases/v2.0.5/rainmeter-desktop-widgets-2.0.5.zip
+!releases/v2.0.5/rainmeter-desktop-widgets-full-2.0.5.zip
+!releases/v2.0.5/rainmeter-desktop-widgets-lite-2.0.5.zip
