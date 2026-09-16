@@ -1,5 +1,9 @@
 # Release Notes
 
+## 2.0.8 - 2026-09-16
+
+- 更新安装开始时立即关闭 Rainmeter、TodoHost、CalendarHost 和 PluginHost；安装完成后不自动重启，由用户手动启动，避免新进程重新锁住刚替换的皮肤文件。
+
 ## 2.0.7 - 2026-09-16
 
 - 修复更新前 Rainmeter 未真正退出的问题：先发送正常退出命令，若同路径进程仍存活，则只对确认属于当前 Rainmeter 安装的进程执行定向关闭/结束，避免它继续占用 `Skins\Todo`。

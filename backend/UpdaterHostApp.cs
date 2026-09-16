@@ -137,6 +137,12 @@ namespace RainmeterUpdater
             bool rainmeterWasRunning = false;
             try
             {
+                // Release every skin/host handle before staging or swapping
+                // directories.  The user can start Rainmeter manually after
+                // the update; restarting here would immediately re-lock the
+                // freshly installed files.
+                rainmeterWasRunning = IsExactProcessRunning("Rainmeter", rainmeterExe);
+                if (rainmeterWasRunning) StopRainmeter(rainmeterExe);
                 StopKnownHosts(roots.SkinsRoot);
                 StopManagedPluginProcesses();
                 RecoverInterruptedSkins(roots.SkinsRoot);
@@ -163,8 +169,6 @@ namespace RainmeterUpdater
                 }
                 CopyUpdaterFilesToStage(sourcePackageRoot, Path.Combine(transaction, "stage", "Todo", "@Resources", "Updater"));
                 VerifyPreserved(transaction, preserved, "stage");
-                rainmeterWasRunning = IsExactProcessRunning("Rainmeter", rainmeterExe);
-                if (rainmeterWasRunning) StopRainmeter(rainmeterExe);
                 foreach (string skin in new[] { "Todo", "Calendar" })
                 {
                     string target = Path.Combine(roots.SkinsRoot, skin), stage = Path.Combine(transaction, "stage", skin), backup = Path.Combine(transaction, "backup", skin);
@@ -174,14 +178,12 @@ namespace RainmeterUpdater
                 }
                 VerifyPreserved(roots.SkinsRoot, preserved, null);
                 ValidateInstalledHosts(roots.SkinsRoot, package.RequiresPluginHost);
-                StartAndRefreshRainmeter(rainmeterExe, activate);
                 TryDeleteDirectory(transaction);
             }
             catch
             {
                 RestorePluginState(pluginSnapshot);
                 RollbackSkins(roots.SkinsRoot, transaction, swapped);
-                if (rainmeterWasRunning && File.Exists(rainmeterExe)) TryStart(rainmeterExe, "");
                 throw;
             }
         }

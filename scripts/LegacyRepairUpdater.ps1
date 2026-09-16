@@ -4,7 +4,7 @@ param(
   [switch]$Activate, [int]$WaitForProcessId=0
 )
 $ErrorActionPreference='Stop'
-$release='v2.0.1'; $asset='rainmeter-desktop-widgets-2.0.7.zip'
+$release='v2.0.1'; $asset='rainmeter-desktop-widgets-2.0.8.zip'
 if($Mode -eq 'UpdateUpdater'){ exit 0 }
 $temp=Join-Path $env:TEMP ('RainmeterDesktopWidgetsRepair-'+[guid]::NewGuid().ToString('N'))
 $download=Join-Path $temp $asset; $extract=Join-Path $temp 'package'; $stage=Join-Path $env:TEMP ('RainmeterDesktopWidgetsRepairStage-'+[guid]::NewGuid().ToString('N'))
