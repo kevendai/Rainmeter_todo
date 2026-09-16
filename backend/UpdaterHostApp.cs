@@ -88,10 +88,12 @@ namespace RainmeterUpdater
                 string packageRoot = FindPackageRoot(extract);
                 string updater = Path.Combine(packageRoot, "Updater", "UpdaterHost.exe");
                 if (!File.Exists(updater)) throw new InvalidDataException("更新包中缺少 UpdaterHost.exe。");
-                Process child = Process.Start(new ProcessStartInfo(updater, BuildArguments("InstallPackage", packageRoot, options.RainmeterRoot, options.Activate) + " -WaitForProcessId " + Process.GetCurrentProcess().Id.ToString(CultureInfo.InvariantCulture)) { UseShellExecute = false, CreateNoWindow = false });
-                if (child == null) throw new InvalidOperationException("无法启动新版本更新器。");
-                child.Dispose();
-                temp = ""; // Detached child owns the extracted package.
+                using (Process child = Process.Start(new ProcessStartInfo(updater, BuildArguments("InstallPackage", packageRoot, options.RainmeterRoot, options.Activate) + " -WaitForProcessId " + Process.GetCurrentProcess().Id.ToString(CultureInfo.InvariantCulture)) { UseShellExecute = false, CreateNoWindow = false }))
+                {
+                    if (child == null) throw new InvalidOperationException("无法启动新版本更新器。");
+                    if (!child.WaitForExit(120000)) throw new TimeoutException("新版本更新器未在 2 分钟内完成。");
+                    if (child.ExitCode != 0) throw new InvalidOperationException("新版本更新器返回错误：" + child.ExitCode);
+                }
             }
             finally { TryDeleteDirectory(temp); }
         }
