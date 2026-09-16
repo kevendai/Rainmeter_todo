@@ -25,6 +25,7 @@ try {
     $fakePlugin = Join-Path $build 'FakePlugin.exe'
     $fakeProvider = Join-Path $build 'FakeProvider.exe'
     $providerProbe = Join-Path $build 'ProviderProbe.exe'
+    $paperBundleProbe = Join-Path $build 'PaperBundleProbe.exe'
     $dpiAssertions = Join-Path $tests 'DpiLayoutAssertions.cs'
     function Get-ProjectSources([string]$projectPath) {
         [xml]$projectXml = Get-Content -LiteralPath $projectPath -Raw -Encoding UTF8
@@ -66,6 +67,8 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'Fake provider compilation failed' }
     & $csc /nologo /target:exe /main:ProviderProbe /optimize+ @refs "/out:$providerProbe" @todoSources (Join-Path $tests 'ProviderProbe.cs')
     if ($LASTEXITCODE -ne 0) { throw 'Provider probe compilation failed' }
+    & $csc /nologo /target:exe /main:PaperBundleProbe /optimize+ @refs "/out:$paperBundleProbe" @todoSources (Join-Path $backend 'PaperBundle.cs') (Join-Path $tests 'PaperBundleProbe.cs')
+    if ($LASTEXITCODE -ne 0) { throw 'Paper bundle probe compilation failed' }
     $previousCommandDisable = $env:RAINMETER_COMMANDS_DISABLED
     $previousPluginRoot = $env:RAINMETER_PLUGIN_ROOT
     try {
@@ -91,6 +94,7 @@ try {
         & $arxivPlugin AddressStatusSelfTest;if($LASTEXITCODE -ne 0){throw "arXiv plugin address takeover tests failed with exit code $LASTEXITCODE"};Write-Host 'arXiv plugin SSDP address takeover and managed-state reporting passed'
         & $arxivPlugin PaperServiceSelfTest;if($LASTEXITCODE -ne 0){throw "Paper service tests failed with exit code $LASTEXITCODE"};Write-Host 'Paper service fatal-error fast fail and readable diagnostics passed'
         & $providerProbe;if($LASTEXITCODE -ne 0){throw "Provider probe failed with exit code $LASTEXITCODE"};Write-Host 'Provider manifest validation, binding resolution, broker error_kind/depth, cancel propagation and busy semantics passed'
+        & $paperBundleProbe;if($LASTEXITCODE -ne 0){throw "Paper bundle probe failed with exit code $LASTEXITCODE"};Write-Host 'PaperBundle v1 profile_hash normalization, tri-state validation and segmented score ranges passed'
         @{version=3;meta=@{};tasks=@()} | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path $build 'tasks.json') -Encoding UTF8
         $eventPath=Join-Path $build 'calendar-event.json';$firstResult=Join-Path $build 'calendar-result-1.json';$secondResult=Join-Path $build 'calendar-result-2.json'
         @{uid='meeting';occurrence_key='meeting#one';title='组会';start_at='2026-09-13T09:00:00+08:00';end_at='2026-09-13T10:00:00+08:00';reminder_at='2026-09-13T08:45:00+08:00';source='caldav';all_day=$false}|ConvertTo-Json -Depth 5|Set-Content -LiteralPath $eventPath -Encoding UTF8
