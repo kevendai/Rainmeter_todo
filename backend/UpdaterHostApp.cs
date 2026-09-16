@@ -24,9 +24,18 @@ namespace RainmeterUpdater
         private const long MaxArchiveBytes = 512L * 1024 * 1024;
         private const long MaxEntryBytes = 256L * 1024 * 1024;
         private const int MaxEntries = 8192;
+        // A parent updater hands this process the package it downloaded and then
+        // waits for us to exit.  Give it a moment to disappear on its own (that
+        // is what the pre-2.0.2 parents do) before we take over separately.
+        private const int HandoffGraceMilliseconds = 5000;
+        private const string WorkerDirectoryPrefix = "RainmeterDesktopWidgetsWorker-";
         private static readonly JavaScriptSerializer Json = new JavaScriptSerializer { MaxJsonLength = 8 * 1024 * 1024, RecursionLimit = 64 };
         private static readonly string LogRoot = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "RainmeterDesktopWidgets", "Updater");
         private static readonly string ErrorLog = Path.Combine(LogRoot, "last-error.log");
+        // Unattended runs (and the automated update-chain tests) must never block
+        // on a modal dialog; the switch and the environment variable are both
+        // honoured because an older parent cannot forward a flag it never knew.
+        private static bool Quiet;
 
         [STAThread]
         private static int Main(string[] args)
@@ -36,18 +45,27 @@ namespace RainmeterUpdater
                 ServicePointManager.SecurityProtocol |= (SecurityProtocolType)3072;
                 ServicePointManager.Expect100Continue = false;
                 Options options = Options.Parse(args);
+                Quiet = options.Quiet || IsTruthy(Environment.GetEnvironmentVariable("RW_UPDATER_QUIET"));
                 RelocateWorkingDirectory(options);
                 if (options.DelayMilliseconds > 0) Thread.Sleep(Math.Min(options.DelayMilliseconds, 10000));
                 if (options.Mode.Equals("SelfTest", StringComparison.OrdinalIgnoreCase)) return SelfTest();
                 if (options.Mode.Equals("UpdateUpdater", StringComparison.OrdinalIgnoreCase)) { UpdateUpdater(options); return 0; }
-                if (options.Mode.Equals("InstallPackage", StringComparison.OrdinalIgnoreCase)) { WaitForProcess(options.WaitForProcessId); InstallPackage(options.PackageRoot, options.RainmeterRoot, options.Activate, true); return 0; }
+                if (options.Mode.Equals("InstallPackage", StringComparison.OrdinalIgnoreCase))
+                {
+                    // Returns true when the work was handed to a detached copy of
+                    // this process; this one then exits so the parent can finish.
+                    if (DetachFromWaitingParent(options)) return 0;
+                    try { InstallPackage(options.PackageRoot, options.RainmeterRoot, options.Activate, true); }
+                    finally { TryDeleteWorkerPackage(options.PackageRoot); }
+                    return 0;
+                }
                 if (options.Mode.Equals("CheckAndInstall", StringComparison.OrdinalIgnoreCase)) { CheckAndInstall(options); return 0; }
                 throw new InvalidOperationException("Unknown updater mode: " + options.Mode);
             }
             catch (Exception ex)
             {
                 try { Directory.CreateDirectory(LogRoot); File.WriteAllText(ErrorLog, DateTimeOffset.Now.ToString("o") + "\r\n" + ex + "\r\n", new UTF8Encoding(false)); } catch { }
-                try { MessageBox.Show("更新失败：" + ex.Message + "\r\n\r\n错误日志：" + ErrorLog, "Rainmeter Desktop Widgets Update", MessageBoxButtons.OK, MessageBoxIcon.Error); } catch { }
+                if (!Quiet) try { MessageBox.Show("更新失败：" + ex.Message + "\r\n\r\n错误日志：" + ErrorLog, "Rainmeter Desktop Widgets Update", MessageBoxButtons.OK, MessageBoxIcon.Error); } catch { }
                 return 1;
             }
         }
@@ -67,6 +85,87 @@ namespace RainmeterUpdater
             try { Directory.SetCurrentDirectory(Path.GetTempPath()); } catch { }
         }
 
+        private static bool IsTruthy(string value)
+        {
+            value = (value ?? "").Trim();
+            return value.Equals("1", StringComparison.Ordinal) || value.Equals("true", StringComparison.OrdinalIgnoreCase) || value.Equals("yes", StringComparison.OrdinalIgnoreCase);
+        }
+
+        // Non-throwing "is that process still alive" probe: a pid that no longer
+        // exists simply means the handoff is already over.
+        private static bool ParentStillRunning(int pid, int milliseconds)
+        {
+            if (pid <= 0) return false;
+            try { using (Process process = Process.GetProcessById(pid)) return !process.WaitForExit(milliseconds); }
+            catch (ArgumentException) { return false; }
+            catch (InvalidOperationException) { return false; }
+        }
+
+        // Every released parent from 2.0.2 on waits for this process to exit (that
+        // is how it knows the install finished) and removes the download directory
+        // it unpacked us into afterwards.  Waiting for *it* deadlocks the pair until
+        // the handoff times out, which is what made a 2.0.2 install reject every
+        // 2.0.3 update.  Break the cycle instead: move our package out of the
+        // parent's directory, continue the install in a detached copy of ourselves,
+        // and exit so the parent can clean up and go away.  Parent versions that do
+        // not wait (1.4.x, 1.5.x, 2.0.0, 2.0.1 and the PowerShell launcher) are gone
+        // within the grace period, so nothing is detached for them.
+        private static bool DetachFromWaitingParent(Options options)
+        {
+            if (options.WaitForProcessId <= 0) return false;
+            if (String.IsNullOrWhiteSpace(options.PackageRoot) || !Directory.Exists(options.PackageRoot)) return false;
+            if (!File.Exists(Path.Combine(options.PackageRoot, "Updater", "UpdaterHost.exe"))) return false;
+            if (!ParentStillRunning(options.WaitForProcessId, HandoffGraceMilliseconds)) return false;
+            try
+            {
+                string work = Path.Combine(Path.GetTempPath(), WorkerDirectoryPrefix + Guid.NewGuid().ToString("N"));
+                string package = Path.Combine(work, "package");
+                Directory.CreateDirectory(work);
+                bool relocated = false;
+                if (IsInsideTemp(options.PackageRoot))
+                {
+                    // Same volume: a rename is instant and lets the parent delete its
+                    // own download directory without tripping over our running image.
+                    try { Directory.Move(options.PackageRoot.TrimEnd('\\'), package); relocated = true; }
+                    catch (IOException) { }
+                    catch (UnauthorizedAccessException) { }
+                }
+                if (!relocated) CopyDirectory(options.PackageRoot, package);
+                if (relocated) options.PackageRoot = package;
+                string worker = Path.Combine(package, "Updater", "UpdaterHost.exe");
+                if (!File.Exists(worker)) throw new InvalidDataException("更新包的 Updater 目录不完整。");
+                Process.Start(new ProcessStartInfo(worker, BuildArguments("InstallPackage", package, options.RainmeterRoot, options.Activate)) { UseShellExecute = true, WorkingDirectory = Path.GetTempPath() });
+                return true;
+            }
+            catch { return false; }
+        }
+
+        // Cleanup helper for the working copy DetachFromWaitingParent creates.  It
+        // refuses to touch anything that is not exactly that working copy, so a
+        // package root the user pointed us at can never be deleted by accident.
+        private static void TryDeleteWorkerPackage(string packageRoot)
+        {
+            try
+            {
+                if (String.IsNullOrWhiteSpace(packageRoot)) return;
+                string root = Path.GetFullPath(packageRoot).TrimEnd('\\');
+                if (!Path.GetFileName(root).Equals("package", StringComparison.OrdinalIgnoreCase)) return;
+                string owner = Path.GetDirectoryName(root);
+                if (String.IsNullOrEmpty(owner)) return;
+                if (!Path.GetFileName(owner).StartsWith(WorkerDirectoryPrefix, StringComparison.OrdinalIgnoreCase)) return;
+                if (!IsInsideTemp(owner)) return;
+                TryDeleteDirectory(Path.Combine(root, "Skins"));
+                TryDeleteDirectory(owner);
+            }
+            catch { }
+        }
+
+        private static bool IsInsideTemp(string path)
+        {
+            try { return FullDirectory(path).StartsWith(FullDirectory(Path.GetTempPath()), StringComparison.OrdinalIgnoreCase); }
+            catch { return false; }
+        }
+
         private static int SelfTest()
         {
             string root = Path.Combine(Path.GetTempPath(), "rw-updater-selftest-" + Guid.NewGuid().ToString("N"));
@@ -77,6 +176,20 @@ namespace RainmeterUpdater
                 string candidate = ZipArchiveReader.SafeDestination(root, "folder/file.txt");
                 if (!candidate.StartsWith(FullDirectory(root), StringComparison.OrdinalIgnoreCase)) return 3;
                 try { ZipArchiveReader.SafeDestination(root, "../escape"); return 4; } catch (InvalidDataException) { }
+                if (ParentStillRunning(0, 10)) return 5;
+                if (!ParentStillRunning(Process.GetCurrentProcess().Id, 10)) return 6;
+                // The worker cleanup must never touch a package root we were pointed
+                // at, but must remove the working copy we created for ourselves.
+                string foreign = Path.Combine(root, "not-a-worker", "package");
+                Directory.CreateDirectory(foreign);
+                File.WriteAllText(Path.Combine(foreign, "keep.txt"), "keep", Encoding.UTF8);
+                TryDeleteWorkerPackage(foreign);
+                if (!File.Exists(Path.Combine(foreign, "keep.txt"))) return 7;
+                string worker = Path.Combine(root, WorkerDirectoryPrefix + "probe", "package");
+                Directory.CreateDirectory(worker);
+                File.WriteAllText(Path.Combine(worker, "gone.txt"), "gone", Encoding.UTF8);
+                TryDeleteWorkerPackage(worker);
+                if (Directory.Exists(Path.GetDirectoryName(worker))) return 8;
                 return 0;
             }
             finally { TryDeleteDirectory(root); }
@@ -89,10 +202,10 @@ namespace RainmeterUpdater
             int comparison = CompareVersions(latestVersion, options.CurrentVersion);
             if (comparison <= 0)
             {
-                MessageBox.Show(comparison == 0 ? "已经是最新版本：" + latestTag : "当前版本比最新发布版更新。", "Rainmeter Desktop Widgets", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                if (!Quiet) MessageBox.Show(comparison == 0 ? "已经是最新版本：" + latestTag : "当前版本比最新发布版更新。", "Rainmeter Desktop Widgets", MessageBoxButtons.OK, MessageBoxIcon.Information);
                 return;
             }
-            if (!options.AssumeYes && MessageBox.Show("发现新版本 " + latestTag + "。\r\n\r\n现在下载并安装吗？Rainmeter 将重新启动。", "Rainmeter Desktop Widgets Update", MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes) return;
+            if (!options.AssumeYes && !Quiet && MessageBox.Show("发现新版本 " + latestTag + "。\r\n\r\n现在下载并安装吗？Rainmeter 将重新启动。", "Rainmeter Desktop Widgets Update", MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes) return;
             string asset = "rainmeter-desktop-widgets-" + latestVersion + ".zip";
             string temp = Path.Combine(Path.GetTempPath(), "RainmeterDesktopWidgetsUpdate-" + Guid.NewGuid().ToString("N"));
             string zip = Path.Combine(temp, asset);
@@ -552,14 +665,12 @@ namespace RainmeterUpdater
         private static string NormalizeVersion(string value) { value = (value ?? "").Trim(); if (value.StartsWith("v", StringComparison.OrdinalIgnoreCase)) value = value.Substring(1); Match m = Regex.Match(value, @"\d+(?:\.\d+){0,3}"); return m.Success ? m.Value : value; }
         private static int CompareVersions(string left, string right) { int[] a = NormalizeVersion(left).Split('.').Select(ParseInt).ToArray(), b = NormalizeVersion(right).Split('.').Select(ParseInt).ToArray(); for (int i = 0; i < Math.Max(a.Length, b.Length); i++) { int av = i < a.Length ? a[i] : 0, bv = i < b.Length ? b[i] : 0; if (av != bv) return av.CompareTo(bv); } return 0; }
         private static int ParseInt(string value) { int result; return Int32.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out result) ? result : 0; }
-        private static string BuildArguments(string mode, string package, string root, bool activate) { return "-Mode " + mode + " -PackageRoot \"" + package.Replace("\"", "\\\"") + "\" -RainmeterRoot \"" + (root ?? "").Replace("\"", "\\\"") + "\"" + (activate ? " -Activate" : ""); }
-
-        private static void WaitForProcess(int pid) { if (pid <= 0) return; try { using (Process process = Process.GetProcessById(pid)) { if (!process.WaitForExit(30000)) throw new TimeoutException("更新器进程交接超时。"); } } catch (ArgumentException) { } }
+        private static string BuildArguments(string mode, string package, string root, bool activate) { return "-Mode " + mode + " -PackageRoot \"" + package.Replace("\"", "\\\"") + "\" -RainmeterRoot \"" + (root ?? "").Replace("\"", "\\\"") + "\"" + (activate ? " -Activate" : "") + (Quiet ? " -Quiet" : ""); }
 
         private sealed class Options
         {
-            public string Mode = "InstallPackage", Repository = "kevendai/Rainmeter_todo", CurrentVersion = "", PackageRoot = "", RainmeterRoot = ""; public bool Activate, AssumeYes; public int WaitForProcessId, DelayMilliseconds;
-            public static Options Parse(string[] args) { var o = new Options(); for (int i = 0; i < args.Length; i++) { string key = args[i].TrimStart('-', '/'); string value = i + 1 < args.Length && !args[i + 1].StartsWith("-") ? args[++i] : null; switch (key.ToLowerInvariant()) { case "mode": o.Mode = value ?? o.Mode; break; case "repository": o.Repository = value ?? o.Repository; break; case "currentversion": o.CurrentVersion = value ?? ""; break; case "packageroot": o.PackageRoot = value ?? ""; break; case "rainmeterroot": o.RainmeterRoot = value ?? ""; break; case "activate": o.Activate = true; if (value != null) i--; break; case "assumeyes": o.AssumeYes = true; if (value != null) i--; break; case "waitforprocessid": Int32.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out o.WaitForProcessId); break; case "delaymilliseconds": Int32.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out o.DelayMilliseconds); break; } } return o; }
+            public string Mode = "InstallPackage", Repository = "kevendai/Rainmeter_todo", CurrentVersion = "", PackageRoot = "", RainmeterRoot = ""; public bool Activate, AssumeYes, Quiet; public int WaitForProcessId, DelayMilliseconds;
+            public static Options Parse(string[] args) { var o = new Options(); for (int i = 0; i < args.Length; i++) { string key = args[i].TrimStart('-', '/'); string value = i + 1 < args.Length && !args[i + 1].StartsWith("-") ? args[++i] : null; switch (key.ToLowerInvariant()) { case "mode": o.Mode = value ?? o.Mode; break; case "repository": o.Repository = value ?? o.Repository; break; case "currentversion": o.CurrentVersion = value ?? ""; break; case "packageroot": o.PackageRoot = value ?? ""; break; case "rainmeterroot": o.RainmeterRoot = value ?? ""; break; case "activate": o.Activate = true; if (value != null) i--; break; case "assumeyes": o.AssumeYes = true; if (value != null) i--; break; case "quiet": o.Quiet = true; if (value != null) i--; break; case "waitforprocessid": Int32.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out o.WaitForProcessId); break; case "delaymilliseconds": Int32.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out o.DelayMilliseconds); break; } } return o; }
         }
 
     }
