@@ -24,6 +24,8 @@ namespace RainmeterBackend
         public static string Logs { get { return Path.Combine(Root, "PluginLogs"); } }
         public static string Values { get { return Path.Combine(Root, "PluginValues.json"); } }
         public static string RegistryCache { get { return Path.Combine(Root, "registry-cache.json"); } }
+        // 跨插件服务绑定表（宿主独占写入，插件不可见）。
+        public static string Bindings { get { return Path.Combine(Root, "plugin-bindings.json"); } }
         public static void Ensure() { foreach (string p in new[] { Root, Plugins, Data, Jobs, Logs }) Directory.CreateDirectory(p); }
         public static string PluginRoot(string id) { return Path.Combine(Plugins, id); }
         public static string VersionRoot(string id, string version) { return Path.Combine(PluginRoot(id), "versions", version); }
@@ -32,13 +34,17 @@ namespace RainmeterBackend
 
     internal sealed class PluginManifest
     {
-        public string Id, Name, Version, MinHostVersion, Entry, SettingsSchema, Homepage, AddressValueKey, AddressTarget;
+        public string Id, Name, Version, MinHostVersion, Entry, SettingsSchema, Homepage, AddressValueKey, AddressTarget, Billing;
         public int ApiVersion, AddressPriority;
         public bool DefaultEnabled;
         public List<string> Capabilities = new List<string>();
         public List<string> Permissions = new List<string>();
         public List<string> AddressTargets = new List<string>();
         public List<Dictionary<string,object>> Actions = new List<Dictionary<string,object>>();
+        // v2.1：插件能提供的服务（provides）与它需要的服务（uses）。与 capabilities 语义不同：
+        // capabilities 是"宿主可以主动执行的入口"，provides 是"给别的插件用的服务"。
+        public List<string> Provides = new List<string>();
+        public List<ServiceUse> Uses = new List<ServiceUse>();
 
         public static PluginManifest Load(string root)
         {
@@ -49,10 +55,18 @@ namespace RainmeterBackend
                 Id=JsonUtil.String(v,"id",""), Name=JsonUtil.String(v,"name",""), Version=JsonUtil.String(v,"version",""),
                 ApiVersion=JsonUtil.Int(v,"api_version",0), MinHostVersion=JsonUtil.String(v,"min_host_version",""),
                 Entry=JsonUtil.String(v,"entry",""), SettingsSchema=JsonUtil.String(v,"settings_schema",""),
-                Homepage=JsonUtil.String(v,"homepage",""), DefaultEnabled=JsonUtil.Bool(v,"default_enabled",false)
+                Homepage=JsonUtil.String(v,"homepage",""), DefaultEnabled=JsonUtil.Bool(v,"default_enabled",false),
+                Billing=JsonUtil.String(v,"billing","")
             };
             m.Capabilities=JsonUtil.Array(JsonUtil.Get(v,"capabilities")).Select(Convert.ToString).Where(x=>!String.IsNullOrWhiteSpace(x)).ToList();
             m.Permissions=JsonUtil.Array(JsonUtil.Get(v,"permissions")).Select(Convert.ToString).Where(x=>!String.IsNullOrWhiteSpace(x)).ToList();
+            m.Provides=JsonUtil.Array(JsonUtil.Get(v,"provides")).Select(Convert.ToString).Where(x=>!String.IsNullOrWhiteSpace(x)).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+            foreach(object raw in JsonUtil.Array(JsonUtil.Get(v,"uses")))
+            {
+                Dictionary<string,object> item=JsonUtil.Object(raw);if(item.Count==0)continue;
+                string service=JsonUtil.String(item,"service","").Trim();
+                m.Uses.Add(new ServiceUse{Service=service,BindingKey=JsonUtil.String(item,"binding_key",ServiceRegistry.KeyOf(service)).Trim(),Optional=JsonUtil.Bool(item,"optional",true)});
+            }
             m.Actions=JsonUtil.Array(JsonUtil.Get(v,"actions")).Select(JsonUtil.Object).ToList();Dictionary<string,object> address=JsonUtil.Object(JsonUtil.Get(v,"address_provider"));m.AddressPriority=JsonUtil.Int(address,"priority",0);m.AddressValueKey=JsonUtil.String(address,"value","");m.AddressTargets=JsonUtil.Array(JsonUtil.Get(address,"targets")).Select(Convert.ToString).Where(x=>!String.IsNullOrWhiteSpace(x)).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
             m.AddressTarget=JsonUtil.String(v,"address_target","").Trim();
             m.Validate(root); return m;
@@ -66,7 +80,17 @@ namespace RainmeterBackend
             if(!Regex.IsMatch(MinHostVersion??"",@"^\d+\.\d+\.\d+$")||CompareVersion(MinHostVersion,PluginRuntime.HostVersion)>0)throw new InvalidDataException("插件要求更高版本的宿主");
             if(String.IsNullOrWhiteSpace(Name))throw new InvalidDataException("插件名称不能为空");
             HashSet<string> allowed=new HashSet<string>(new[]{"todo_source","todo_transform","value_provider"},StringComparer.OrdinalIgnoreCase);
-            if(Capabilities.Count==0||Capabilities.Any(x=>!allowed.Contains(x)))throw new InvalidDataException("插件 capability 无效");if(AddressTargets.Count>0&&(!Capabilities.Contains("value_provider")||!Regex.IsMatch(AddressValueKey??"",@"^[A-Za-z0-9_.-]{1,80}$")))throw new InvalidDataException("地址提供者声明无效");
+            // capabilities 可以为空（纯 Provider 插件），但"能被宿主调用"与"能提供服务"至少要有一样。
+            if(Capabilities.Count==0&&Provides.Count==0)throw new InvalidDataException("插件既无 capability 也不提供任何服务");
+            if(Capabilities.Any(x=>!allowed.Contains(x)))throw new InvalidDataException("插件 capability 无效");
+            if(Provides.Any(x=>!ServiceRegistry.ValidService(x)))throw new InvalidDataException("插件 provides 声明无效");
+            foreach(ServiceUse use in Uses)
+            {
+                if(!ServiceRegistry.ValidService(use.Service))throw new InvalidDataException("插件 uses 声明无效");
+                if(!ServiceRegistry.ValidBindingKey(use.BindingKey))throw new InvalidDataException("插件 uses 的 binding_key 无效");
+            }
+            if(Uses.Select(x=>x.BindingKey).Distinct(StringComparer.OrdinalIgnoreCase).Count()!=Uses.Count)throw new InvalidDataException("插件 uses 的 binding_key 重复");
+            if(AddressTargets.Count>0&&(!Capabilities.Contains("value_provider")||!Regex.IsMatch(AddressValueKey??"",@"^[A-Za-z0-9_.-]{1,80}$")))throw new InvalidDataException("地址提供者声明无效");
             if(!String.IsNullOrEmpty(AddressTarget)&&!Regex.IsMatch(AddressTarget,@"^[a-z0-9]+(?:[._-][a-z0-9]+)+$"))throw new InvalidDataException("插件 address_target 格式无效");
             if(!File.Exists(SafeChildPath(root,Entry,"插件入口")))throw new InvalidDataException("插件入口不存在");
             if(!String.IsNullOrWhiteSpace(SettingsSchema)&&!File.Exists(SafeChildPath(root,SettingsSchema,"设置 Schema")))throw new InvalidDataException("设置 Schema 不存在");
@@ -86,13 +110,37 @@ namespace RainmeterBackend
     internal sealed class PluginCallResult
     {
         public bool Ok;
+        // "ok"（缺省即旧插件语义）| "attention"（正式协议结果：等用户决定，不是失败，见规格 §4.3/§5）。
+        public string Status="ok";
         public Dictionary<string,object> Payload=new Dictionary<string,object>();
         public string Error="";
+    }
+
+    // 单飞锁拒绝第二个同步时抛这个。调用方**不得**把它渲染成失败（规格 §4.7）：
+    // 用户手快双击时正在跑的那个 job 必须保持 running。
+    internal sealed class PluginBusyException : Exception
+    {
+        public PluginBusyException(string message) : base(message) { }
     }
 
     internal static class PluginRuntime
     {
         public static readonly string HostVersion = LoadHostVersion();
+
+        // 宿主→插件上下文变量。规格 §4.4：Caller identity 只来自这些变量，请求 JSON 里不许出现 provider_id。
+        public const string PluginIdVariable="RW_PLUGIN_ID";
+        public const string JobIdVariable="RW_PLUGIN_JOB_ID";
+        public const string HostExeVariable="RW_PLUGIN_HOST_EXE";
+        public const string ParentPidVariable="RW_PLUGIN_PID";
+        public const string DepthVariable="RW_SERVICE_CALL_DEPTH";
+
+        // 本次 job 的 uuid，由 PluginHostApp 在起 job 时赋值；空 = 该次调用不参与取消传播。
+        public static string CurrentJobId="";
+
+        // Broker 入口（跨插件调用的唯一通道）。PluginRuntime 只跑在 PluginHost.exe 里，
+        // 所以这永远是宿主目录下的 PluginHost.exe；插件拿到全路径后即可回调宿主。
+        public static string BrokerHostExe { get { return Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"PluginHost.exe"); } }
+
         private const int MaxLineChars=1024*1024,MaxOutputChars=4*1024*1024,MaxLogChars=1024*1024;
         private static string LoadHostVersion(){string path=Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"app-version.txt");if(File.Exists(path)){string value=File.ReadAllText(path,Encoding.UTF8).Trim();if(Regex.IsMatch(value,@"^\d+\.\d+\.\d+$"))return value;}return "0.0.0";}
         public static Dictionary<string,object> Current(string id){string p=Path.Combine(PluginPaths.PluginRoot(id),"current.json");return File.Exists(p)?JsonUtil.LoadObject(p):new Dictionary<string,object>();}
@@ -120,19 +168,36 @@ namespace RainmeterBackend
 
         public static PluginCallResult Invoke(string id,string action,object input,string trigger,int timeoutSeconds,Action<Dictionary<string,object>> progress)
         {
+            return Invoke(id,action,input,trigger,timeoutSeconds,progress,null);
+        }
+
+        // extraEnvironment：Broker 调用 provider 时用来"剔除 RW_PLUGIN_HOST_EXE + 注入 depth"，
+        // 值传 null 表示把该键从子环境块里删掉（否则会随环境块继承下去）。
+        public static PluginCallResult Invoke(string id,string action,object input,string trigger,int timeoutSeconds,Action<Dictionary<string,object>> progress,Dictionary<string,string> extraEnvironment)
+        {
             PluginPaths.Ensure();bool settingsAction=String.Equals(action,"validate_settings",StringComparison.OrdinalIgnoreCase)||String.Equals(action,"configure_account",StringComparison.OrdinalIgnoreCase)||String.Equals(action,"configure_discovery",StringComparison.OrdinalIgnoreCase);PluginManifest m=Resolve(id,!settingsAction);string root=PluginPaths.VersionRoot(id,m.Version);
             string entry=PluginManifest.SafeChildPath(root,m.Entry,"插件入口"),requestId=Guid.NewGuid().ToString("N");
             // 本体不向插件注入任何地址：声明了 address_target 的插件自己决定用哪个地址
             // （通过 DynamicPluginValues.AddressProvider 向地址插件申请，并自行记录是否被接管）。
             // 这里只做用户自己写的 {{plugin:...}} 占位符替换，不再替插件绑定/改写地址。
             Dictionary<string,object> resolvedConfig=ReadObject(Path.Combine(PluginPaths.DataRoot(id),"config.json"));DynamicPluginValues.ResolveObject(resolvedConfig);
+            // 跨插件服务解析（规格 §3）：唯一候选自动绑定并落 plugin-bindings.json，
+            // 绑定失效/多候选一律视为"没有该 provider"（不回落、不按顺序挑）。
+            List<ServiceResolution> services=ServiceRegistry.ResolveAll(id,m.Uses,true);
+            Dictionary<string,object> context=new Dictionary<string,object>{{"host_version",HostVersion},{"locale",CultureInfo.CurrentUICulture.Name},{"now",DateTimeOffset.Now.ToString("o",CultureInfo.InvariantCulture)},{"trigger",trigger??"manual"}};
+            if(services.Count>0)context["services"]=ServiceRegistry.ToContextServices(services);
             Dictionary<string,object> request=new Dictionary<string,object>{
                 {"api_version",1},{"request_id",requestId},{"plugin_id",id},{"action",action},
-                {"context",new Dictionary<string,object>{{"host_version",HostVersion},{"locale",CultureInfo.CurrentUICulture.Name},{"now",DateTimeOffset.Now.ToString("o",CultureInfo.InvariantCulture)},{"trigger",trigger??"manual"}}},
+                {"context",context},
                 {"config",resolvedConfig},{"secret",ReadSecret(Path.Combine(PluginPaths.DataRoot(id),"secret.dat"))},{"input",input??new Dictionary<string,object>()}};
             List<string> lines=new List<string>();StringBuilder errors=new StringBuilder();object gate=new object();Exception progressError=null;
             ProcessStartInfo info=new ProcessStartInfo(entry){WorkingDirectory=root,UseShellExecute=false,CreateNoWindow=true,RedirectStandardInput=true,RedirectStandardOutput=true,RedirectStandardError=true};
-            ApplyPluginEnvironment(info,PluginPaths.DataRoot(id),UiScale.Current.ToString("0.###",CultureInfo.InvariantCulture));
+            Dictionary<string,string> environment=new Dictionary<string,string>(StringComparer.OrdinalIgnoreCase){
+                {PluginIdVariable,id},{JobIdVariable,CurrentJobId??""},{HostExeVariable,BrokerHostExe},{ParentPidVariable,Process.GetCurrentProcess().Id.ToString(CultureInfo.InvariantCulture)}};
+            foreach(KeyValuePair<string,string> pair in ServiceRegistry.ToEnvironment(services))environment[pair.Key]=pair.Value;
+            if(extraEnvironment!=null)foreach(KeyValuePair<string,string> pair in extraEnvironment)environment[pair.Key]=pair.Value;
+            ApplyPluginEnvironment(info,PluginPaths.DataRoot(id),UiScale.Current.ToString("0.###",CultureInfo.InvariantCulture),environment);
+
             using(Process p=new Process{StartInfo=info,EnableRaisingEvents=true})
             {
                 int total=0;
@@ -153,7 +218,8 @@ namespace RainmeterBackend
                     if(type=="progress")continue;
                     if(type!="result")throw new InvalidDataException("未知插件响应类型");
                     if(result!=null)throw new InvalidDataException("插件返回了多个最终结果");
-                    result=new PluginCallResult{Ok=JsonUtil.Bool(msg,"ok",false),Payload=JsonUtil.Object(JsonUtil.Get(msg,"payload")),Error=JsonUtil.String(msg,"error","")};
+                    string status=JsonUtil.String(msg,"status","ok").Trim();
+                    result=new PluginCallResult{Ok=JsonUtil.Bool(msg,"ok",false),Status=status==""?"ok":status,Payload=JsonUtil.Object(JsonUtil.Get(msg,"payload")),Error=JsonUtil.String(msg,"error","")};
                 }
                 if(result==null)throw new InvalidDataException("插件未返回最终结果");
                 if(result.Ok){ApplyConfigUpdates(id,result.Payload);ApplySecretUpdates(id,result.Payload);}
@@ -171,12 +237,21 @@ namespace RainmeterBackend
         // 反射不可用时退回官方属性。
         internal static void ApplyPluginEnvironment(ProcessStartInfo info,string dataDir,string windowScale)
         {
-            StringDictionary environment=BuildChildEnvironment(Environment.GetEnvironmentVariables(),dataDir,windowScale);
+            ApplyPluginEnvironment(info,dataDir,windowScale,null);
+        }
+
+        internal static void ApplyPluginEnvironment(ProcessStartInfo info,string dataDir,string windowScale,Dictionary<string,string> extra)
+        {
+            StringDictionary environment=BuildChildEnvironment(Environment.GetEnvironmentVariables(),dataDir,windowScale,extra);
             if(environment!=null&&TryAssignEnvironment(info,environment))return;
             try
             {
                 info.EnvironmentVariables["RW_PLUGIN_DATA_DIR"]=dataDir;
                 info.EnvironmentVariables["RW_WINDOW_SCALE"]=windowScale;
+                if(extra!=null)foreach(KeyValuePair<string,string> pair in extra)
+                {
+                    if(pair.Value==null)info.EnvironmentVariables.Remove(pair.Key);else info.EnvironmentVariables[pair.Key]=pair.Value;
+                }
             }
             catch(ArgumentException ex){throw new InvalidOperationException("无法为插件进程构造环境变量，宿主环境块中存在大小写重复的变量名",ex);}
         }
@@ -184,6 +259,13 @@ namespace RainmeterBackend
         // 同名不同大小写只保留最先出现的一项，与 Windows 解析环境变量的顺序一致，
         // 因此子进程拿到的值与直接继承父进程时完全相同。
         internal static StringDictionary BuildChildEnvironment(IDictionary source,string dataDir,string windowScale)
+        {
+            return BuildChildEnvironment(source,dataDir,windowScale,null);
+        }
+
+        // extra 里值为 null = 显式剔除该键。Broker 用它把 RW_PLUGIN_HOST_EXE 从 provider 的环境块里拿掉，
+        // 让 provider 物理上找不到宿主入口（规格 §4.4 的 depth=1 机制保障）。
+        internal static StringDictionary BuildChildEnvironment(IDictionary source,string dataDir,string windowScale,Dictionary<string,string> extra)
         {
             try
             {
@@ -195,6 +277,11 @@ namespace RainmeterBackend
                 }
                 if(!String.IsNullOrEmpty(dataDir))environment["RW_PLUGIN_DATA_DIR"]=dataDir;
                 if(!String.IsNullOrEmpty(windowScale))environment["RW_WINDOW_SCALE"]=windowScale;
+                if(extra!=null)foreach(KeyValuePair<string,string> pair in extra)
+                {
+                    if(String.IsNullOrEmpty(pair.Key))continue;
+                    if(pair.Value==null)environment.Remove(pair.Key);else environment[pair.Key]=pair.Value;
+                }
                 return environment;
             }
             catch(Exception){return null;}

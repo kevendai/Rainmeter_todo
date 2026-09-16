@@ -1,15 +1,24 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Text;
+using System.Text.RegularExpressions;
 using System.Threading;
 using RainmeterBackend;
 
 internal static class PluginHostApp
 {
     private static string ActivePluginId="";
+
+    // Broker 请求文件的顶层键白名单：多一个都拒（规格 §4.4）。请求里**不许**出现
+    // provider_id / consumer / binding_key —— 插件只能报 service 名，provider 由宿主按绑定解析。
+    private static readonly HashSet<string> ServiceRequestKeys=new HashSet<string>(new[]{"protocol","request_id","service","action","input","timeout_seconds"},StringComparer.OrdinalIgnoreCase);
+    private const long MaxServiceRequestBytes=1024L*1024L;
+    private const int DefaultServiceTimeout=600,MinServiceTimeout=2,MaxServiceTimeout=1800;
+
     private static int Main(string[] args)
     {
         try
@@ -23,7 +32,10 @@ internal static class PluginHostApp
             if (action == "QueryTasks") return QueryTasks(baseDir,args);
             if (action == "SyncAll") return SyncAll(baseDir,args.Length>1?args[1]:"manual");
             if (action == "ValuesAll") return ValuesAll(baseDir,args.Length>1?args[1]:"startup");
-            if (action == "Cancel") return CancelPlugin(args.Length>1?args[1]:"");
+            if (action == "Cancel") return CancelPlugin(args.Length>1?args[1]:"",args.Length>2?args[2]:"user_cancelled");
+            // 两种写法都收：`ServiceCall <requestFile> <outputFile>` 与规格 §4.1 的
+            // `-Mode ServiceCall -RequestFile <path> [-OutputFile <path>]`。
+            if (action == "ServiceCall" || String.Equals(action,"-Mode",StringComparison.OrdinalIgnoreCase)) return ServiceCallCommand(args);
             if (args.Length < 2) throw new ArgumentException("缺少插件 ID");
             string id = args[1];
             ActivePluginId=id;
@@ -33,27 +45,81 @@ internal static class PluginHostApp
             bool sync=action=="Sync"||action=="SyncAuto";
             int timeout = sync||custom ? 1800 : id==DynamicPluginValues.SsdpPluginId ? 90 : 30;
             string pluginAction = custom?(args.Length>2?args[2]:""):sync ? "sync" : action == "Transform" ? "transform" : action == "Values" ? "get_values" : action;
-            WriteJobState(id,"running",0,0,"正在运行");
-            PluginCallResult result = InvokeLocked(id,pluginAction,input,action == "SyncAuto" ? "startup" : sync ? "manual" : "host",timeout,sync,ThrottledProgress(id,baseDir));
-            string addressTarget=PluginRuntime.AddressTargetOf(id);AddressProviderBinding addressProvider=sync&&addressTarget!=""?DynamicPluginValues.AddressProvider(addressTarget):null;if(addressProvider!=null&&!result.Ok){PluginCallResult refreshed=RefreshAddressProvider(baseDir,addressProvider);if(refreshed.Ok)result=InvokeLocked(id,pluginAction,input,action=="SyncAuto"?"startup":"manual",timeout,sync,ThrottledProgress(id,baseDir));else result.Error=result.Error+"；"+addressProvider.PluginName+" 重新发现失败："+refreshed.Error+"。服务器可能已关机或故障。";}
-            Dictionary<string, object> response = new Dictionary<string, object>{{"ok",result.Ok},{"payload",result.Payload},{"error",result.Error}};
-            if (action == "Values" || (custom && pluginAction == "configure_discovery" && JsonUtil.Object(JsonUtil.Get(result.Payload,"values")).Count>0)) { UpdateValues(baseDir, id, result); if(result.Ok&&custom&&pluginAction=="configure_discovery")SetPluginEnabled(id,true); }
-            bool importsTasks=sync||(custom&&pluginAction=="rescore");
-            if (result.Ok && (importsTasks || action == "Transform"))
+            string jobId=Guid.NewGuid().ToString("N");
+            PluginCallResult result;
+            try
             {
-                IEnumerable<Dictionary<string, object>> drafts;
-                if (action == "Transform" && JsonUtil.Get(result.Payload, "task") is Dictionary<string, object>)
-                    drafts = new[] { JsonUtil.Object(JsonUtil.Get(result.Payload, "task")) };
-                else
-                    drafts = JsonUtil.Array(JsonUtil.Get(result.Payload, "tasks")).Select(JsonUtil.Object);
-                response["import"] = TodoExternalImport.Import(Path.Combine(baseDir, "tasks.json"), id, drafts);
-                if (importsTasks) RefreshTodo(baseDir);
+                result=InvokeLocked(id,pluginAction,input,action == "SyncAuto" ? "startup" : sync ? "manual" : "host",timeout,sync,ThrottledProgress(id,baseDir),delegate{StartJob(id,jobId);});
+            }
+            catch(PluginBusyException)
+            {
+                // 规格 §4.7：单飞锁拒绝第二个请求时，正在跑的那个 job 必须保持 running。
+                // 这里**一个字节都不写** job 文件（连 message 也不改），避免踩坏在跑的任务。
+                Console.Error.WriteLine("该插件已有同步任务正在运行");
+                return 0;
+            }
+            string addressTarget=PluginRuntime.AddressTargetOf(id);AddressProviderBinding addressProvider=sync&&addressTarget!=""?DynamicPluginValues.AddressProvider(addressTarget):null;if(addressProvider!=null&&!result.Ok){PluginCallResult refreshed=RefreshAddressProvider(baseDir,addressProvider);if(refreshed.Ok)result=InvokeLocked(id,pluginAction,input,action=="SyncAuto"?"startup":"manual",timeout,sync,ThrottledProgress(id,baseDir),null);else result.Error=result.Error+"；"+addressProvider.PluginName+" 重新发现失败："+refreshed.Error+"。服务器可能已关机或故障。";}
+            Dictionary<string, object> response = new Dictionary<string, object>{{"ok",result.Ok},{"status",result.Status},{"payload",result.Payload},{"error",result.Error}};
+            Dictionary<string,object> attention=AttentionOf(result);
+            if(JobHasState(id,"cancelled"))
+            {
+                // 规格 §4.6-6「取消后不得续跑」：插件被杀的瞬间可能已经把结果写出来了，
+                // 这里必须整体丢弃 —— 不导入 Todo、不写终态（否则会把 CancelPlugin 写的
+                // cancelled 覆盖成 completed，用户看到"取消失败"）。
+                Console.Error.WriteLine("任务已被取消，忽略本轮结果");
+                response["cancelled"]=true;
+            }
+            else if(attention!=null)
+            {
+                // 规格 §5.2：插件带着 attention 正常退出，宿主把它写进 job，等用户在磁贴上点按钮。
+                // 这一轮 0 次外部 API 调用、0 个 Todo。
+                WriteJob(id,new Dictionary<string,object>{
+                    {"state","attention"},{"attention",attention},
+                    {"message",JsonUtil.String(attention,"message","需要你的确认")},
+                    {"current",0},{"total",0},
+                    {"resume_action",JsonUtil.String(attention,"resume_action","")},
+                    {"resume_input",JsonUtil.Object(JsonUtil.Get(attention,"resume_input"))}});
+            }
+            else
+            {
+                if (action == "Values" || (custom && pluginAction == "configure_discovery" && JsonUtil.Object(JsonUtil.Get(result.Payload,"values")).Count>0)) { UpdateValues(baseDir, id, result); if(result.Ok&&custom&&pluginAction=="configure_discovery")SetPluginEnabled(id,true); }
+                bool importsTasks=sync||ActionImportsTasks(id,pluginAction);
+                if (result.Ok && !JobHasState(id,"cancelled") && (importsTasks || action == "Transform"))
+                {
+                    IEnumerable<Dictionary<string, object>> drafts;
+                    if (action == "Transform" && JsonUtil.Get(result.Payload, "task") is Dictionary<string, object>)
+                        drafts = new[] { JsonUtil.Object(JsonUtil.Get(result.Payload, "task")) };
+                    else
+                        drafts = JsonUtil.Array(JsonUtil.Get(result.Payload, "tasks")).Select(JsonUtil.Object);
+                    response["import"] = TodoExternalImport.Import(Path.Combine(baseDir, "tasks.json"), id, drafts);
+                    if (importsTasks) RefreshTodo(baseDir);
+                }
+                WriteTerminalState(id,result.Ok?"completed":"failed",result.Ok?1:0,1,result.Ok?JsonUtil.String(result.Payload,"summary","已完成"):result.Error);
             }
             if (outputPath != "") JsonUtil.SaveAtomic(outputPath, response); else Console.Out.WriteLine(JsonUtil.Serialize(response));
-            WriteJobState(id,result.Ok?"completed":"failed",result.Ok?1:0,1,result.Ok?JsonUtil.String(result.Payload,"summary","已完成"):result.Error);
             return result.Ok ? 0 : 1;
         }
         catch (Exception ex) { try {if(ActivePluginId!="")WriteFailureUnlessCancelled(ActivePluginId,ex.Message);Console.Error.WriteLine(ex.ToString()); } catch { } return 1; }
+    }
+
+    // 哪些 action 的结果要导入 Todo。原来硬编码 "rescore"（2.0.4 及更早），现在改成数据驱动：
+    // manifest 的 action 里标 "imports_tasks": true 即生效（旧值保留以兼容已发布的插件）。
+    private static bool ActionImportsTasks(string id,string actionId)
+    {
+        if(String.IsNullOrWhiteSpace(actionId))return false;
+        if(String.Equals(actionId,"rescore",StringComparison.OrdinalIgnoreCase))return true;
+        try{return PluginRuntime.Resolve(id,false).Actions.Any(a=>String.Equals(JsonUtil.String(a,"id",""),actionId,StringComparison.OrdinalIgnoreCase)&&JsonUtil.Bool(a,"imports_tasks",false));}
+        catch{return false;}
+    }
+
+    // status == "attention" 是**正式协议结果**，不是失败（规格 §4.3/§5.4）。
+    private static Dictionary<string,object> AttentionOf(PluginCallResult result)
+    {
+        if(result==null||!result.Ok)return null;
+        if(!String.Equals(result.Status,"attention",StringComparison.OrdinalIgnoreCase))return null;
+        Dictionary<string,object> attention=JsonUtil.Object(JsonUtil.Get(result.Payload,"attention"));
+        if(attention.Count==0)attention=new Dictionary<string,object>{{"type","paid_service_confirmation"},{"message",JsonUtil.String(result.Payload,"summary","需要你的确认")}};
+        return attention;
     }
 
     private static void SetPluginEnabled(string id,bool enabled){Dictionary<string,object> current=PluginRuntime.Current(id);current["enabled"]=enabled;JsonUtil.SaveAtomic(Path.Combine(PluginPaths.PluginRoot(id),"current.json"),current);}
@@ -68,11 +134,23 @@ internal static class PluginHostApp
         {
             string id=Path.GetFileName(root);try
             {
-                PluginManifest manifest=PluginRuntime.Resolve(id,true);if(!manifest.Capabilities.Contains("todo_source"))continue;ActivePluginId=id;WriteJobState(id,"running",0,0,"正在运行");
-                PluginCallResult result=InvokeLocked(id,"sync",new Dictionary<string,object>(),trigger,1800,true,ThrottledProgress(id,baseDir));string addressTarget=PluginRuntime.AddressTargetOf(id);AddressProviderBinding provider=addressTarget!=""?DynamicPluginValues.AddressProvider(addressTarget):null;
-                if(provider!=null&&!result.Ok){PluginCallResult refreshed=RefreshAddressProvider(baseDir,provider);if(refreshed.Ok)result=InvokeLocked(id,"sync",new Dictionary<string,object>(),trigger,1800,true,ThrottledProgress(id,baseDir));else result.Error=result.Error+"；"+provider.PluginName+" 重新发现失败："+refreshed.Error+"。服务器可能已关机或故障。";}
-                if(!result.Ok){failures++;WriteJobState(id,"failed",0,1,result.Error);continue;}IEnumerable<Dictionary<string,object>> drafts=JsonUtil.Array(JsonUtil.Get(result.Payload,"tasks")).Select(JsonUtil.Object);TodoExternalImport.Import(Path.Combine(baseDir,"tasks.json"),id,drafts);WriteJobState(id,"completed",1,1,JsonUtil.String(result.Payload,"summary","已完成"));
-            }catch(Exception ex){failures++;WriteJobState(id,"failed",0,1,ex.Message);}
+                PluginManifest manifest=PluginRuntime.Resolve(id,true);if(!manifest.Capabilities.Contains("todo_source"))continue;ActivePluginId=id;
+                string jobId=Guid.NewGuid().ToString("N");PluginCallResult result;
+                try{result=InvokeLocked(id,"sync",new Dictionary<string,object>(),trigger,1800,true,ThrottledProgress(id,baseDir),delegate{StartJob(id,jobId);});}
+                catch(PluginBusyException){continue;}
+                string addressTarget=PluginRuntime.AddressTargetOf(id);AddressProviderBinding provider=addressTarget!=""?DynamicPluginValues.AddressProvider(addressTarget):null;
+                if(provider!=null&&!result.Ok){PluginCallResult refreshed=RefreshAddressProvider(baseDir,provider);if(refreshed.Ok)result=InvokeLocked(id,"sync",new Dictionary<string,object>(),trigger,1800,true,ThrottledProgress(id,baseDir),null);else result.Error=result.Error+"；"+provider.PluginName+" 重新发现失败："+refreshed.Error+"。服务器可能已关机或故障。";}
+                if(JobHasState(id,"cancelled"))continue;
+                Dictionary<string,object> attention=AttentionOf(result);
+                if(attention!=null)
+                {
+                    // 后台同步**不弹模态**（规格 §5.2 / §11-#9）：只置 attention + 磁贴提示，等用户主动点。
+                    WriteJob(id,new Dictionary<string,object>{{"state","attention"},{"attention",attention},{"message",JsonUtil.String(attention,"message","需要你的确认")},{"current",0},{"total",0},{"resume_action",JsonUtil.String(attention,"resume_action","")},{"resume_input",JsonUtil.Object(JsonUtil.Get(attention,"resume_input"))}});continue;
+                }
+                if(!result.Ok){failures++;WriteTerminalState(id,"failed",0,1,result.Error);continue;}
+                if(JobHasState(id,"cancelled"))continue;
+                IEnumerable<Dictionary<string,object>> drafts=JsonUtil.Array(JsonUtil.Get(result.Payload,"tasks")).Select(JsonUtil.Object);TodoExternalImport.Import(Path.Combine(baseDir,"tasks.json"),id,drafts);WriteTerminalState(id,"completed",1,1,JsonUtil.String(result.Payload,"summary","已完成"));
+            }catch(Exception ex){failures++;WriteTerminalState(id,"failed",0,1,ex.Message);}
         }
         RefreshTodo(baseDir);return failures==0?0:1;
     }    private static int ValuesAll(string baseDir,string trigger)
@@ -93,29 +171,281 @@ internal static class PluginHostApp
         JsonUtil.SaveAtomic(args[2],new Dictionary<string,object>{{"ok",true},{"task_ids",existing}});return 0;
     }
 
-    private static PluginCallResult InvokeLocked(string id,string action,object input,string trigger,int timeout,bool exclusive,Action<Dictionary<string,object>> progress)
+    private static PluginCallResult InvokeLocked(string id,string action,object input,string trigger,int timeout,bool exclusive,Action<Dictionary<string,object>> progress,Action onStart)
     {
-        if(!exclusive)return PluginRuntime.Invoke(id,action,input,trigger,timeout,progress);
-        using(System.Threading.Mutex mutex=new System.Threading.Mutex(false,@"Global\RainmeterPluginSync_"+System.Text.RegularExpressions.Regex.Replace(id,@"[^A-Za-z0-9]","_")))
+        if(!exclusive){if(onStart!=null)onStart();return PluginRuntime.Invoke(id,action,input,trigger,timeout,progress);}
+        using(System.Threading.Mutex mutex=new System.Threading.Mutex(false,@"Global\RainmeterPluginSync_"+Regex.Replace(id,@"[^A-Za-z0-9]","_")))
         {
-            bool held=false;try{try{held=mutex.WaitOne(TimeSpan.Zero);}catch(System.Threading.AbandonedMutexException){held=true;}if(!held)throw new InvalidOperationException("该插件已有同步任务正在运行");return PluginRuntime.Invoke(id,action,input,trigger,timeout,progress);}finally{if(held)mutex.ReleaseMutex();}
+            bool held=false;try{try{held=mutex.WaitOne(TimeSpan.Zero);}catch(System.Threading.AbandonedMutexException){held=true;}if(!held)throw new PluginBusyException("该插件已有同步任务正在运行");
+            // 拿到锁之后才写 job：否则第二个请求会先把在跑的 job 的进度打回 0/0。
+            if(onStart!=null)onStart();
+            return PluginRuntime.Invoke(id,action,input,trigger,timeout,progress);}finally{if(held)mutex.ReleaseMutex();}
         }
+    }
+
+    // 起一个 job：写 job_id 与空 children[]，并把 job_id 交给 PluginRuntime 注入插件环境。
+    private static void StartJob(string id,string jobId)
+    {
+        PluginRuntime.CurrentJobId=jobId;
+        WriteJob(id,new Dictionary<string,object>{
+            {"job_id",jobId},{"state","running"},{"current",0},{"total",0},{"message","正在运行"},
+            {"started_at",DateTimeOffset.Now.ToString("o",CultureInfo.InvariantCulture)},{"children",new List<object>()}});
     }
 
     private static void WriteJob(string id, Dictionary<string, object> progress)
     {
-        using(System.Threading.Mutex mutex=new System.Threading.Mutex(false,@"Global\RainmeterPluginJob_"+System.Text.RegularExpressions.Regex.Replace(id,@"[^A-Za-z0-9]","_"))){bool held=false;try{try{held=mutex.WaitOne(TimeSpan.FromSeconds(5));}catch(System.Threading.AbandonedMutexException){held=true;}if(!held)throw new TimeoutException("插件任务状态正忙");string path=Path.Combine(PluginPaths.Jobs,id+".json");Dictionary<string,object> job=File.Exists(path)?JsonUtil.LoadObject(path):new Dictionary<string,object>();foreach(KeyValuePair<string,object> pair in progress)job[pair.Key]=pair.Value;if(!progress.ContainsKey("state"))job["state"]="running";string state=JsonUtil.String(job,"state","");if(state!="running"){job.Remove("pid");job.Remove("entry");job.Remove("process_started_at");}job["plugin_id"]=id;job["updated_at"]=DateTimeOffset.Now.ToString("o",CultureInfo.InvariantCulture);JsonUtil.SaveAtomic(path,job);}finally{if(held)mutex.ReleaseMutex();}}
+        using(System.Threading.Mutex mutex=new System.Threading.Mutex(false,@"Global\RainmeterPluginJob_"+Regex.Replace(id,@"[^A-Za-z0-9]","_"))){bool held=false;try{try{held=mutex.WaitOne(TimeSpan.FromSeconds(5));}catch(System.Threading.AbandonedMutexException){held=true;}if(!held)throw new TimeoutException("插件任务状态正忙");string path=Path.Combine(PluginPaths.Jobs,id+".json");Dictionary<string,object> job=File.Exists(path)?JsonUtil.LoadObject(path):new Dictionary<string,object>();foreach(KeyValuePair<string,object> pair in progress)job[pair.Key]=pair.Value;if(!progress.ContainsKey("state"))job["state"]="running";
+            // 规格 §4.6-1：pid/entry 在整个 job 生命周期里保留（不再像 2.0.4 那样收尾即删），
+            // 否则 job 一收尾就再也取消不了；误杀风险由 CancelPlugin 的进程身份核对兜住。
+            job["plugin_id"]=id;job["updated_at"]=DateTimeOffset.Now.ToString("o",CultureInfo.InvariantCulture);JsonUtil.SaveAtomic(path,job);}finally{if(held)mutex.ReleaseMutex();}}
     }
     private static void WriteJobState(string id,string state,int current,int total,string message){WriteJob(id,new Dictionary<string,object>{{"state",state},{"current",current},{"total",total},{"message",message??""}});}
     private static bool JobHasState(string id,string state){string path=Path.Combine(PluginPaths.Jobs,id+".json");if(!File.Exists(path))return false;try{return JsonUtil.String(JsonUtil.LoadObject(path),"state","")==state;}catch{return false;}}
-    private static void WriteFailureUnlessCancelled(string id,string message)
+    private static void WriteFailureUnlessCancelled(string id,string message){WriteTerminalState(id,"failed",0,1,message);}
+
+    // 写终态。**取消优先**：CancelPlugin 已经标了 cancelled 就绝不覆盖（规格 §4.6-6）。
+    // 判定与写入必须在同一把 job 锁里完成 —— 否则 CancelPlugin 恰好插在两者之间时，
+    // 用户会看到"取消成功"，紧接着状态又变回 completed。
+    private static void WriteTerminalState(string id,string state,int current,int total,string message)
     {
-        using(System.Threading.Mutex mutex=new System.Threading.Mutex(false,@"Global\RainmeterPluginJob_"+System.Text.RegularExpressions.Regex.Replace(id,@"[^A-Za-z0-9]","_"))){bool held=false;try{try{held=mutex.WaitOne(TimeSpan.FromSeconds(5));}catch(System.Threading.AbandonedMutexException){held=true;}if(!held)return;string path=Path.Combine(PluginPaths.Jobs,id+".json");Dictionary<string,object> job=File.Exists(path)?JsonUtil.LoadObject(path):new Dictionary<string,object>();if(JsonUtil.String(job,"state","")=="cancelled")return;job["state"]="failed";job["current"]=0;job["total"]=1;job["message"]=message??"";job["plugin_id"]=id;job["updated_at"]=DateTimeOffset.Now.ToString("o",CultureInfo.InvariantCulture);job.Remove("pid");job.Remove("entry");job.Remove("process_started_at");JsonUtil.SaveAtomic(path,job);}finally{if(held)mutex.ReleaseMutex();}}
+        using(System.Threading.Mutex mutex=new System.Threading.Mutex(false,@"Global\RainmeterPluginJob_"+Regex.Replace(id,@"[^A-Za-z0-9]","_")))
+        {
+            bool held=false;
+            try
+            {
+                try{held=mutex.WaitOne(TimeSpan.FromSeconds(5));}catch(System.Threading.AbandonedMutexException){held=true;}
+                if(!held)return;
+                string path=Path.Combine(PluginPaths.Jobs,id+".json");
+                Dictionary<string,object> job=File.Exists(path)?JsonUtil.LoadObject(path):new Dictionary<string,object>();
+                if(JsonUtil.String(job,"state","")=="cancelled")return;
+                job["state"]=state;job["current"]=current;job["total"]=total;job["message"]=message??"";
+                job["plugin_id"]=id;job["updated_at"]=DateTimeOffset.Now.ToString("o",CultureInfo.InvariantCulture);
+                JsonUtil.SaveAtomic(path,job);
+            }
+            finally{if(held)mutex.ReleaseMutex();}
+        }
     }
-    private static int CancelPlugin(string id)
+
+    // 取消传播（规格 §4.6）：先 provider（最深）→ 再 broker → 最后 consumer。
+    // 顺序反了会留下孤儿请求进程；每一步都用登记路径核对进程身份，PID 被复用则跳过而不是误杀。
+    private static int CancelPlugin(string id,string reason)
     {
-        if(id=="")return 2;string path=Path.Combine(PluginPaths.Jobs,id+".json");if(!File.Exists(path))return 1;Dictionary<string,object> job=JsonUtil.LoadObject(path);int pid=JsonUtil.Int(job,"pid",0);string entry=JsonUtil.String(job,"entry","");if(pid<=0||entry=="")return 1;
-        try{using(System.Diagnostics.Process process=System.Diagnostics.Process.GetProcessById(pid)){string actual=process.MainModule.FileName;if(!Path.GetFullPath(actual).Equals(Path.GetFullPath(entry),StringComparison.OrdinalIgnoreCase))throw new InvalidOperationException("进程身份已变化，拒绝终止");try{process.CloseMainWindow();}catch{}if(!process.WaitForExit(3000))process.Kill();}}catch(ArgumentException){return 1;}WriteJobState(id,"cancelled",0,1,"已取消");return 0;
+        if(id=="")return 2;string path=Path.Combine(PluginPaths.Jobs,id+".json");if(!File.Exists(path))return 1;
+        Dictionary<string,object> job;try{job=JsonUtil.LoadObject(path);}catch{return 1;}
+        string state=JsonUtil.String(job,"state","");bool killed=false;
+        List<Dictionary<string,object>> children=JsonUtil.Array(JsonUtil.Get(job,"children")).Select(JsonUtil.Object).ToList();
+        for(int index=children.Count-1;index>=0;index--)
+        {
+            Dictionary<string,object> child=children[index];
+            if(KillRegisteredProcess(JsonUtil.Int(child,"broker_pid",0),JsonUtil.String(child,"broker_entry","")))killed=true;
+            if(KillRegisteredProcess(JsonUtil.Int(child,"pid",0),JsonUtil.String(child,"entry","")))killed=true;
+        }
+        if(KillRegisteredProcess(JsonUtil.Int(job,"pid",0),JsonUtil.String(job,"entry","")))killed=true;
+        if(state=="completed"||state=="failed"||state=="cancelled")return 1;
+        if(!killed&&state!="running"&&state!="attention")return 1;
+        string cancelReason=String.IsNullOrWhiteSpace(reason)?"user_cancelled":reason.Trim();
+        WriteJob(id,new Dictionary<string,object>{{"state","cancelled"},{"current",0},{"total",1},{"message",CancelMessage(cancelReason)},{"cancel_reason",cancelReason},{"cancelled_at",DateTimeOffset.Now.ToString("o",CultureInfo.InvariantCulture)}});
+        return 0;
+    }
+
+    // 取消 ≠ 失败：文案由 cancel_reason 决定（规格 §4.6-6）。
+    private static string CancelMessage(string reason)
+    {
+        if(reason=="user_declined")return "已取消：你选择了不使用 AI 评分";
+        if(reason=="provider_denied")return "已取消：没有人确认这次付费调用";
+        return "已取消";
+    }
+
+    private static bool KillRegisteredProcess(int pid,string entry)
+    {
+        if(pid<=0||String.IsNullOrWhiteSpace(entry))return false;
+        try{if(pid==Process.GetCurrentProcess().Id)return false;}catch{}
+        try
+        {
+            using(Process process=Process.GetProcessById(pid))
+            {
+                string actual;try{actual=process.MainModule.FileName;}catch{return false;}
+                if(!Path.GetFullPath(actual).Equals(Path.GetFullPath(entry),StringComparison.OrdinalIgnoreCase))return false;
+                try{process.CloseMainWindow();}catch{}
+                if(!process.WaitForExit(3000))process.Kill();
+                return true;
+            }
+        }
+        catch(ArgumentException){return false;}
+        catch(Exception){return false;}
+    }
+
+    // Broker 把 provider 进程登记进消费者 job 的 children[]（规格 §4.6-2）。
+    // 只在「job 存在 && job_id 与本次调用一致 && job 尚未收尾」时登记。否则会把别的任务的
+    // children 留在已完成/别代的 job 里，取消时只得拿死 PID 一个个核对（判定也就不可信了）。
+    private static void AppendJobChild(string consumerId,string jobId,Dictionary<string,object> child)
+    {
+        if(String.IsNullOrWhiteSpace(consumerId)||String.IsNullOrWhiteSpace(jobId)||JsonUtil.Int(child,"pid",0)<=0)return;
+        using(System.Threading.Mutex mutex=new System.Threading.Mutex(false,@"Global\RainmeterPluginJob_"+Regex.Replace(consumerId,@"[^A-Za-z0-9]","_")))
+        {
+            bool held=false;
+            try
+            {
+                try{held=mutex.WaitOne(TimeSpan.FromSeconds(5));}catch(AbandonedMutexException){held=true;}
+                if(!held)return;
+                string path=Path.Combine(PluginPaths.Jobs,consumerId+".json");
+                if(!File.Exists(path))return;
+                Dictionary<string,object> job=JsonUtil.LoadObject(path);
+                if(!String.Equals(JsonUtil.String(job,"job_id",""),jobId,StringComparison.OrdinalIgnoreCase))return;
+                string state=JsonUtil.String(job,"state","");
+                if(state=="completed"||state=="failed"||state=="cancelled")return;
+                List<object> children=JsonUtil.Array(JsonUtil.Get(job,"children")).ToList();
+                int pid=JsonUtil.Int(child,"pid",0);
+                if(children.Select(JsonUtil.Object).Any(x=>JsonUtil.Int(x,"pid",0)==pid))return;
+                children.Add(child);job["children"]=children;
+                job["plugin_id"]=consumerId;job["updated_at"]=DateTimeOffset.Now.ToString("o",CultureInfo.InvariantCulture);
+                JsonUtil.SaveAtomic(path,job);
+            }
+            catch{}
+            finally{if(held)mutex.ReleaseMutex();}
+        }
+    }
+
+    private static string CurrentProcessEntry()
+    {
+        try{return Process.GetCurrentProcess().MainModule.FileName;}catch{return "";}
+    }
+
+    private sealed class ServiceCallTrace
+    {
+        public DateTimeOffset StartedAt;
+        public string RequestId="",Consumer="",Service="",Action="",ProviderId="",Billing="",Status="",ErrorKind="",Error="";
+        public long RequestBytes;public int InputKeys;public bool Ok;
+    }
+
+    // 跨插件服务调用（Broker）。规格 §4：这是插件**唯一**被允许的跨插件动作。
+    // 链：Host(Sync) → consumer 插件 → 本进程 → provider 插件。Broker depth 写死 1。
+    private static int ServiceCallCommand(string[] args)
+    {
+        string requestPath=null,outputPath="";
+        for(int index=1;index<args.Length;index++)
+        {
+            string arg=args[index];
+            if(String.Equals(arg,"-Mode",StringComparison.OrdinalIgnoreCase)||String.Equals(arg,"ServiceCall",StringComparison.OrdinalIgnoreCase))continue;
+            if(String.Equals(arg,"-RequestFile",StringComparison.OrdinalIgnoreCase)){if(index+1<args.Length)requestPath=args[++index];continue;}
+            if(String.Equals(arg,"-OutputFile",StringComparison.OrdinalIgnoreCase)){if(index+1<args.Length)outputPath=args[++index];continue;}
+            if(requestPath==null)requestPath=arg;else if(outputPath=="")outputPath=arg;
+        }
+        return ServiceCall(requestPath??"",outputPath);
+    }
+
+    private static int ServiceCall(string requestPath,string outputPath)
+    {
+        ServiceCallTrace trace=new ServiceCallTrace{StartedAt=DateTimeOffset.Now};
+        Dictionary<string,object> response;
+        try{response=RunServiceCall(requestPath,trace);}
+        catch(Exception ex){response=Fail(trace,"broker_error","Broker 内部错误："+ex.Message);}
+        try{if(outputPath!="")JsonUtil.SaveAtomic(outputPath,response);else Console.Out.WriteLine(JsonUtil.Serialize(response));}catch{}
+        long elapsed=(long)(DateTimeOffset.Now-trace.StartedAt).TotalMilliseconds;
+        ServiceRegistry.Audit((trace.Consumer==""?"-":trace.Consumer)+" | "+(trace.ProviderId==""?"-":trace.ProviderId)+" | "+(trace.Service==""?"-":trace.Service)+" | "+(trace.Action==""?"-":trace.Action)+" | "+elapsed.ToString(CultureInfo.InvariantCulture)+"ms | "+(trace.Ok?"ok/"+trace.Status:"error/"+trace.ErrorKind)+" | "+(trace.Billing==""?"-":trace.Billing)+" | request="+trace.RequestBytes.ToString(CultureInfo.InvariantCulture)+"B input_keys="+trace.InputKeys.ToString(CultureInfo.InvariantCulture));
+        return JsonUtil.Bool(response,"ok",false)?0:1;
+    }
+
+    private static Dictionary<string,object> RunServiceCall(string requestPath,ServiceCallTrace trace)
+    {
+        string consumer=Environment.GetEnvironmentVariable(PluginRuntime.PluginIdVariable)??"";trace.Consumer=consumer;
+        string jobId=Environment.GetEnvironmentVariable(PluginRuntime.JobIdVariable)??"";
+        // 双保险（规格 §4.4）：Broker 自身环境块里已经有 depth 标记 ⇒ 这是二级转发，直接拒。
+        if(!String.IsNullOrEmpty(Environment.GetEnvironmentVariable(PluginRuntime.DepthVariable)))
+            return Fail(trace,"broker_depth_exceeded","服务调用不允许二级转发（Broker depth = 1）。");
+        if(String.IsNullOrWhiteSpace(consumer))
+            return Fail(trace,"protocol_error","缺少 "+PluginRuntime.PluginIdVariable+"：跨插件调用只能从插件内部发起。");
+        WatchConsumer(consumer,jobId);
+        if(String.IsNullOrWhiteSpace(requestPath)||!File.Exists(requestPath))
+            return Fail(trace,"input_invalid","缺少 Broker 请求文件。");
+        FileInfo file=new FileInfo(requestPath);trace.RequestBytes=file.Length;
+        if(file.Length>MaxServiceRequestBytes)return Fail(trace,"input_invalid","Broker 请求文件超过 1 MB 限制。");
+        Dictionary<string,object> request;
+        try{request=JsonUtil.LoadObject(requestPath);}catch(Exception ex){return Fail(trace,"input_invalid","Broker 请求文件不是合法 JSON："+ex.Message);}
+        string offending=request.Keys.FirstOrDefault(key=>!ServiceRequestKeys.Contains(key));
+        if(offending!=null)return Fail(trace,"protocol_error","请求文件出现非法顶层键："+offending+"（插件只能报 service，provider 由宿主按绑定解析）。");
+        if(JsonUtil.Int(request,"protocol",0)!=1)return Fail(trace,"protocol_error","不支持的 Broker 协议版本。");
+        trace.RequestId=JsonUtil.String(request,"request_id","");
+        string service=JsonUtil.String(request,"service","").Trim();trace.Service=service;
+        string callAction=JsonUtil.String(request,"action","").Trim();trace.Action=callAction;
+        if(!ServiceRegistry.ValidService(service))return Fail(trace,"protocol_error","service 格式无效（应为 name@version）。");
+        if(!Regex.IsMatch(callAction??"",@"^[a-z0-9_]{1,60}$"))return Fail(trace,"protocol_error","action 格式无效。");
+        object input=JsonUtil.Get(request,"input");if(input==null)input=new Dictionary<string,object>();
+        Dictionary<string,object> inputObject=input as Dictionary<string,object>;trace.InputKeys=inputObject==null?0:inputObject.Count;
+        int timeout=JsonUtil.Int(request,"timeout_seconds",DefaultServiceTimeout);if(timeout<MinServiceTimeout)timeout=MinServiceTimeout;if(timeout>MaxServiceTimeout)timeout=MaxServiceTimeout;
+        string providerId=ServiceRegistry.ProviderFor(consumer,service);trace.ProviderId=providerId;
+        if(providerId=="")return Fail(trace,"no_provider","没有可用的服务提供者（"+ServiceRegistry.ReasonFor(consumer,service)+"）。");
+        trace.Billing=ServiceRegistry.BillingOf(providerId);
+        Dictionary<string,string> environment=new Dictionary<string,string>(StringComparer.OrdinalIgnoreCase){
+            {PluginRuntime.HostExeVariable,null},            // 显式剔除：provider 物理上找不到 Broker 入口
+            {PluginRuntime.DepthVariable,"1"},
+            {PluginRuntime.PluginIdVariable,providerId}};    // provider 看到的是自己的 id
+        Action<Dictionary<string,object>> onProgress=delegate(Dictionary<string,object> progress)
+        {
+            if(JsonUtil.String(progress,"type","")!="host_start")return;
+            AppendJobChild(consumer,jobId,new Dictionary<string,object>{
+                {"job_id",jobId},
+                {"role","provider"},{"plugin_id",providerId},
+                {"pid",JsonUtil.Int(progress,"pid",0)},{"entry",JsonUtil.String(progress,"entry","")},
+                {"broker_pid",Process.GetCurrentProcess().Id},{"broker_entry",CurrentProcessEntry()},
+                {"started_at",DateTimeOffset.Now.ToString("o",CultureInfo.InvariantCulture)}});
+        };
+        PluginCallResult result;
+        try{result=PluginRuntime.Invoke(providerId,callAction,input,"service_call",timeout,onProgress,environment);}
+        catch(TimeoutException){return Fail(trace,"provider_timeout","服务提供者超过 "+timeout.ToString(CultureInfo.InvariantCulture)+" 秒没有返回。");}
+        catch(PluginBusyException ex){return Fail(trace,"provider_denied",ex.Message);}
+        catch(Exception ex){return Fail(trace,"provider_crashed","服务提供者执行失败："+ex.Message);}
+        if(result.Ok)
+        {
+            trace.Ok=true;trace.Status=String.IsNullOrWhiteSpace(result.Status)?"ok":result.Status;
+            return ServiceEnvelope(trace.RequestId,true,trace.Status,result.Payload,"","",false);
+        }
+        return Fail(trace,"provider_error",String.IsNullOrWhiteSpace(result.Error)?"服务提供者返回失败。":result.Error,JsonUtil.Bool(result.Payload,"fatal",false));
+    }
+
+    // consumer 插件进程消失 ⇒ Broker 自行退出，避免留下后台请求（规格 §4.6-4）。
+    // consumer 的 pid 取自它自己的 job 文件（用 job_id 核对，防止读到下一代任务的 pid）。
+    private static void WatchConsumer(string consumerId,string jobId)
+    {
+        // 没有 job 就没有"可以被取消的东西"：此时不监视（否则会盯上一个与本调用无关的 PID）。
+        if(String.IsNullOrWhiteSpace(consumerId)||String.IsNullOrWhiteSpace(jobId))return;
+        int pid=0;
+        try
+        {
+            string path=Path.Combine(PluginPaths.Jobs,consumerId+".json");
+            if(!File.Exists(path))return;
+            Dictionary<string,object> job=JsonUtil.LoadObject(path);
+            if(!String.Equals(JsonUtil.String(job,"job_id",""),jobId,StringComparison.OrdinalIgnoreCase))return;
+            pid=JsonUtil.Int(job,"pid",0);
+        }
+        catch{return;}
+        if(pid<=0)return;
+        try{if(pid==Process.GetCurrentProcess().Id)return;}catch{}
+        Thread thread=new Thread(delegate()
+        {
+            try{using(Process parent=Process.GetProcessById(pid)){parent.WaitForExit();}Console.Error.WriteLine("consumer 插件已退出，Broker 自行结束");}
+            catch(ArgumentException){Console.Error.WriteLine("consumer 插件已不存在，Broker 自行结束");}
+            catch(Exception){return;}
+            try{Environment.Exit(1);}catch{}
+        });
+        thread.IsBackground=true;thread.Start();
+    }
+
+    private static Dictionary<string,object> Fail(ServiceCallTrace trace,string kind,string message){return Fail(trace,kind,message,false);}
+
+    private static Dictionary<string,object> Fail(ServiceCallTrace trace,string kind,string message,bool fatal)
+    {
+        trace.Ok=false;trace.Status="error";trace.ErrorKind=kind;trace.Error=message;
+        return ServiceEnvelope(trace.RequestId,false,"error",null,message,kind,fatal);
+    }
+
+    private static Dictionary<string,object> ServiceEnvelope(string requestId,bool ok,string status,object output,string error,string errorKind,bool fatal)
+    {
+        return new Dictionary<string,object>{
+            {"protocol",1},{"request_id",requestId??""},{"ok",ok},
+            {"status",String.IsNullOrWhiteSpace(status)?"ok":status},
+            {"output",output},{"error",error??""},{"error_kind",errorKind??""},
+            {"fatal",fatal},{"warnings",new List<object>()}};
     }
 
     private static void UpdateValues(string baseDir,string pluginId,PluginCallResult result)

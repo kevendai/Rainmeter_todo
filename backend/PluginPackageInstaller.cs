@@ -54,11 +54,27 @@ namespace RainmeterBackend
                 if (!Regex.IsMatch(minHost, @"^\d+\.\d+\.\d+$")) throw new InvalidDataException("插件最低宿主版本无效。");
                 if (new Version(minHost).CompareTo(new Version(hostVersion)) > 0) throw new InvalidDataException("插件要求主程序 " + minHost + " 或更高版本。");
                 List<object> capabilities = JsonUtil.Array(JsonUtil.Get(manifest, "capabilities"));
-                if (capabilities.Count == 0) throw new InvalidDataException("插件 capability 无效。");
+                List<object> provides = JsonUtil.Array(JsonUtil.Get(manifest, "provides"));
+                // 规格 §1.3：capabilities 可以为空（纯 Provider 插件，例如 ai-deepseek），
+                // 但"能被宿主主动调用"与"能给别的插件提供服务"至少要有一样。
+                if (capabilities.Count == 0 && provides.Count == 0) throw new InvalidDataException("插件既没有 capability 也不提供任何服务。");
                 foreach (object capability in capabilities)
                 {
                     string name = Convert.ToString(capability, CultureInfo.InvariantCulture) ?? "";
                     if (Array.IndexOf(AllowedCapabilities, name) < 0) throw new InvalidDataException("插件 capability 无效。");
+                }
+                foreach (object provided in provides)
+                {
+                    string name = Convert.ToString(provided, CultureInfo.InvariantCulture) ?? "";
+                    if (!ServiceRegistry.ValidService(name)) throw new InvalidDataException("插件 provides 声明无效。");
+                }
+                foreach (object raw in JsonUtil.Array(JsonUtil.Get(manifest, "uses")))
+                {
+                    Dictionary<string, object> use = JsonUtil.Object(raw);
+                    if (use.Count == 0) continue;
+                    string service = JsonUtil.String(use, "service", "").Trim();
+                    string key = JsonUtil.String(use, "binding_key", ServiceRegistry.KeyOf(service)).Trim();
+                    if (!ServiceRegistry.ValidService(service) || !ServiceRegistry.ValidBindingKey(key)) throw new InvalidDataException("插件 uses 声明无效。");
                 }
                 string entry = JsonUtil.String(manifest, "entry", "");
                 if (entry.Length == 0 || Path.IsPathRooted(entry) || Regex.IsMatch(entry, @"(^|[\\/])\.\.([\\/]|$)")) throw new InvalidDataException("插件入口路径无效。");

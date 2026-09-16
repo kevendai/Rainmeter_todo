@@ -26,6 +26,7 @@
     <Compile Include="ZipArchiveToolkit.cs" />
     <Compile Include="Common.cs" />
     <Compile Include="PluginRuntime.cs" />
+    <Compile Include="ServiceRegistry.cs" />
     <Compile Include="PluginPackageInstaller.cs" />
     <Compile Include="PluginManagerForms.cs" />
     <Compile Include="TodoApp.cs" />

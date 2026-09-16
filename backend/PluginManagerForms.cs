@@ -372,6 +372,10 @@ internal static partial class TodoApp
     }
     private static string PluginRuntimeStatus(string id,PluginManifest manifest)
     {
+        // job 状态优先，且必须区分 attention / cancelled 与真正的失败（规格 §5.4、§11-#25）。
+        // 原来这一段被 `value_provider` 短路保护着，arxiv（todo_source）根本走不到。
+        string jobStatus=PluginJobStatus(id);
+        if(jobStatus!="")return jobStatus;
         if(!manifest.Capabilities.Contains("value_provider"))return "";
         try
         {
@@ -381,10 +385,22 @@ internal static partial class TodoApp
                 Dictionary<string,object> values=JsonUtil.LoadObject(PluginPaths.Values),entries=JsonUtil.Object(JsonUtil.Get(values,"entries")),entry=JsonUtil.Object(JsonUtil.Get(entries,variable));
                 string ip=JsonUtil.String(entry,"value","");if(ip!="")return "IP "+ip+(JsonUtil.Bool(entry,"stale",false)?"（上次成功，当前已失效）":"");
             }
-            string jobPath=Path.Combine(PluginPaths.Jobs,id+".json");if(File.Exists(jobPath)){Dictionary<string,object> job=JsonUtil.LoadObject(jobPath);string state=JsonUtil.String(job,"state","");if(state=="failed"||state=="attention")return "失败："+JsonUtil.String(job,"message","未知错误");}
         }
         catch{}
         return "尚未获取 IP";
+    }
+    private static string PluginJobStatus(string id)
+    {
+        try
+        {
+            string path=Path.Combine(PluginPaths.Jobs,id+".json");if(!File.Exists(path))return "";
+            Dictionary<string,object> job=JsonUtil.LoadObject(path);string state=JsonUtil.String(job,"state",""),message=JsonUtil.String(job,"message","");
+            if(state=="attention")return "需要确认："+(message==""?"请到磁贴处理":message);
+            if(state=="cancelled")return message==""?"已取消":message;
+            if(state=="failed")return "失败："+(message==""?"未知错误":message);
+            return "";
+        }
+        catch{return "";}
     }
     private static PluginManifest SelectedPlugin(PluginListControl view){PluginRow row=view.SelectedRow;if(row==null)throw new Exception("请先选择一个插件。");return (PluginManifest)row.Tag;}
 

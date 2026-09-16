@@ -45,6 +45,11 @@ internal static class PluginInstallerProbe
             Reject("API 版本不支持", "API", delegate { Install(root, plugins, "badapi", Entries(Manifest("io.github.example.probe", "1.2.3", 2, "2.0.0", "bin/Probe.exe", "todo_transform"), "bin/Probe.exe", "x"), ""); });
             Reject("宿主版本过低", "更高版本", delegate { Install(root, plugins, "newhost", Entries(Manifest("io.github.example.probe", "1.2.3", 1, "9.9.9", "bin/Probe.exe", "todo_transform"), "bin/Probe.exe", "x"), ""); });
             Reject("capability 非法", "capability", delegate { Install(root, plugins, "badcap", Entries(Manifest("io.github.example.probe", "1.2.3", 1, "2.0.0", "bin/Probe.exe", "system_shell"), "bin/Probe.exe", "x"), ""); });
+            // v2.1 §1.3：capabilities 可以为空（纯 Provider 插件），但两者都空必须拒。
+            string providerOnly = WritePackage(root, "provider.rwplugin", Entries(ManifestExtras("io.github.example.provider", "1.2.3", 1, "2.0.0", "bin/Probe.exe", "", "ai_provider@1"), "bin/Probe.exe", "MZ-fake-plugin"));
+            Expect(PluginPackageInstaller.Install(providerOnly, plugins, HostVersion, "").Id == "io.github.example.provider", "capabilities 为空但 provides 非空的纯 Provider 包可以安装");
+            Reject("既无 capability 也无 provides", "既没有 capability", delegate { Install(root, plugins, "nothing", Entries(ManifestExtras("io.github.example.empty", "1.2.3", 1, "2.0.0", "bin/Probe.exe", "", ""), "bin/Probe.exe", "x"), ""); });
+            Reject("provides 缺少版本", "provides", delegate { Install(root, plugins, "badprovides", Entries(ManifestExtras("io.github.example.badprovides", "1.2.3", 1, "2.0.0", "bin/Probe.exe", "", "ai_provider"), "bin/Probe.exe", "x"), ""); });
             Reject("入口越界", "入口", delegate { Install(root, plugins, "badescape", Entries(Manifest("io.github.example.probe", "1.2.3", 1, "2.0.0", "../outside.exe", "todo_transform"), "bin/Probe.exe", "x"), ""); });
             Reject("入口不存在", "入口", delegate { Install(root, plugins, "badentry", Entries(Manifest("io.github.example.probe", "1.2.3", 1, "2.0.0", "bin/Missing.exe", "todo_transform"), "bin/Probe.exe", "x"), ""); });
             Expect(Directory.GetDirectories(root, "rwplugin-*").Length == 0, "所有失败路径都不留暂存目录");
@@ -69,6 +74,15 @@ internal static class PluginInstallerProbe
     {
         return "{\"id\":\"" + id + "\",\"name\":\"Probe\",\"version\":\"" + version + "\",\"api_version\":" + apiVersion.ToString() +
             ",\"min_host_version\":\"" + minHost + "\",\"entry\":\"" + entry + "\",\"capabilities\":[\"" + capability + "\"]}";
+    }
+
+    // capability 与 provides 都可空，用于 v2.1 §1.3 的校验放宽。
+    private static string ManifestExtras(string id, string version, int apiVersion, string minHost, string entry, string capability, string provides)
+    {
+        string capabilities = capability == "" ? "[]" : "[\"" + capability + "\"]";
+        string providesJson = provides == "" ? "[]" : "[\"" + provides + "\"]";
+        return "{\"id\":\"" + id + "\",\"name\":\"Probe\",\"version\":\"" + version + "\",\"api_version\":" + apiVersion.ToString() +
+            ",\"min_host_version\":\"" + minHost + "\",\"entry\":\"" + entry + "\",\"capabilities\":" + capabilities + ",\"provides\":" + providesJson + "}";
     }
 
     private static void Reject(string title, string expectedFragment, Action action)
