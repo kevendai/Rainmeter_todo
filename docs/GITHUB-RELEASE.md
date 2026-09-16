@@ -84,7 +84,7 @@ Expected values:
 - Unified package: `Version = X.Y.Z`, `AppVersion = X.Y.Z`, `PaperFeatures = True`, `RuntimeSwitch = True`, `BadEntries` empty.
 - Unified zip contains the complete product and its top-level updater, but `HasInstallEntry = False`; it is an automatic-update transport package, not a manual installer.
 - full/lite zips are the legacy compatibility archives built from `scripts\legacy-compat\RainmeterDesktopWidgetsUpdater.ps1`: a v1.3.5 client downloads one of them from raw, installs the packaged updater, and that updater fetches the canonical release package and performs the upgrade in one hop.
-- The three names under `releases\vX.Y.Z\` are the same archive; only the canonical name is also published as a Release asset, because the v1.4.4+ generations read the Release while the v1.3.x generations read raw.
+- The three names under `releases\vX.Y.Z\` are the same archive, and all three are also published as Release assets so that the raw-reading (v1.3.x) and the Release-reading generations resolve to the same compatibility archive.
 - Only the unified `.rmskin` is published.
 - The `.rmskin` must end with the 16-byte Rainmeter package footer: an 8-byte little-endian archive size, one flags byte, and the ASCII key `RMSKIN\0`. A normal ZIP renamed to `.rmskin` is invalid.
 
@@ -146,14 +146,20 @@ gh release create "v$version" `
   ".\release-build\rainmeter-desktop-widgets-$version.zip.sha256" `
   ".\release-build\rainmeter-desktop-widgets-$version.rmskin" `
   ".\release-build\rainmeter-desktop-widgets-$version.rmskin.sha256" `
-  ".\release-build\rainmeter-desktop-widgets-full-$version.zip" `
-  ".\release-build\rainmeter-desktop-widgets-full-$version.zip.sha256" `
-  ".\release-build\rainmeter-desktop-widgets-lite-$version.zip" `
-  ".\release-build\rainmeter-desktop-widgets-lite-$version.zip.sha256" `
+  ".\releases\v$version\rainmeter-desktop-widgets-full-$version.zip" `
+  ".\releases\v$version\rainmeter-desktop-widgets-full-$version.zip.sha256" `
+  ".\releases\v$version\rainmeter-desktop-widgets-lite-$version.zip" `
+  ".\releases\v$version\rainmeter-desktop-widgets-lite-$version.zip.sha256" `
   --repo kevendai/Rainmeter_todo `
   --title "Rainmeter Desktop Widgets $version" `
   --notes-file $notesPath
 ```
+
+The canonical ZIP/RMSKIN come from the build output root, while the full/lite
+compatibility archives come from the committed `releases\vX.Y.Z\` folder.  Note
+that the compatibility `.sha256` sidecars are git-ignored on purpose: the raw
+channel serves only the archives, and every client verifies the canonical
+package against the Release checksum instead.
 
 If `gh` is not on `PATH`, check `C:\Program Files\GitHub CLI\gh.exe` before falling back to the REST API.
 
