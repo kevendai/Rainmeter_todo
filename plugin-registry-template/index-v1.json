@@ -1,18 +1,18 @@
 {
   "version": 1,
-  "generated_at": "2026-09-14T23:04:05.607272+08:00",
+  "generated_at": "2026-09-16T22:27:16.194461+08:00",
   "plugins": [
     {
       "id": "io.github.kevendai.arxiv",
       "name": "arXiv Paper Recommendation",
       "channel": "stable",
       "official": true,
-      "version": "1.0.0",
+      "version": "1.0.1",
       "api_version": 1,
       "min_host_version": "2.0.0",
-      "download": "https://github.com/kevendai/Rainmeter_todo-plugin-registry/releases/download/arxiv-v1.0.0/arxiv-1.0.0.rwplugin",
-      "sha256": "e10f13b9f45a5e0ab49e5ba92b30ab8ca0adc5228032e084e8f5f4c93b83c425",
-      "release_notes": "Initial official release",
+      "download": "https://github.com/kevendai/Rainmeter_todo-plugin-registry/releases/download/arxiv-v1.0.1/arxiv-1.0.1.rwplugin",
+      "sha256": "bb41b10078061a606327cfbbc14935aaf3793e453691b2afd68d4381115bf620",
+      "release_notes": "修复文件服务器地址被清空导致远端拉取失败的问题：宿主在插件未保存过该地址时会注入空串，插件据此把迁移过来的服务器地址覆盖为空，于是「已启用 + 地址为空」使设置校验报错、远端论文拉取/上传/状态检查全部停用。现在地址字段忽略空值（关闭同步请用「启用文件同步」开关），并新增自检覆盖该合并逻辑。",
       "homepage": "https://github.com/kevendai/Rainmeter_todo-plugin-registry/tree/master/official-plugins/arxiv"
     },
     {

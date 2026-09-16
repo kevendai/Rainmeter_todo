@@ -1,7 +1,7 @@
 {
   "id": "io.github.kevendai.arxiv",
   "name": "arXiv Paper Recommendation",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "api_version": 1,
   "min_host_version": "2.0.0",
   "entry": "bin/ArxivPlugin.exe",

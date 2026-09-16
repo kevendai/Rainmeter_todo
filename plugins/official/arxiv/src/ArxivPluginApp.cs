@@ -30,6 +30,7 @@ internal static partial class TodoApp
         Console.InputEncoding=Encoding.UTF8;Console.OutputEncoding=Encoding.UTF8;
         PluginDataDir=Environment.GetEnvironmentVariable("RW_PLUGIN_DATA_DIR");if(String.IsNullOrWhiteSpace(PluginDataDir))PluginDataDir=Path.Combine(Path.GetTempPath(),"RainmeterArxivPluginData");Directory.CreateDirectory(PluginDataDir);Directory.CreateDirectory(PaperCache);
         if(args.Length>0&&args[0]=="PaperRssSelfTest")return RunPaperRssSelfTests();
+        if(args.Length>0&&args[0]=="PaperSettingsSelfTest")return RunPaperSettingsSelfTests();
         if(args.Length>0&&args[0]=="PaperRssServer"){ResourceDir=PluginDataDir;return RunPaperRssServer();}
         string requestId="";
         try
@@ -82,10 +83,33 @@ internal static partial class TodoApp
         Dictionary<string,object> root=JsonUtil.Object(JsonUtil.Get(secret,"paper_settings"));if(root.Count==0)root=new Dictionary<string,object>{{"Version",2}};
         Dictionary<string,object> api=JsonUtil.Object(JsonUtil.Get(root,"DeepSeek")),file=JsonUtil.Object(JsonUtil.Get(root,"FileServer")),scoring=JsonUtil.Object(JsonUtil.Get(root,"Scoring")),rss=JsonUtil.Object(JsonUtil.Get(root,"Rss"));root["DeepSeek"]=api;root["FileServer"]=file;root["Scoring"]=scoring;root["Rss"]=rss;
         Copy(config,"enabled",root,"Enabled");Copy(config,"api_url",api,"BaseUrl");Copy(config,"api_model",api,"Model");Copy(secret,"api_key",api,"ApiKey");Copy(config,"max_concurrency",api,"MaxConcurrency");Copy(config,"timeout_seconds",api,"TimeoutSeconds");
-        Copy(config,"file_enabled",file,"Enabled");Copy(config,"file_url",file,"BaseUrl");Copy(config,"file_account",file,"Account");Copy(secret,"file_password",file,"Password");
+        Copy(config,"file_enabled",file,"Enabled");CopyAddress(config,"file_url",file,"BaseUrl");Copy(config,"file_account",file,"Account");Copy(secret,"file_password",file,"Password");
         Copy(config,"categories",scoring,"Categories");Copy(config,"exclude_categories",scoring,"ExcludeCategories");Copy(config,"title_prompt",scoring,"TitlePrompt");Copy(config,"abstract_prompt",scoring,"AbstractPrompt");Copy(config,"title_threshold",scoring,"TitleThreshold");Copy(config,"title_batch_size",scoring,"TitleBatchSize");Copy(config,"abstract_batch_size",scoring,"AbstractBatchSize");Copy(config,"import_count",scoring,"ImportCount");Copy(config,"cache_days",scoring,"CacheDays");Copy(config,"rss_enabled",rss,"Enabled");rss["Address"]="127.0.0.1";rss["Port"]=18158;return root;
     }
     private static void Copy(Dictionary<string,object> source,string from,Dictionary<string,object> target,string to){object value=JsonUtil.Get(source,from);if(value!=null)target[to]=value;}
+    // 服务器地址这一项由宿主代管：装了地址插件（SSDP）时，宿主会把已保存的地址改写主机后塞回 file_url，
+    // 同时在设置界面隐藏该项、不把它写进 config.json。宿主没有值的时候仍然会塞一个空串进来——那个空串
+    // 只代表「宿主这边没有值」，不代表「用户清空了地址」。若照抄进 BaseUrl，从旧版本迁移过来的地址就会被
+    // 抹掉，随后「启用中 + 地址为空」会让设置校验直接报错，远端拉取、上传、状态检查全部停用。
+    // 所以要关闭文件同步请用「启用文件同步」开关，清空地址一律视为未设置。
+    private static void CopyAddress(Dictionary<string,object> source,string from,Dictionary<string,object> target,string to)
+    {
+        string value=JsonUtil.String(source,from,"").Trim();if(value=="")return;target[to]=value;
+    }
+    // 回归自检：宿主注入的 file_url 为空串时不得清掉已有地址，有值时必须覆盖，两边都没有时保持为空。
+    private static int RunPaperSettingsSelfTests()
+    {
+        if(PapersBaseUrl(BuildPaperSettings(new Dictionary<string,object>{{"file_url",""}},SettingsSecret("http://192.0.2.10:8900")))!="http://192.0.2.10:8900")return 51;
+        if(PapersBaseUrl(BuildPaperSettings(new Dictionary<string,object>{{"file_url","http://192.0.2.11:8901"}},SettingsSecret("http://192.0.2.10:8900")))!="http://192.0.2.11:8901")return 52;
+        if(PapersBaseUrl(BuildPaperSettings(new Dictionary<string,object>{{"file_url",""}},SettingsSecret("")))!="")return 53;
+        if(PapersBaseUrl(BuildPaperSettings(new Dictionary<string,object>(),SettingsSecret("http://192.0.2.10:8900")))!="http://192.0.2.10:8900")return 54;
+        return 0;
+    }
+    private static Dictionary<string,object> SettingsSecret(string address)
+    {
+        return new Dictionary<string,object>{{"paper_settings",new Dictionary<string,object>{{"Version",2},{"Enabled",true},{"FileServer",new Dictionary<string,object>{{"Enabled",true},{"BaseUrl",address},{"Account","legacy"},{"Password","legacy"}}}}}};
+    }
+    private static string PapersBaseUrl(Dictionary<string,object> merged){return JsonUtil.String(JsonUtil.Object(JsonUtil.Get(merged,"FileServer")),"BaseUrl","");}
     private static string PaperExternalId(Dictionary<string,object> task){string note=S(task,"note");System.Text.RegularExpressions.Match m=System.Text.RegularExpressions.Regex.Match(note,@"arXiv ID[：:]\s*(\d{4}\.\d{4,5})");if(m.Success)return m.Groups[1].Value;m=System.Text.RegularExpressions.Regex.Match(S(task,"target"),@"/(\d{4}\.\d{4,5})");return m.Success?m.Groups[1].Value:"";}
     private static Dictionary<string,object> Meta(Dictionary<string,object> state){Dictionary<string,object> v=JsonUtil.Object(JsonUtil.Get(state,"meta"));state["meta"]=v;return v;}
     private static List<Dictionary<string,object>> Tasks(Dictionary<string,object> state){List<Dictionary<string,object>> v=JsonUtil.Array(JsonUtil.Get(state,"tasks")).Select(JsonUtil.Object).ToList();state["tasks"]=v;return v;}
