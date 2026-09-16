@@ -32,7 +32,7 @@ namespace RainmeterBackend
 
     internal sealed class PluginManifest
     {
-        public string Id, Name, Version, MinHostVersion, Entry, SettingsSchema, Homepage, AddressValueKey;
+        public string Id, Name, Version, MinHostVersion, Entry, SettingsSchema, Homepage, AddressValueKey, AddressTarget;
         public int ApiVersion, AddressPriority;
         public bool DefaultEnabled;
         public List<string> Capabilities = new List<string>();
@@ -54,6 +54,7 @@ namespace RainmeterBackend
             m.Capabilities=JsonUtil.Array(JsonUtil.Get(v,"capabilities")).Select(Convert.ToString).Where(x=>!String.IsNullOrWhiteSpace(x)).ToList();
             m.Permissions=JsonUtil.Array(JsonUtil.Get(v,"permissions")).Select(Convert.ToString).Where(x=>!String.IsNullOrWhiteSpace(x)).ToList();
             m.Actions=JsonUtil.Array(JsonUtil.Get(v,"actions")).Select(JsonUtil.Object).ToList();Dictionary<string,object> address=JsonUtil.Object(JsonUtil.Get(v,"address_provider"));m.AddressPriority=JsonUtil.Int(address,"priority",0);m.AddressValueKey=JsonUtil.String(address,"value","");m.AddressTargets=JsonUtil.Array(JsonUtil.Get(address,"targets")).Select(Convert.ToString).Where(x=>!String.IsNullOrWhiteSpace(x)).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+            m.AddressTarget=JsonUtil.String(v,"address_target","").Trim();
             m.Validate(root); return m;
         }
 
@@ -66,6 +67,7 @@ namespace RainmeterBackend
             if(String.IsNullOrWhiteSpace(Name))throw new InvalidDataException("插件名称不能为空");
             HashSet<string> allowed=new HashSet<string>(new[]{"todo_source","todo_transform","value_provider"},StringComparer.OrdinalIgnoreCase);
             if(Capabilities.Count==0||Capabilities.Any(x=>!allowed.Contains(x)))throw new InvalidDataException("插件 capability 无效");if(AddressTargets.Count>0&&(!Capabilities.Contains("value_provider")||!Regex.IsMatch(AddressValueKey??"",@"^[A-Za-z0-9_.-]{1,80}$")))throw new InvalidDataException("地址提供者声明无效");
+            if(!String.IsNullOrEmpty(AddressTarget)&&!Regex.IsMatch(AddressTarget,@"^[a-z0-9]+(?:[._-][a-z0-9]+)+$"))throw new InvalidDataException("插件 address_target 格式无效");
             if(!File.Exists(SafeChildPath(root,Entry,"插件入口")))throw new InvalidDataException("插件入口不存在");
             if(!String.IsNullOrWhiteSpace(SettingsSchema)&&!File.Exists(SafeChildPath(root,SettingsSchema,"设置 Schema")))throw new InvalidDataException("设置 Schema 不存在");
         }
@@ -103,11 +105,27 @@ namespace RainmeterBackend
             return m;
         }
 
+        // 插件在 plugin.json 的 address_target 里声明自己的地址由谁代管（例如 arxiv.file_server）。
+        // 空串表示该插件不接受地址插件代管，本体不做任何地址改写。
+        public static string AddressTargetOf(string id)
+        {
+            try
+            {
+                Dictionary<string,object> current=Current(id);if(current.Count==0)return "";
+                PluginManifest manifest=PluginManifest.Load(PluginPaths.VersionRoot(id,JsonUtil.String(current,"version","")));
+                return String.IsNullOrWhiteSpace(manifest.AddressTarget)?"":manifest.AddressTarget;
+            }
+            catch{return "";}
+        }
+
         public static PluginCallResult Invoke(string id,string action,object input,string trigger,int timeoutSeconds,Action<Dictionary<string,object>> progress)
         {
             PluginPaths.Ensure();bool settingsAction=String.Equals(action,"validate_settings",StringComparison.OrdinalIgnoreCase)||String.Equals(action,"configure_account",StringComparison.OrdinalIgnoreCase)||String.Equals(action,"configure_discovery",StringComparison.OrdinalIgnoreCase);PluginManifest m=Resolve(id,!settingsAction);string root=PluginPaths.VersionRoot(id,m.Version);
             string entry=PluginManifest.SafeChildPath(root,m.Entry,"插件入口"),requestId=Guid.NewGuid().ToString("N");
-            Dictionary<string,object> resolvedConfig=ReadObject(Path.Combine(PluginPaths.DataRoot(id),"config.json"));if(id=="io.github.kevendai.arxiv")resolvedConfig["file_url"]=DynamicPluginValues.BindForTarget(JsonUtil.String(resolvedConfig,"file_url",""),"arxiv.file_server");DynamicPluginValues.ResolveObject(resolvedConfig);
+            // 本体不向插件注入任何地址：声明了 address_target 的插件自己决定用哪个地址
+            // （通过 DynamicPluginValues.AddressProvider 向地址插件申请，并自行记录是否被接管）。
+            // 这里只做用户自己写的 {{plugin:...}} 占位符替换，不再替插件绑定/改写地址。
+            Dictionary<string,object> resolvedConfig=ReadObject(Path.Combine(PluginPaths.DataRoot(id),"config.json"));DynamicPluginValues.ResolveObject(resolvedConfig);
             Dictionary<string,object> request=new Dictionary<string,object>{
                 {"api_version",1},{"request_id",requestId},{"plugin_id",id},{"action",action},
                 {"context",new Dictionary<string,object>{{"host_version",HostVersion},{"locale",CultureInfo.CurrentUICulture.Name},{"now",DateTimeOffset.Now.ToString("o",CultureInfo.InvariantCulture)},{"trigger",trigger??"manual"}}},

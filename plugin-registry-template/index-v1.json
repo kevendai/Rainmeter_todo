@@ -1,18 +1,18 @@
 {
   "version": 1,
-  "generated_at": "2026-09-16T22:27:16.194461+08:00",
+  "generated_at": "2026-09-16T23:05:00.000000+08:00",
   "plugins": [
     {
       "id": "io.github.kevendai.arxiv",
       "name": "arXiv Paper Recommendation",
       "channel": "stable",
       "official": true,
-      "version": "1.0.1",
+      "version": "1.0.2",
       "api_version": 1,
       "min_host_version": "2.0.0",
-      "download": "https://github.com/kevendai/Rainmeter_todo-plugin-registry/releases/download/arxiv-v1.0.1/arxiv-1.0.1.rwplugin",
-      "sha256": "bb41b10078061a606327cfbbc14935aaf3793e453691b2afd68d4381115bf620",
-      "release_notes": "修复文件服务器地址被清空导致远端拉取失败的问题：宿主在插件未保存过该地址时会注入空串，插件据此把迁移过来的服务器地址覆盖为空，于是「已启用 + 地址为空」使设置校验报错、远端论文拉取/上传/状态检查全部停用。现在地址字段忽略空值（关闭同步请用「启用文件同步」开关），并新增自检覆盖该合并逻辑。",
+      "download": "https://github.com/kevendai/Rainmeter_todo-plugin-registry/releases/download/arxiv-v1.0.2/arxiv-1.0.2.rwplugin",
+      "sha256": "955666018d0532598b56ebd09a9df9cf0298e6ab1b07bc31a4ce3fbe49062b67",
+      "release_notes": "文件服务器地址改由插件自己解析，不再依赖主程序注入：插件在 plugin.json 声明 address_target = arxiv.file_server，主动向地址插件（如 SSDP 服务器 IP 同步）申请主机，只替换主机、保留协议/端口/路径，并记录被谁接管，因此插件明确知道自己已被接管；设置界面会显示实际使用的地址并提示在这里改 IP 没有意义。接管结果只用于运行时，不写回你的设置。建议配合主程序 2.0.4 使用。",
       "homepage": "https://github.com/kevendai/Rainmeter_todo-plugin-registry/tree/master/official-plugins/arxiv"
     },
     {

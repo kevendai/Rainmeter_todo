@@ -16,6 +16,22 @@ A `.rwplugin` is a ZIP containing `plugin.json` at its root. Plugin IDs use reve
 
 Permissions are declarations shown to users. API v1 does not claim to sandbox an ordinary EXE. Plugins receive only their own `config`, their own decrypted `secret`, the requested input, and a private data directory through `RW_PLUGIN_DATA_DIR`. They must never edit `tasks.json`.
 
+## Address takeover
+
+The host never injects or rewrites an address on a plugin's behalf. A plugin that can serve its address from a discovered host declares it in the manifest:
+
+```json
+{"address_target":"arxiv.file_server"}
+```
+
+The name is a contract between the consumer and the provider. A provider plugin declares `address_provider.targets` containing that same name, plus a priority and the `PluginValues.json` key it publishes (`{"address_provider":{"priority":100,"value":"server_ip","targets":["arxiv.file_server"]}}`). The host only substitutes user-authored `{{plugin:<id>:<key>}}` placeholders; everything else is the plugin's own decision.
+
+A consumer resolves the address itself at runtime, in whatever order suits it: take the user's stored value, then ask the provider whose `address_provider.targets` includes its `address_target`, and if that provider is enabled and has a value, replace only the host part while keeping scheme, port and path. The plugin is expected to record the outcome — who took over, what the user had stored, and the effective address — so it knows it is being taken over and can say so instead of letting the user edit a value that has no effect. The replaced value is runtime-only: never write it back into the user's own settings, so disabling the provider restores the stored address immediately.
+
+In the settings schema, mark the field the provider may take over with `"x-address": true`. The host then renders it read-only while a provider is active and explains that the value comes from that provider.
+
+Consumers are backwards compatible: an older host simply passes the stored address through, and `address_target` is ignored.
+
 ## Request
 
 ```json

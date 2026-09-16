@@ -1,13 +1,14 @@
 {
   "id": "io.github.kevendai.arxiv",
   "name": "arXiv Paper Recommendation",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "api_version": 1,
   "min_host_version": "2.0.0",
   "entry": "bin/ArxivPlugin.exe",
   "capabilities": ["todo_source"],
   "permissions": ["network"],
   "settings_schema": "settings.schema.json",
+  "address_target": "arxiv.file_server",
   "homepage": "https://github.com/kevendai/Rainmeter_todo-plugin-registry/tree/master/official-plugins/arxiv",
   "default_enabled": true,
   "actions": [

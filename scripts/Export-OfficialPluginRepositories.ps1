@@ -93,8 +93,10 @@ foreach ($definition in $definitions) {
         Set-Content -LiteralPath $projectPath -Value $projectText -Encoding UTF8
     }
 
-    Set-Content -LiteralPath (Join-Path $target 'Build-Package.ps1') -Value $buildScript -Encoding UTF8
-    Set-Content -LiteralPath (Join-Path $target '.gitignore') -Value $repositoryGitIgnore -Encoding UTF8
+    # 必须写成无 BOM 的 ASCII：Windows PowerShell 5.1 的 -Encoding UTF8 会写入 BOM，
+    # 而 .gitignore 首行一旦带上 BOM，`dist/` 就不再被忽略（dist 里正是打包产物）。
+    Set-Content -LiteralPath (Join-Path $target 'Build-Package.ps1') -Value $buildScript -Encoding ascii
+    Set-Content -LiteralPath (Join-Path $target '.gitignore') -Value $repositoryGitIgnore -Encoding ascii
 
     if (-not $SkipBuild) {
         & (Join-Path $target 'Build-Package.ps1') -OutputDirectory (Join-Path $target 'dist')

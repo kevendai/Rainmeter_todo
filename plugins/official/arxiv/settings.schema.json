@@ -17,7 +17,7 @@
     "title_prompt": {"type":"multiline","title":"标题评分提示词","default":"","x-order":14,"x-advanced":true},
     "abstract_prompt": {"type":"multiline","title":"摘要评分提示词","default":"","x-order":15,"x-advanced":true},
     "file_enabled": {"type":"boolean","title":"启用文件服务器同步","default":false,"x-order":16},
-    "file_url": {"type":"string","title":"File Browser 地址","default":"","x-order":17,"x-advanced":true},
+    "file_url": {"type":"string","title":"File Browser 地址","default":"","x-address":true,"x-order":17,"x-advanced":true},
     "file_account": {"type":"string","title":"文件服务器账号","default":"","x-order":18,"x-advanced":true},
     "file_password": {"type":"password","title":"文件服务器密码","x-secret":true,"x-order":19,"x-advanced":true},
     "translation_secret_id": {"type":"string","title":"Tencent Cloud SecretId","x-secret":true,"x-order":20,"x-advanced":true},

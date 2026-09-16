@@ -92,6 +92,48 @@ internal static partial class TodoApp
         public PaperHttpException(int statusCode, string message) : base(message) { StatusCode = statusCode; }
     }
 
+    // 重试和拆批都救不回来的错误（例如 API Key 无效 401、余额不足 402、被拒绝 403）。
+    // 一旦出现就立刻中止整轮评分，而不是对每一批都白跑一遍。
+    private sealed class PaperFatalException : Exception
+    {
+        public int StatusCode;
+        public PaperFatalException(int statusCode, string message) : base(message) { StatusCode = statusCode; }
+    }
+
+    private static bool IsFatalPaperStatus(int statusCode)
+    {
+        return statusCode == 401 || statusCode == 402 || statusCode == 403;
+    }
+
+    private static string DescribePaperFailure(Exception ex)
+    {
+        PaperFatalException fatal = ex as PaperFatalException;
+        if (fatal != null)
+        {
+            if (fatal.StatusCode == 402) return "DeepSeek 账户余额不足（HTTP 402），请充值后重新同步论文";
+            if (fatal.StatusCode == 401) return "DeepSeek API Key 无效或已被撤销（HTTP 401），请在插件设置里检查 API Key";
+            if (fatal.StatusCode == 403) return "DeepSeek 拒绝了本次请求（HTTP 403），请检查账号权限或所在地区限制";
+            return fatal.Message;
+        }
+        PaperHttpException http = ex as PaperHttpException;
+        if (http != null && IsFatalPaperStatus(http.StatusCode)) return DescribePaperFailure(new PaperFatalException(http.StatusCode, http.Message));
+        return SafeStatusMessage(ex == null ? "" : ex.Message);
+    }
+
+    // Parallel.ForEach 会把并行体里的异常包成 AggregateException，直接取 Message 只会得到
+    // 「发生一个或多个错误。」这类无信息量的文案，真实原因（例如 402）就丢了。
+    private static Exception UnwrapAggregate(Exception ex)
+    {
+        AggregateException aggregate = ex as AggregateException;
+        if (aggregate == null) return ex;
+        List<Exception> flat = aggregate.Flatten().InnerExceptions.ToList();
+        Exception fatal = flat.FirstOrDefault(e => e is PaperFatalException);
+        if (fatal != null) return fatal;
+        Exception http = flat.FirstOrDefault(e => e is PaperHttpException);
+        if (http != null) return http;
+        return flat.Count > 0 ? flat[0] : ex;
+    }
+
     private static string PaperJobPath { get { return Path.Combine(PaperCache, "paper-job.json"); } }
     private static string PaperRescorePath(string date) { return Path.Combine(PaperCache, date + "_papers.rescore"); }
 
@@ -429,8 +471,9 @@ internal static partial class TodoApp
             }
             catch (Exception ex)
             {
-                WritePaperJob("failed", "论文评分失败：" + SafeStatusMessage(ex.Message), 0, 0);
-                UpdatePaperStatus("论文评分失败：" + SafeStatusMessage(ex.Message), true);
+                string reason = DescribePaperFailure(UnwrapAggregate(ex));
+                WritePaperJob("failed", "论文评分失败：" + reason, 0, 0);
+                UpdatePaperStatus("论文评分失败：" + reason, true);
                 return 1;
             }
             finally { if (held) mutex.ReleaseMutex(); }
@@ -698,6 +741,8 @@ internal static partial class TodoApp
         object saveLock = new object();
         int completed = 0;
         WritePaperJob(stage, stage == "title" ? "正在并发进行标题评分" : "正在并发进行摘要评分", 0, stagePapers.Count);
+        try
+        {
         Parallel.ForEach(batches, new ParallelOptions { MaxDegreeOfParallelism = settings.MaxConcurrency }, delegate(List<Dictionary<string, object>> batch) {
             Dictionary<int, int> scores = ScoreBatchWithRecovery(batch, stage, minimum, maximum, settings);
             lock (saveLock)
@@ -717,6 +762,8 @@ internal static partial class TodoApp
                 WritePaperJob(stage, (stage == "title" ? "标题评分 " : "摘要评分 ") + completed + "/" + stagePapers.Count, completed, stagePapers.Count);
             }
         });
+        }
+        catch (AggregateException ex) { throw UnwrapAggregate(ex); }
     }
 
     private static Dictionary<int, int> ScoreBatchWithRecovery(List<Dictionary<string, object>> batch, string stage, int minimum, int maximum, PaperSettings settings)
@@ -725,6 +772,12 @@ internal static partial class TodoApp
         for (int attempt = 0; attempt < 2; attempt++)
         {
             try { return CallDeepSeekBatch(batch, stage, minimum, maximum, settings); }
+            catch (PaperHttpException ex)
+            {
+                // 致命错误重试没有意义，直接上抛，让整轮评分立刻结束。
+                if (IsFatalPaperStatus(ex.StatusCode)) throw new PaperFatalException(ex.StatusCode, ex.Message);
+                last = ex;
+            }
             catch (Exception ex) { last = ex; }
         }
         if (batch.Count > 1)
@@ -1164,6 +1217,13 @@ internal static partial class TodoApp
             Dictionary<string, object> todayTask = new Dictionary<string, object>{{"source","arxiv"},{"created_at","2026-07-16T10:00:00+08:00"}};
             Dictionary<string, object> oldTask = new Dictionary<string, object>{{"source","arxiv"},{"created_at","2026-07-15T10:00:00+08:00"}};
             if (!IsPaperTaskCreatedOnDate(todayTask, "2026-07-16") || IsPaperTaskCreatedOnDate(oldTask, "2026-07-16")) return 43;
+            if (!IsFatalPaperStatus(401) || !IsFatalPaperStatus(402) || !IsFatalPaperStatus(403) || IsFatalPaperStatus(429) || IsFatalPaperStatus(0)) return 45;
+            if (DescribePaperFailure(new PaperFatalException(402, "HTTP 402 Insufficient Balance")).IndexOf("余额不足", StringComparison.Ordinal) < 0) return 46;
+            Exception unwrapped = UnwrapAggregate(new AggregateException(new Exception("发生一个或多个错误。"), new PaperFatalException(402, "HTTP 402 Insufficient Balance")));
+            if (!(unwrapped is PaperFatalException) || DescribePaperFailure(unwrapped).IndexOf("余额不足", StringComparison.Ordinal) < 0) return 47;
+            Exception nested = UnwrapAggregate(new AggregateException(new AggregateException(new PaperHttpException(429, "HTTP 429 busy"))));
+            if (!(nested is PaperHttpException) || ((PaperHttpException)nested).StatusCode != 429) return 48;
+            if (DescribePaperFailure(new PaperHttpException(401, "HTTP 401 nope")).IndexOf("API Key", StringComparison.Ordinal) < 0) return 49;
             return 0;
         }
         finally

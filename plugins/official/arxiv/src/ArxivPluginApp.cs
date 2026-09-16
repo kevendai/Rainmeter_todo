@@ -10,6 +10,9 @@ using RainmeterBackend;
 internal static partial class TodoApp
 {
     private const string GitHubRepository="kevendai/Rainmeter_todo";
+    // 本插件在 plugin.json 的 address_target 里声明的地址代管目标。本体不再替插件注入地址，
+    // 由插件自己拿着这个名字去问地址插件（如 SSDP 服务器 IP 同步）要主机。
+    private const string AddressTarget="arxiv.file_server";
     private static string ResourceDir="";
     private static string PluginDataDir="";
     private static string StatePath { get { return Path.Combine(PluginDataDir,"rss-tasks.json"); } }
@@ -31,6 +34,10 @@ internal static partial class TodoApp
         PluginDataDir=Environment.GetEnvironmentVariable("RW_PLUGIN_DATA_DIR");if(String.IsNullOrWhiteSpace(PluginDataDir))PluginDataDir=Path.Combine(Path.GetTempPath(),"RainmeterArxivPluginData");Directory.CreateDirectory(PluginDataDir);Directory.CreateDirectory(PaperCache);
         if(args.Length>0&&args[0]=="PaperRssSelfTest")return RunPaperRssSelfTests();
         if(args.Length>0&&args[0]=="PaperSettingsSelfTest")return RunPaperSettingsSelfTests();
+        if(args.Length>0&&args[0]=="AddressStatusSelfTest")return RunAddressStatusSelfTests();
+        // 论文链路的共享逻辑（TodoPaperService，本体与插件同源）此前没有入口跑到，这里补上，
+        // 覆盖致命错误快速失败与真实错误文案（401/402/403）。
+        if(args.Length>0&&args[0]=="PaperServiceSelfTest")return RunPaperSelfTests();
         if(args.Length>0&&args[0]=="PaperRssServer"){ResourceDir=PluginDataDir;return RunPaperRssServer();}
         string requestId="";
         try
@@ -53,9 +60,9 @@ internal static partial class TodoApp
                 return Emit(requestId,true,new Dictionary<string,object>{{"tasks",new List<object>()},{"summary","今日论文已同步"}},null);
             Console.Out.WriteLine(JsonUtil.Serialize(new Dictionary<string,object>{{"type","progress"},{"request_id",requestId},{"current",0},{"total",1},{"message","正在获取和评分论文"}}));
             PaperSettings settings=LoadPaperSettings();
-            if(action=="validate_settings"){ValidatePaperSettings(settings);return Emit(requestId,true,new Dictionary<string,object>{{"message","设置有效"}},null);}
+            if(action=="validate_settings"){ValidatePaperSettings(settings);return Emit(requestId,true,new Dictionary<string,object>{{"message","设置有效"},{"address",AddressStatus(paper)}},null);}
             if(action=="test_api"){TestDeepSeekConnection(settings);return Emit(requestId,true,new Dictionary<string,object>{{"message","DeepSeek 连接成功"}},null);}
-            if(action=="test_file_server"){TestFileServerConnection(settings);return Emit(requestId,true,new Dictionary<string,object>{{"message","文件服务器连接成功"}},null);}
+            if(action=="test_file_server"){TestFileServerConnection(settings);string provider=AddressProviderName();return Emit(requestId,true,new Dictionary<string,object>{{"message",provider==""?"文件服务器连接成功":"文件服务器连接成功（地址由“"+provider+"”提供）"}},null);}
             if(action=="test_translation"){return Emit(requestId,true,new Dictionary<string,object>{{"message",TestTranslationCredentials(JsonUtil.String(translation,"SecretId",""),JsonUtil.String(translation,"SecretKey",""))}},null);}
             List<Dictionary<string,object>> cached;
             string finalPath=Path.Combine(PaperCache,date+"_papers.json");
@@ -83,27 +90,120 @@ internal static partial class TodoApp
         Dictionary<string,object> root=JsonUtil.Object(JsonUtil.Get(secret,"paper_settings"));if(root.Count==0)root=new Dictionary<string,object>{{"Version",2}};
         Dictionary<string,object> api=JsonUtil.Object(JsonUtil.Get(root,"DeepSeek")),file=JsonUtil.Object(JsonUtil.Get(root,"FileServer")),scoring=JsonUtil.Object(JsonUtil.Get(root,"Scoring")),rss=JsonUtil.Object(JsonUtil.Get(root,"Rss"));root["DeepSeek"]=api;root["FileServer"]=file;root["Scoring"]=scoring;root["Rss"]=rss;
         Copy(config,"enabled",root,"Enabled");Copy(config,"api_url",api,"BaseUrl");Copy(config,"api_model",api,"Model");Copy(secret,"api_key",api,"ApiKey");Copy(config,"max_concurrency",api,"MaxConcurrency");Copy(config,"timeout_seconds",api,"TimeoutSeconds");
-        Copy(config,"file_enabled",file,"Enabled");CopyAddress(config,"file_url",file,"BaseUrl");Copy(config,"file_account",file,"Account");Copy(secret,"file_password",file,"Password");
+        Copy(config,"file_enabled",file,"Enabled");ApplyFileAddress(config,file);Copy(config,"file_account",file,"Account");Copy(secret,"file_password",file,"Password");
         Copy(config,"categories",scoring,"Categories");Copy(config,"exclude_categories",scoring,"ExcludeCategories");Copy(config,"title_prompt",scoring,"TitlePrompt");Copy(config,"abstract_prompt",scoring,"AbstractPrompt");Copy(config,"title_threshold",scoring,"TitleThreshold");Copy(config,"title_batch_size",scoring,"TitleBatchSize");Copy(config,"abstract_batch_size",scoring,"AbstractBatchSize");Copy(config,"import_count",scoring,"ImportCount");Copy(config,"cache_days",scoring,"CacheDays");Copy(config,"rss_enabled",rss,"Enabled");rss["Address"]="127.0.0.1";rss["Port"]=18158;return root;
     }
     private static void Copy(Dictionary<string,object> source,string from,Dictionary<string,object> target,string to){object value=JsonUtil.Get(source,from);if(value!=null)target[to]=value;}
-    // 服务器地址这一项由宿主代管：装了地址插件（SSDP）时，宿主会把已保存的地址改写主机后塞回 file_url，
-    // 同时在设置界面隐藏该项、不把它写进 config.json。宿主没有值的时候仍然会塞一个空串进来——那个空串
-    // 只代表「宿主这边没有值」，不代表「用户清空了地址」。若照抄进 BaseUrl，从旧版本迁移过来的地址就会被
-    // 抹掉，随后「启用中 + 地址为空」会让设置校验直接报错，远端拉取、上传、状态检查全部停用。
-    // 所以要关闭文件同步请用「启用文件同步」开关，清空地址一律视为未设置。
-    private static void CopyAddress(Dictionary<string,object> source,string from,Dictionary<string,object> target,string to)
+    // 文件服务器地址不再由本体注入，改由插件自己向地址插件申请主机：
+    //   · 用户自己填的完整地址（协议 / 端口 / 路径）取自 config 的 file_url，其次取 secret 里
+    //     从旧版本迁移过来的 FileServer.BaseUrl；空串只代表「没有值」，绝不会把已有地址抹掉
+    //     （要关同步请用「启用文件同步」开关）。
+    //   · 装了声明了同一个 address_target 的地址插件（例如 SSDP 服务器 IP 同步）并且它已经拿到
+    //     主机时，本插件就是「被接管」状态：只把地址里的主机换成插件给的主机，其余原样保留。
+    //   · 被接管的事实会记进 AddressManaged / AddressManagedBy(Name) / AddressStoredBaseUrl，
+    //     随 runtime-paper.secret 一起落盘 —— 插件因此明确知道自己被谁接管、用户原本填了什么，
+    //     设置界面也能据此提示「在这里改 IP 没有意义」，避免用户徒劳修改。
+    //   · 被接管时换出来的地址只用于这一次运行，绝不写回用户自己的 secret，插件一禁用就恢复原样。
+    private static void ApplyFileAddress(Dictionary<string,object> config,Dictionary<string,object> file)
     {
-        string value=JsonUtil.String(source,from,"").Trim();if(value=="")return;target[to]=value;
+        string stored=JsonUtil.String(config,"file_url","").Trim();
+        if(stored=="")stored=JsonUtil.String(file,"BaseUrl","").Trim();
+        // 先展开用户可能写的 {{plugin:...}} 占位符，再让地址插件决定主机。
+        string resolved=DynamicPluginValues.Resolve(stored);
+        AddressProviderBinding provider=DynamicPluginValues.AddressProvider(AddressTarget);
+        bool managed=provider!=null&&!String.IsNullOrWhiteSpace(provider.Value);
+        if(managed)
+        {
+            string bound=DynamicPluginValues.BindForTarget(resolved,AddressTarget);
+            if(String.IsNullOrWhiteSpace(bound))bound=resolved;
+            file["BaseUrl"]=bound;
+            file["AddressManaged"]=true;
+            file["AddressManagedBy"]=provider.PluginId;
+            file["AddressManagedByName"]=provider.PluginName;
+            if(stored!="")file["AddressStoredBaseUrl"]=stored;
+        }
+        else
+        {
+            if(resolved!="")file["BaseUrl"]=resolved;
+            file["AddressManaged"]=false;
+            file.Remove("AddressManagedBy");file.Remove("AddressManagedByName");file.Remove("AddressStoredBaseUrl");
+        }
     }
-    // 回归自检：宿主注入的 file_url 为空串时不得清掉已有地址，有值时必须覆盖，两边都没有时保持为空。
+    private static string AddressProviderName()
+    {
+        AddressProviderBinding provider=DynamicPluginValues.AddressProvider(AddressTarget);
+        return provider==null||String.IsNullOrWhiteSpace(provider.Value)?"":provider.PluginName;
+    }
+    // 回归自检（51-54）：地址字段的空值不得清掉已有地址，有值必须覆盖，两边都没有时保持为空。
+    // 这些用例在「没有地址插件」的环境里跑，所以同时验证了未被接管时用户地址原样保留。
     private static int RunPaperSettingsSelfTests()
     {
-        if(PapersBaseUrl(BuildPaperSettings(new Dictionary<string,object>{{"file_url",""}},SettingsSecret("http://192.0.2.10:8900")))!="http://192.0.2.10:8900")return 51;
-        if(PapersBaseUrl(BuildPaperSettings(new Dictionary<string,object>{{"file_url","http://192.0.2.11:8901"}},SettingsSecret("http://192.0.2.10:8900")))!="http://192.0.2.11:8901")return 52;
-        if(PapersBaseUrl(BuildPaperSettings(new Dictionary<string,object>{{"file_url",""}},SettingsSecret("")))!="")return 53;
-        if(PapersBaseUrl(BuildPaperSettings(new Dictionary<string,object>(),SettingsSecret("http://192.0.2.10:8900")))!="http://192.0.2.10:8900")return 54;
-        return 0;
+        string previousRoot=Environment.GetEnvironmentVariable("RAINMETER_PLUGIN_ROOT"),isolated=Path.Combine(Path.GetTempPath(),"RainmeterArxivSelfTest-"+Guid.NewGuid().ToString("N"));
+        try
+        {
+            Directory.CreateDirectory(isolated);Environment.SetEnvironmentVariable("RAINMETER_PLUGIN_ROOT",isolated);
+            if(PapersBaseUrl(BuildPaperSettings(new Dictionary<string,object>{{"file_url",""}},SettingsSecret("http://192.0.2.10:8900")))!="http://192.0.2.10:8900")return 51;
+            if(PapersBaseUrl(BuildPaperSettings(new Dictionary<string,object>{{"file_url","http://192.0.2.11:8901"}},SettingsSecret("http://192.0.2.10:8900")))!="http://192.0.2.11:8901")return 52;
+            if(PapersBaseUrl(BuildPaperSettings(new Dictionary<string,object>{{"file_url",""}},SettingsSecret("")))!="")return 53;
+            if(PapersBaseUrl(BuildPaperSettings(new Dictionary<string,object>(),SettingsSecret("http://192.0.2.10:8900")))!="http://192.0.2.10:8900")return 54;
+            return 0;
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("RAINMETER_PLUGIN_ROOT",previousRoot);
+            try{Directory.Delete(isolated,true);}catch{}
+        }
+    }
+    // 回归自检（55-59）：地址插件接管 / 未接管 / 值为空 / 插件被禁用 四种情形下的地址与「是否被接管」标记。
+    private static int RunAddressStatusSelfTests()
+    {
+        string previousRoot=Environment.GetEnvironmentVariable("RAINMETER_PLUGIN_ROOT"),isolated=Path.Combine(Path.GetTempPath(),"RainmeterArxivAddressTest-"+Guid.NewGuid().ToString("N"));
+        try
+        {
+            Directory.CreateDirectory(isolated);Environment.SetEnvironmentVariable("RAINMETER_PLUGIN_ROOT",isolated);
+            // 55：根本没有地址插件 → 不接管，用户地址原样保留。
+            Dictionary<string,object> plain=BuildPaperSettings(new Dictionary<string,object>(),SettingsSecret("http://192.0.2.10:8900"));
+            if(PapersBaseUrl(plain)!="http://192.0.2.10:8900"||IsAddressManaged(plain))return 55;
+            // 56：地址插件已启用并给出主机 → 只换主机，保留端口与路径，并标记被谁接管。
+            WriteFakeAddressProvider(isolated,true,"server_ip",AddressTarget,"203.0.113.9","Fake SSDP");
+            Dictionary<string,object> managed=BuildPaperSettings(new Dictionary<string,object>(),SettingsSecret("http://192.0.2.10:8900/files"));
+            if(PapersBaseUrl(managed)!="http://203.0.113.9:8900/files"||!IsAddressManaged(managed))return 56;
+            if(AddressField(managed,"AddressManagedBy")!="io.github.test.fake-address"||AddressField(managed,"AddressManagedByName")!="Fake SSDP"||AddressField(managed,"AddressStoredBaseUrl")!="http://192.0.2.10:8900/files")return 57;
+            // 58：地址插件已启用但还没拿到主机 → 视为未接管，用户地址仍然可用。
+            WriteFakeAddressProvider(isolated,true,"server_ip",AddressTarget,"","Fake SSDP");
+            Dictionary<string,object> emptyProvider=BuildPaperSettings(new Dictionary<string,object>(),SettingsSecret("http://192.0.2.10:8900"));
+            if(PapersBaseUrl(emptyProvider)!="http://192.0.2.10:8900"||IsAddressManaged(emptyProvider))return 58;
+            // 59：地址插件被禁用 → 不再接管（哪怕它上次拿到的 IP 还在）。
+            WriteFakeAddressProvider(isolated,false,"server_ip",AddressTarget,"203.0.113.9","Fake SSDP");
+            Dictionary<string,object> disabled=BuildPaperSettings(new Dictionary<string,object>(),SettingsSecret("http://192.0.2.10:8900"));
+            if(PapersBaseUrl(disabled)!="http://192.0.2.10:8900"||IsAddressManaged(disabled))return 59;
+            return 0;
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("RAINMETER_PLUGIN_ROOT",previousRoot);
+            try{Directory.Delete(isolated,true);}catch{}
+        }
+    }
+    private static void WriteFakeAddressProvider(string root,bool enabled,string valueKey,string target,string ip,string name)
+    {
+        string pluginRoot=Path.Combine(root,"Plugins","io.github.test.fake-address"),versionRoot=Path.Combine(pluginRoot,"versions","1.0.0");
+        Directory.CreateDirectory(versionRoot);
+        JsonUtil.SaveAtomic(Path.Combine(pluginRoot,"current.json"),new Dictionary<string,object>{{"version","1.0.0"},{"enabled",enabled}});
+        JsonUtil.SaveAtomic(Path.Combine(versionRoot,"plugin.json"),new Dictionary<string,object>{{"id","io.github.test.fake-address"},{"name",name},{"capabilities",new List<object>{"value_provider"}},{"address_provider",new Dictionary<string,object>{{"priority",100},{"value",valueKey},{"targets",new List<object>{target}}}}});
+        JsonUtil.SaveAtomic(Path.Combine(root,"PluginValues.json"),new Dictionary<string,object>{{"entries",new Dictionary<string,object>{{("Plugin_io_github_test_fake_address_"+valueKey),new Dictionary<string,object>{{"value",ip}}}}},{"providers",new Dictionary<string,object>()}});
+    }
+    private static bool IsAddressManaged(Dictionary<string,object> merged){return JsonUtil.Bool(JsonUtil.Object(JsonUtil.Get(merged,"FileServer")),"AddressManaged",false);}
+    private static string AddressField(Dictionary<string,object> merged,string key){return JsonUtil.String(JsonUtil.Object(JsonUtil.Get(merged,"FileServer")),key,"");}
+    // 插件对「当前地址是谁给的」的自述：设置界面/日志可据此提示用户。
+    private static Dictionary<string,object> AddressStatus(Dictionary<string,object> merged)
+    {
+        return new Dictionary<string,object>{
+            {"managed",IsAddressManaged(merged)},
+            {"provider",AddressField(merged,"AddressManagedBy")},
+            {"provider_name",AddressField(merged,"AddressManagedByName")},
+            {"effective",PapersBaseUrl(merged)},
+            {"stored",AddressField(merged,"AddressStoredBaseUrl")}};
     }
     private static Dictionary<string,object> SettingsSecret(string address)
     {
