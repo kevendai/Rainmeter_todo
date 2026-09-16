@@ -35,6 +35,7 @@ namespace RainmeterUpdater
                 ServicePointManager.SecurityProtocol |= (SecurityProtocolType)3072;
                 ServicePointManager.Expect100Continue = false;
                 Options options = Options.Parse(args);
+                if (options.DelayMilliseconds > 0) Thread.Sleep(Math.Min(options.DelayMilliseconds, 10000));
                 if (options.Mode.Equals("SelfTest", StringComparison.OrdinalIgnoreCase)) return SelfTest();
                 if (options.Mode.Equals("UpdateUpdater", StringComparison.OrdinalIgnoreCase)) { UpdateUpdater(options); return 0; }
                 if (options.Mode.Equals("InstallPackage", StringComparison.OrdinalIgnoreCase)) { WaitForProcess(options.WaitForProcessId); InstallPackage(options.PackageRoot, options.RainmeterRoot, options.Activate, true); return 0; }
@@ -406,8 +407,8 @@ namespace RainmeterUpdater
 
         private sealed class Options
         {
-            public string Mode = "InstallPackage", Repository = "kevendai/Rainmeter_todo", CurrentVersion = "", PackageRoot = "", RainmeterRoot = ""; public bool Activate, AssumeYes; public int WaitForProcessId;
-            public static Options Parse(string[] args) { var o = new Options(); for (int i = 0; i < args.Length; i++) { string key = args[i].TrimStart('-', '/'); string value = i + 1 < args.Length && !args[i + 1].StartsWith("-") ? args[++i] : null; switch (key.ToLowerInvariant()) { case "mode": o.Mode = value ?? o.Mode; break; case "repository": o.Repository = value ?? o.Repository; break; case "currentversion": o.CurrentVersion = value ?? ""; break; case "packageroot": o.PackageRoot = value ?? ""; break; case "rainmeterroot": o.RainmeterRoot = value ?? ""; break; case "activate": o.Activate = true; if (value != null) i--; break; case "assumeyes": o.AssumeYes = true; if (value != null) i--; break; case "waitforprocessid": Int32.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out o.WaitForProcessId); break; } } return o; }
+            public string Mode = "InstallPackage", Repository = "kevendai/Rainmeter_todo", CurrentVersion = "", PackageRoot = "", RainmeterRoot = ""; public bool Activate, AssumeYes; public int WaitForProcessId, DelayMilliseconds;
+            public static Options Parse(string[] args) { var o = new Options(); for (int i = 0; i < args.Length; i++) { string key = args[i].TrimStart('-', '/'); string value = i + 1 < args.Length && !args[i + 1].StartsWith("-") ? args[++i] : null; switch (key.ToLowerInvariant()) { case "mode": o.Mode = value ?? o.Mode; break; case "repository": o.Repository = value ?? o.Repository; break; case "currentversion": o.CurrentVersion = value ?? ""; break; case "packageroot": o.PackageRoot = value ?? ""; break; case "rainmeterroot": o.RainmeterRoot = value ?? ""; break; case "activate": o.Activate = true; if (value != null) i--; break; case "assumeyes": o.AssumeYes = true; if (value != null) i--; break; case "waitforprocessid": Int32.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out o.WaitForProcessId); break; case "delaymilliseconds": Int32.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out o.DelayMilliseconds); break; } } return o; }
         }
 
         private sealed class ZipEntryInfo { public string Name; public ushort Method, Flags; public uint Crc, Compressed, Uncompressed, LocalOffset, External; }

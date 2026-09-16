@@ -44,6 +44,8 @@ if ($Activate) { $forward += '-Activate' }
 if ($AssumeYes) { $forward += '-AssumeYes' }
 $escaped = @($forward | ForEach-Object { if ($_ -match '[\s"]') { '"' + ($_ -replace '"', '\"') + '"' } else { $_ } })
 if ($Mode -eq 'InstallPackage' -and $packageUpdaterSelected) {
+    $escaped += '-DelayMilliseconds'
+    $escaped += '1500'
     Start-Process -FilePath $updater -ArgumentList $escaped | Out-Null
     exit 0
 }
