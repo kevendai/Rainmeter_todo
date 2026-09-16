@@ -10,6 +10,7 @@ visual-check/
 .release-cache/
 release-build/
 release-build*/
+release-repair-v2.0.1/
 plugin-build*/
 plugin-package*/
 .tmp-plugin-export-*/
