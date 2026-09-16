@@ -395,7 +395,10 @@ namespace RainmeterUpdater
             {
                 try
                 {
-                    if (!Path.GetFullPath(process.MainModule.FileName).Equals(Path.GetFullPath(exe), StringComparison.OrdinalIgnoreCase)) continue;
+                    // Rainmeter may deny access to MainModule while shutting
+                    // down.  At this point the updater has already sent
+                    // !Quit; terminate the remaining Rainmeter instance so
+                    // skin files cannot stay locked.
                     try { process.CloseMainWindow(); } catch { }
                     if (!process.WaitForExit(1500)) process.Kill();
                     process.WaitForExit(5000);
