@@ -5,7 +5,13 @@ param(
 )
 $ErrorActionPreference='Stop'
 $release='v2.0.1'; $asset='rainmeter-desktop-widgets-2.0.1.zip'
-if($Mode -eq 'UpdateUpdater'){ exit 0 }
+if($Mode -eq 'UpdateUpdater'){
+  if([string]::IsNullOrWhiteSpace($RainmeterRoot)){ throw 'RainmeterRoot is required.' }
+  $target=Join-Path $RainmeterRoot 'Skins\Todo\@Resources\Updater'
+  New-Item -ItemType Directory -Path $target -Force | Out-Null
+  Copy-Item -LiteralPath $PSCommandPath -Destination (Join-Path $target 'RainmeterDesktopWidgetsUpdater.ps1') -Force
+  exit 0
+}
 $temp=Join-Path $env:TEMP ('RainmeterDesktopWidgetsRepair-'+[guid]::NewGuid().ToString('N'))
 $download=Join-Path $temp $asset; $extract=Join-Path $temp 'package'; $stage=Join-Path $env:TEMP ('RainmeterDesktopWidgetsRepairStage-'+[guid]::NewGuid().ToString('N'))
 try {
