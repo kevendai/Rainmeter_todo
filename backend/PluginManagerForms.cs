@@ -437,14 +437,12 @@ internal static partial class TodoApp
     {
         OpenFileDialog open=new OpenFileDialog{Filter="Rainmeter 插件 (*.rwplugin)|*.rwplugin",CheckFileExists=true};if(open.ShowDialog(owner)!=DialogResult.OK)return;
         if(!LightUi.Confirm("插件是普通第三方程序，权限声明不能限制其系统访问。仅安装你信任的文件。继续吗？","第三方插件警告"))return;
-        string script=Path.Combine(ResourceDir,"PluginInstaller.ps1");if(!File.Exists(script))throw new Exception("缺少 PluginInstaller.ps1。");
         RunPluginInstaller(open.FileName,"");MessageBox.Show("插件安装成功。默认保持禁用，请检查权限后手动启用。","插件安装",MessageBoxButtons.OK,MessageBoxIcon.Information);
     }
 
     private static void RunPluginInstaller(string package,string expectedSha)
     {
-        string script=Path.Combine(ResourceDir,"PluginInstaller.ps1");if(!File.Exists(script))throw new Exception("缺少 PluginInstaller.ps1。");string sha=expectedSha==""?"":" -ExpectedSha256 \""+expectedSha+"\"";
-        Process p=Process.Start(new ProcessStartInfo("pwsh.exe","-NoLogo -NoProfile -ExecutionPolicy Bypass -File \""+script+"\" -Package \""+package.Replace("\"","\"\"")+"\" -PluginRoot \""+PluginPaths.Plugins+"\" -HostVersion \""+AppVersion+"\""+sha){UseShellExecute=false,CreateNoWindow=true,RedirectStandardError=true,RedirectStandardOutput=true});string output=p.StandardOutput.ReadToEnd(),error=p.StandardError.ReadToEnd();p.WaitForExit();if(p.ExitCode!=0)throw new Exception(error==""?output:error);
+        PluginPackageInstaller.Install(package,PluginPaths.Plugins,AppVersion,expectedSha);
     }
     private static void InstallMarketPlugin(PluginRow row)
     {

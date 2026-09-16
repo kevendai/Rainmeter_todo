@@ -1,9 +1,12 @@
 using System;
+using System.Collections;
 using System.Collections.Generic;
+using System.Collections.Specialized;
 using System.Diagnostics;
 using System.Globalization;
 using System.IO;
 using System.Linq;
+using System.Reflection;
 using System.Text;
 using System.Text.RegularExpressions;
 using System.Threading;
@@ -111,8 +114,7 @@ namespace RainmeterBackend
                 {"config",resolvedConfig},{"secret",ReadSecret(Path.Combine(PluginPaths.DataRoot(id),"secret.dat"))},{"input",input??new Dictionary<string,object>()}};
             List<string> lines=new List<string>();StringBuilder errors=new StringBuilder();object gate=new object();Exception progressError=null;
             ProcessStartInfo info=new ProcessStartInfo(entry){WorkingDirectory=root,UseShellExecute=false,CreateNoWindow=true,RedirectStandardInput=true,RedirectStandardOutput=true,RedirectStandardError=true};
-            info.EnvironmentVariables["RW_PLUGIN_DATA_DIR"]=PluginPaths.DataRoot(id);
-            info.EnvironmentVariables["RW_WINDOW_SCALE"]=UiScale.Current.ToString("0.###",CultureInfo.InvariantCulture);
+            ApplyPluginEnvironment(info,PluginPaths.DataRoot(id),UiScale.Current.ToString("0.###",CultureInfo.InvariantCulture));
             using(Process p=new Process{StartInfo=info,EnableRaisingEvents=true})
             {
                 int total=0;
@@ -140,6 +142,59 @@ namespace RainmeterBackend
                 if(p.ExitCode!=0&&result.Ok)throw new InvalidDataException("插件异常退出："+p.ExitCode.ToString(CultureInfo.InvariantCulture));
                 return result;
             }
+        }
+
+        // 插件进程需要 RW_PLUGIN_DATA_DIR / RW_WINDOW_SCALE 两个环境变量。不能直接写
+        // ProcessStartInfo.EnvironmentVariables：该属性懒加载时会把父进程环境块塞进
+        // StringDictionary（内部把键转小写），而 Windows 的环境块允许同时存在大小写不同的
+        // 同名变量（例如 Git Bash、部分安装器、CI 代理会额外注入一份 PATH），此时 Add 会抛
+        // ArgumentException，导致所有插件一次也启动不了。这里自己构造一份「大小写去重 +
+        // 追加 RW_*」的干净环境块，反射写入 ProcessStartInfo 的私有字段以绕开该实现缺陷；
+        // 反射不可用时退回官方属性。
+        internal static void ApplyPluginEnvironment(ProcessStartInfo info,string dataDir,string windowScale)
+        {
+            StringDictionary environment=BuildChildEnvironment(Environment.GetEnvironmentVariables(),dataDir,windowScale);
+            if(environment!=null&&TryAssignEnvironment(info,environment))return;
+            try
+            {
+                info.EnvironmentVariables["RW_PLUGIN_DATA_DIR"]=dataDir;
+                info.EnvironmentVariables["RW_WINDOW_SCALE"]=windowScale;
+            }
+            catch(ArgumentException ex){throw new InvalidOperationException("无法为插件进程构造环境变量，宿主环境块中存在大小写重复的变量名",ex);}
+        }
+
+        // 同名不同大小写只保留最先出现的一项，与 Windows 解析环境变量的顺序一致，
+        // 因此子进程拿到的值与直接继承父进程时完全相同。
+        internal static StringDictionary BuildChildEnvironment(IDictionary source,string dataDir,string windowScale)
+        {
+            try
+            {
+                StringDictionary environment=new StringDictionary();HashSet<string> seen=new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                if(source!=null)foreach(DictionaryEntry entry in source)
+                {
+                    string key=entry.Key as string;if(String.IsNullOrEmpty(key)||!seen.Add(key))continue;
+                    environment[key]=entry.Value as string??Convert.ToString(entry.Value,CultureInfo.InvariantCulture)??"";
+                }
+                if(!String.IsNullOrEmpty(dataDir))environment["RW_PLUGIN_DATA_DIR"]=dataDir;
+                if(!String.IsNullOrEmpty(windowScale))environment["RW_WINDOW_SCALE"]=windowScale;
+                return environment;
+            }
+            catch(Exception){return null;}
+        }
+
+        private static bool TryAssignEnvironment(ProcessStartInfo info,StringDictionary environment)
+        {
+            try
+            {
+                foreach(string name in new[]{"environmentVariables","_environmentVariables"})
+                {
+                    FieldInfo field=typeof(ProcessStartInfo).GetField(name,BindingFlags.Instance|BindingFlags.NonPublic);
+                    if(field==null||!field.FieldType.IsInstanceOfType(environment))continue;
+                    field.SetValue(info,environment);return true;
+                }
+            }
+            catch(Exception){}
+            return false;
         }
 
         public static void BootstrapBundled(string bundledRoot)

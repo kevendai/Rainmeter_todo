@@ -46,7 +46,6 @@ try {
     & (Join-Path $PSScriptRoot 'Build-Backend.ps1') -Backend Todo -OutputDirectory (Join-Path $stage '@Resources') | Out-Null
     & (Join-Path $PSScriptRoot 'Build-Backend.ps1') -Backend Plugin -OutputDirectory (Join-Path $stage '@Resources') | Out-Null
     & (Join-Path $PSScriptRoot 'Build-OfficialPlugins.ps1') -OutputDirectory (Join-Path $stage '@Resources\BundledPlugins') | Out-Null
-    Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'Install-RwPlugin.ps1') -Destination (Join-Path $stage '@Resources\PluginInstaller.ps1') -Force
     Copy-Item -LiteralPath (Join-Path $projectRoot 'plugin-registry-template\index-v1.json') -Destination (Join-Path $stage '@Resources\plugin-registry-v1.json') -Force
     foreach ($name in $preservedHashes.Keys) { $stagedData = Join-Path $stage ('@Resources\' + $name); if (-not (Test-Path -LiteralPath $stagedData) -or (Get-FileHash -LiteralPath $stagedData -Algorithm SHA256).Hash -ne $preservedHashes[$name]) { throw "Staged user data verification failed: $name" } }
     Remove-Item -LiteralPath (Join-Path $stage '@Resources\Todo.ps1') -Force -ErrorAction SilentlyContinue

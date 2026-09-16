@@ -23,8 +23,10 @@
     <Reference Include="System.Xml" />
   </ItemGroup>
   <ItemGroup>
+    <Compile Include="ZipArchiveToolkit.cs" />
     <Compile Include="Common.cs" />
     <Compile Include="PluginRuntime.cs" />
+    <Compile Include="PluginPackageInstaller.cs" />
     <Compile Include="PluginManagerForms.cs" />
     <Compile Include="TodoApp.cs" />
     <Compile Include="TodoBackupService.cs" />

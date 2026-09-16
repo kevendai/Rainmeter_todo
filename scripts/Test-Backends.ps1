@@ -1,4 +1,4 @@
-$ErrorActionPreference = 'Stop'
+﻿$ErrorActionPreference = 'Stop'
 $projectRoot = Split-Path $PSScriptRoot -Parent
 $backend = Join-Path $projectRoot 'backend'
 $tests = Join-Path $projectRoot 'tests'
@@ -20,6 +20,8 @@ try {
     $calendarLayout = Join-Path $build 'CalendarLayoutProbe.exe'
     $calendarRecurrence = Join-Path $build 'CalendarRecurrenceProbe.exe'
     $addressProviderProbe = Join-Path $build 'AddressProviderProbe.exe'
+    $pluginInstallerProbe = Join-Path $build 'PluginInstallerProbe.exe'
+    $pluginEnvironmentProbe = Join-Path $build 'PluginEnvironmentProbe.exe'
     $fakePlugin = Join-Path $build 'FakePlugin.exe'
     $dpiAssertions = Join-Path $tests 'DpiLayoutAssertions.cs'
     function Get-ProjectSources([string]$projectPath) {
@@ -38,7 +40,14 @@ try {
     if ($updaterProbe.ExitCode -ne 0) { throw 'UpdaterHost self-test failed' }
     Set-Content -LiteralPath (Join-Path $build 'app-version.txt') -Value '2.0.0' -Encoding UTF8
     & (Join-Path $PSScriptRoot 'Build-OfficialPlugins.ps1') -OutputDirectory $bundledPlugins -IncludePrivate | Out-Null
-    & (Join-Path $tests 'Test-PluginInstaller.ps1') -Installer (Join-Path $PSScriptRoot 'Install-RwPlugin.ps1') -PluginSource (Join-Path $bundledPlugins 'calendar-to-todo')
+    & $csc /nologo /target:exe /main:PluginInstallerProbe /optimize+ @refs "/out:$pluginInstallerProbe" @todoSources (Join-Path $tests 'PluginInstallerProbe.cs')
+    if ($LASTEXITCODE -ne 0) { throw 'Plugin installer probe compilation failed' }
+    & $pluginInstallerProbe
+    if ($LASTEXITCODE -ne 0) { throw 'Plugin installer probe failed' }
+    & $csc /nologo /target:exe /main:PluginEnvironmentProbe /optimize+ @refs "/out:$pluginEnvironmentProbe" @todoSources (Join-Path $tests 'PluginEnvironmentProbe.cs')
+    if ($LASTEXITCODE -ne 0) { throw 'Plugin environment probe compilation failed' }
+    & $pluginEnvironmentProbe
+    if ($LASTEXITCODE -ne 0) { throw 'Plugin environment probe failed' }
     & $csc /nologo /target:exe /optimize+ /r:System.Web.Extensions.dll "/out:$smoke" (Join-Path $backend 'SmokeTests.cs')
     if ($LASTEXITCODE -ne 0) { throw 'Smoke test compilation failed' }
     & $csc /nologo /target:exe /main:TodoLayoutProbe /optimize+ @refs "/out:$todoLayout" @todoSources $dpiAssertions (Join-Path $tests 'TodoLayoutProbe.cs')

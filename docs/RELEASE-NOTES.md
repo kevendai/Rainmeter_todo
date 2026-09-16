@@ -1,5 +1,14 @@
 # Release Notes
 
+## 2.0.3 - 2026-09-16
+
+- 修复插件市场与“从本地安装”安装 `.rwplugin` 时报“系统找不到指定的文件。”的问题。根因是插件安装由一段 PowerShell 脚本执行，而主程序硬编码调用 `pwsh.exe`（PowerShell 7）：只装了 Windows PowerShell 5.1 的机器上并不存在这个程序，`Process.Start` 会直接以 WinError 2 失败，插件始终装不上。现在包的校验、安全解压与落盘全部改由主程序自身用 C# 完成，不再依赖任何外部 PowerShell，也不再受脚本文件编码影响。
+- 同一条链路的另外两个隐患一并修掉：安装脚本此前是 UTF-8 无 BOM，Windows PowerShell 5.1 会按系统代码页读取，中文提示会把语句拆坏，即使回退到 5.1 也仍然失败；把暂存目录搬到插件目录时用的是 `Directory.Move`，当 `%TEMP%` 与插件目录不在同一个卷时必然失败，现已改为跨卷复制后删除。
+- 打包与解压收敛为一份共享实现：更新器与插件安装器共用同一个手写 ZIP 读取器，路径越界、符号链接、ZIP64、重复条目、CRC 校验统一在这一层拦截，不再有两份实现各自演化。
+- 皮肤目录定位完全以 Rainmeter 自己的配置为准：优先读便携安装中与 `Rainmeter.exe` 同目录的 `Rainmeter.ini`，其次使用该目录下的 `Skins`，之后才回退到 `%APPDATA%\Rainmeter\Rainmeter.ini` 的 `SkinPath`。标准版（皮肤在 `Documents\Rainmeter\Skins`）与便携版（皮肤在程序目录下的 `Skins`）都能正确定位，不会把标准版的路径套用到便携版，也不写死任何安装位置；`SkinPath` 为相对路径时按 ini 所在目录解析。
+- 插件安装的回归测试从 PowerShell 换成 C# 探针（`tests/PluginInstallerProbe.cs`，19 项断言）：自带极简 ZIP 写入器，可直接构造路径穿越、缺少清单、字段非法等坏包，并覆盖 SHA256 校验、重装幂等与 `enabled` 开关保留；随包的 PowerShell 安装器与旧测试已删除。
+- 修复部分机器上所有插件“一次都跑不起来”的问题：启动插件进程时会把 `RW_PLUGIN_DATA_DIR`、`RW_WINDOW_SCALE` 写进子进程环境，而 `ProcessStartInfo.EnvironmentVariables` 内部用 `StringDictionary` 保存键（键统一转小写），一旦宿主的环境块里同时存在大小写不同的同名变量（例如安装器、Git Bash 或 CI 代理额外注入了一份 `PATH`，于是 `Path` 与 `PATH` 并存），写入会直接抛 `ArgumentException: 已添加项。字典中的关键字:"PATH"所添加的关键字:"Path"`，插件安装、转换、取值全部失败。现在由主程序自己构造一份大小写去重后的干净环境块（同名变量保留系统最先解析到的那一项，其余变量原样保留）再交给子进程，`tests/PluginEnvironmentProbe.cs` 覆盖去重构造与“环境确实送达子进程”。
+
 ## 2.0.2 - 2026-09-16
 
 - 修复插件市场打开时报“市场不可用：传入的对象无效”的问题：索引改为下载原始字节并按 UTF-8 显式解码，不再依赖系统默认代码页，避免中文条目被写成乱码后落盘。只有解析成功的索引才会写入 `registry-cache.json`；缓存本身损坏时自动删除并回退内置 `plugin-registry-v1.json`，市场不会再被一份坏缓存永久卡住。

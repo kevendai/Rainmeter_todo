@@ -243,7 +243,6 @@ function New-Package {
     & (Join-Path $PSScriptRoot 'Build-Backend.ps1') -Backend Calendar -OutputDirectory (Split-Path $calendarExe -Parent) | Out-Null
     & (Join-Path $PSScriptRoot 'Build-Backend.ps1') -Backend Plugin -OutputDirectory (Split-Path $pluginExe -Parent) | Out-Null
     & (Join-Path $PSScriptRoot 'Build-OfficialPlugins.ps1') -OutputDirectory (Join-Path $todoRoot '@Resources\BundledPlugins') -PackageDirectory (Join-Path $todoRoot '@Resources\BundledPluginPackages') -LockPath (Join-Path $todoRoot '@Resources\bundled-plugins.lock.json') | Out-Null
-    Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'Install-RwPlugin.ps1') -Destination (Join-Path $todoRoot '@Resources\PluginInstaller.ps1') -Force
     Copy-Item -LiteralPath (Join-Path $projectRoot 'plugin-registry-template\index-v1.json') -Destination (Join-Path $todoRoot '@Resources\plugin-registry-v1.json') -Force
 
     Copy-Item -LiteralPath $installer -Destination (Join-Path $packageRoot 'Rainmeter-4.5.26.exe') -Force

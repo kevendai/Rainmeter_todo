@@ -14,6 +14,7 @@ using System.Threading;
 using System.Web.Script.Serialization;
 using System.Windows.Forms;
 using Microsoft.Win32;
+using RainmeterBackend;
 
 namespace RainmeterUpdater
 {
@@ -73,9 +74,9 @@ namespace RainmeterUpdater
             {
                 Directory.CreateDirectory(root);
                 if (CompareVersions("2.0.3", "2.0.2") <= 0 || NormalizeVersion("v2.0.3") != "2.0.3") return 2;
-                string candidate = SafeDestination(root, "folder/file.txt");
+                string candidate = ZipArchiveReader.SafeDestination(root, "folder/file.txt");
                 if (!candidate.StartsWith(FullDirectory(root), StringComparison.OrdinalIgnoreCase)) return 3;
-                try { SafeDestination(root, "../escape"); return 4; } catch (InvalidDataException) { }
+                try { ZipArchiveReader.SafeDestination(root, "../escape"); return 4; } catch (InvalidDataException) { }
                 return 0;
             }
             finally { TryDeleteDirectory(root); }
@@ -100,7 +101,7 @@ namespace RainmeterUpdater
             try
             {
                 DownloadVerifiedReleaseAsset(options.Repository, latestTag, asset, zip);
-                ZipExtractor.Extract(zip, extract);
+                ZipArchiveReader.Extract(zip, extract, MaxArchiveBytes, MaxEntryBytes, MaxArchiveBytes, MaxEntries);
                 string packageRoot = FindPackageRoot(extract);
                 string updater = Path.Combine(packageRoot, "Updater", "UpdaterHost.exe");
                 if (!File.Exists(updater)) throw new InvalidDataException("更新包中缺少 UpdaterHost.exe。");
@@ -137,7 +138,7 @@ namespace RainmeterUpdater
                 {
                     string zip = Path.Combine(temp, asset), extract = Path.Combine(temp, "package");
                     DownloadVerifiedReleaseAsset(repo, tag, asset, zip, bootstrapHash);
-                    ZipExtractor.Extract(zip, extract);
+                    ZipArchiveReader.Extract(zip, extract, MaxArchiveBytes, MaxEntryBytes, MaxArchiveBytes, MaxEntries);
                     InstallPackage(FindPackageRoot(extract), rainmeterRoot, activate, false);
                     CopyUpdaterFiles(sourcePackageRoot, GetRoots(rainmeterRoot).SkinsRoot);
                     return;
@@ -329,11 +330,38 @@ namespace RainmeterUpdater
             if (Path.GetFileName(value.TrimEnd('\\')).Equals("Skins", StringComparison.OrdinalIgnoreCase)) { skins = value; rainmeter = Directory.GetParent(value).FullName; }
             else if (File.Exists(Path.Combine(value, "Rainmeter.exe")))
             {
-                string ini = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Rainmeter", "Rainmeter.ini");
-                if (File.Exists(ini)) { Match m = Regex.Match(File.ReadAllText(ini), @"(?m)^SkinPath=(.+)$"); if (m.Success) skins = Path.GetFullPath(Environment.ExpandEnvironmentVariables(m.Groups[1].Value.Trim().Trim('"'))); }
+                // 皮肤目录一律问 Rainmeter 自己，绝不写死 Documents 或程序目录：
+                // 标准版把 SkinPath 写在 %APPDATA%\Rainmeter\Rainmeter.ini（通常是
+                // Documents\Rainmeter\Skins），便携版把 Rainmeter.ini 放在程序目录、
+                // 皮肤放在其下的 Skins。顺序：程序目录里的 ini → 程序目录下的 Skins →
+                // %APPDATA% 的 ini → 退回程序目录下的 Skins。
+                string portableIni = Path.Combine(value, "Rainmeter.ini"), portableSkins = Path.Combine(value, "Skins");
+                string skinPath = File.Exists(portableIni) ? ReadSkinPath(portableIni) : null;
+                if (skinPath == null && Directory.Exists(portableSkins)) skinPath = portableSkins;
+                if (skinPath == null)
+                {
+                    string ini = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Rainmeter", "Rainmeter.ini");
+                    if (File.Exists(ini)) skinPath = ReadSkinPath(ini);
+                }
+                if (skinPath != null) skins = skinPath;
             }
             Directory.CreateDirectory(skins);
             return new Roots { RainmeterRoot = rainmeter, SkinsRoot = skins };
+        }
+        // 读 Rainmeter.ini 的 SkinPath。相对路径按 ini 所在目录解析，不能靠当前工作目录
+        //（更新器已经把工作目录挪到了 %TEMP%）。
+        private static string ReadSkinPath(string ini)
+        {
+            try
+            {
+                Match m = Regex.Match(File.ReadAllText(ini), @"(?m)^SkinPath=(.+)$");
+                if (!m.Success) return null;
+                string path = Environment.ExpandEnvironmentVariables(m.Groups[1].Value.Trim().Trim('"'));
+                if (path.Length == 0) return null;
+                if (!Path.IsPathRooted(path)) path = Path.Combine(Path.GetDirectoryName(ini), path);
+                return Path.GetFullPath(path);
+            }
+            catch { return null; }
         }
         private sealed class Roots { public string RainmeterRoot; public string SkinsRoot; }
 
@@ -519,7 +547,6 @@ namespace RainmeterUpdater
         private static void CopyLimited(Stream input, Stream output, long maximum) { byte[] buffer = new byte[81920]; long total = 0; int read; while ((read = input.Read(buffer, 0, buffer.Length)) > 0) { total += read; if (total > maximum) throw new InvalidDataException("数据超过允许大小。"); output.Write(buffer, 0, read); } }
         private static void TryDeleteDirectory(string path) { if (String.IsNullOrWhiteSpace(path) || !Directory.Exists(path)) return; try { Directory.Delete(path, true); } catch { } }
         private static string FullDirectory(string path) { return Path.GetFullPath(path).TrimEnd('\\') + "\\"; }
-        private static string SafeDestination(string root, string relative) { relative = (relative ?? "").Replace('/', '\\'); if (relative.Length == 0 || Path.IsPathRooted(relative) || relative.Split('\\').Any(x => x == "..")) throw new InvalidDataException("压缩包路径无效。"); string result = Path.GetFullPath(Path.Combine(root, relative)); if (!result.StartsWith(FullDirectory(root), StringComparison.OrdinalIgnoreCase)) throw new InvalidDataException("压缩包路径越界。"); return result; }
         private static IDictionary<string, object> ReadObject(string path) { object value = Json.DeserializeObject(File.ReadAllText(path, Encoding.UTF8)); var dictionary = value as IDictionary<string, object>; if (dictionary == null) throw new InvalidDataException("JSON 对象格式无效：" + path); return dictionary; }
         private static string Text(IDictionary<string, object> item, string key) { object value; return item != null && item.TryGetValue(key, out value) && value != null ? Convert.ToString(value, CultureInfo.InvariantCulture) : ""; }
         private static string NormalizeVersion(string value) { value = (value ?? "").Trim(); if (value.StartsWith("v", StringComparison.OrdinalIgnoreCase)) value = value.Substring(1); Match m = Regex.Match(value, @"\d+(?:\.\d+){0,3}"); return m.Success ? m.Value : value; }
@@ -535,71 +562,5 @@ namespace RainmeterUpdater
             public static Options Parse(string[] args) { var o = new Options(); for (int i = 0; i < args.Length; i++) { string key = args[i].TrimStart('-', '/'); string value = i + 1 < args.Length && !args[i + 1].StartsWith("-") ? args[++i] : null; switch (key.ToLowerInvariant()) { case "mode": o.Mode = value ?? o.Mode; break; case "repository": o.Repository = value ?? o.Repository; break; case "currentversion": o.CurrentVersion = value ?? ""; break; case "packageroot": o.PackageRoot = value ?? ""; break; case "rainmeterroot": o.RainmeterRoot = value ?? ""; break; case "activate": o.Activate = true; if (value != null) i--; break; case "assumeyes": o.AssumeYes = true; if (value != null) i--; break; case "waitforprocessid": Int32.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out o.WaitForProcessId); break; case "delaymilliseconds": Int32.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out o.DelayMilliseconds); break; } } return o; }
         }
 
-        private sealed class ZipEntryInfo { public string Name; public ushort Method, Flags; public uint Crc, Compressed, Uncompressed, LocalOffset, External; }
-        private static class ZipExtractor
-        {
-            public static void Extract(string archive, string destination)
-            {
-                if (new FileInfo(archive).Length > MaxArchiveBytes) throw new InvalidDataException("压缩包超过大小限制。");
-                Directory.CreateDirectory(destination);
-                using (FileStream stream = File.OpenRead(archive))
-                using (BinaryReader reader = new BinaryReader(stream))
-                {
-                    List<ZipEntryInfo> entries = ReadCentralDirectory(stream, reader);
-                    var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase); long total = 0;
-                    foreach (ZipEntryInfo entry in entries)
-                    {
-                        string normalized = entry.Name.Replace('/', '\\'); bool directory = normalized.EndsWith("\\", StringComparison.Ordinal);
-                        if (!names.Add(normalized.TrimEnd('\\'))) throw new InvalidDataException("压缩包包含重复路径：" + entry.Name);
-                        if ((entry.Flags & 1) != 0 || (entry.Method != 0 && entry.Method != 8)) throw new InvalidDataException("压缩包使用了不支持的加密或压缩方式。");
-                        if (entry.Uncompressed > MaxEntryBytes || (total += entry.Uncompressed) > MaxArchiveBytes) throw new InvalidDataException("解压后文件超过大小限制。");
-                        if (((entry.External >> 16) & 0xF000) == 0xA000) throw new InvalidDataException("压缩包不允许符号链接。");
-                        string target = SafeDestination(destination, normalized);
-                        if (directory) { Directory.CreateDirectory(target); continue; }
-                        Directory.CreateDirectory(Path.GetDirectoryName(target));
-                        stream.Position = entry.LocalOffset;
-                        if (reader.ReadUInt32() != 0x04034b50) throw new InvalidDataException("ZIP 本地文件头无效。");
-                        stream.Position += 22; ushort nameLength = reader.ReadUInt16(), extraLength = reader.ReadUInt16(); stream.Position += nameLength + extraLength;
-                        using (var bounded = new BoundedStream(stream, entry.Compressed))
-                        using (Stream input = entry.Method == 8 ? (Stream)new DeflateStream(bounded, CompressionMode.Decompress, true) : bounded)
-                        using (FileStream output = File.Create(target))
-                        {
-                            var crc = new Crc32(); byte[] buffer = new byte[81920]; long written = 0; int read;
-                            while ((read = input.Read(buffer, 0, buffer.Length)) > 0) { written += read; if (written > entry.Uncompressed) throw new InvalidDataException("ZIP 条目长度无效。"); crc.Update(buffer, 0, read); output.Write(buffer, 0, read); }
-                            if (written != entry.Uncompressed || crc.Value != entry.Crc) throw new InvalidDataException("ZIP 条目校验失败：" + entry.Name);
-                        }
-                    }
-                }
-            }
-            private static List<ZipEntryInfo> ReadCentralDirectory(FileStream stream, BinaryReader reader)
-            {
-                long search = Math.Min(stream.Length, 65557); stream.Position = stream.Length - search; byte[] tail = reader.ReadBytes((int)search); int eocd = -1;
-                for (int i = tail.Length - 22; i >= 0; i--) if (BitConverter.ToUInt32(tail, i) == 0x06054b50) { eocd = i; break; }
-                if (eocd < 0) throw new InvalidDataException("ZIP 中央目录缺失。");
-                ushort count = BitConverter.ToUInt16(tail, eocd + 10), comment = BitConverter.ToUInt16(tail, eocd + 20); uint size = BitConverter.ToUInt32(tail, eocd + 12), offset = BitConverter.ToUInt32(tail, eocd + 16);
-                if (count > MaxEntries || eocd + 22 + comment > tail.Length || (long)offset + size > stream.Length) throw new InvalidDataException("ZIP 中央目录无效或过大。");
-                stream.Position = offset; var entries = new List<ZipEntryInfo>(count);
-                for (int i = 0; i < count; i++)
-                {
-                    if (reader.ReadUInt32() != 0x02014b50) throw new InvalidDataException("ZIP 中央目录条目无效。");
-                    reader.ReadUInt16(); reader.ReadUInt16(); ushort flags = reader.ReadUInt16(), method = reader.ReadUInt16(); stream.Position += 4; uint crc = reader.ReadUInt32(), compressed = reader.ReadUInt32(), uncompressed = reader.ReadUInt32(); ushort nameLength = reader.ReadUInt16(), extraLength = reader.ReadUInt16(), commentLength = reader.ReadUInt16(); stream.Position += 4; uint external = reader.ReadUInt32(), local = reader.ReadUInt32(); byte[] nameBytes = reader.ReadBytes(nameLength); Encoding encoding = (flags & 0x800) != 0 ? Encoding.UTF8 : Encoding.GetEncoding(437); string name = encoding.GetString(nameBytes); stream.Position += extraLength + commentLength;
-                    if (compressed == UInt32.MaxValue || uncompressed == UInt32.MaxValue || local == UInt32.MaxValue) throw new InvalidDataException("不支持 ZIP64 更新包。");
-                    entries.Add(new ZipEntryInfo { Name = name, Method = method, Flags = flags, Crc = crc, Compressed = compressed, Uncompressed = uncompressed, LocalOffset = local, External = external });
-                }
-                return entries;
-            }
-        }
-        private sealed class BoundedStream : Stream
-        {
-            private readonly Stream inner; private long remaining; public BoundedStream(Stream inner, long length) { this.inner = inner; remaining = length; }
-            public override int Read(byte[] buffer, int offset, int count) { if (remaining <= 0) return 0; int read = inner.Read(buffer, offset, (int)Math.Min(count, remaining)); remaining -= read; return read; }
-            public override bool CanRead { get { return true; } } public override bool CanSeek { get { return false; } } public override bool CanWrite { get { return false; } } public override long Length { get { throw new NotSupportedException(); } } public override long Position { get { throw new NotSupportedException(); } set { throw new NotSupportedException(); } } public override void Flush() { } public override long Seek(long o, SeekOrigin so) { throw new NotSupportedException(); } public override void SetLength(long v) { throw new NotSupportedException(); } public override void Write(byte[] b, int o, int c) { throw new NotSupportedException(); }
-        }
-        private sealed class Crc32
-        {
-            private uint crc = 0xffffffff; private static readonly uint[] Table = Build(); public uint Value { get { return crc ^ 0xffffffff; } }
-            public void Update(byte[] bytes, int offset, int count) { for (int i = offset; i < offset + count; i++) crc = Table[(crc ^ bytes[i]) & 0xff] ^ (crc >> 8); }
-            private static uint[] Build() { var table = new uint[256]; for (uint i = 0; i < table.Length; i++) { uint value = i; for (int j = 0; j < 8; j++) value = (value & 1) != 0 ? 0xedb88320 ^ (value >> 1) : value >> 1; table[i] = value; } return table; }
-        }
     }
 }
