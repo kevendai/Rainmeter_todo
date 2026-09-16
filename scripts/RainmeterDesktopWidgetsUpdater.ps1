@@ -15,6 +15,12 @@ param(
 # Compatibility launcher only. Released v1.x hosts invoke this filename with
 # Windows PowerShell. All update work is performed by UpdaterHost.exe.
 $ErrorActionPreference = 'Stop'
+# Windows cannot rename a directory that is the current directory of a live
+# process, and this launcher is itself installed inside Todo\@Resources.  This
+# wrapper waits for the updater, so it must not keep the skin folder as its
+# current directory while the updater swaps the skin directories.
+if (-not [string]::IsNullOrWhiteSpace($PackageRoot)) { try { $PackageRoot = (Resolve-Path -LiteralPath $PackageRoot).Path } catch { } }
+try { Set-Location -LiteralPath ([IO.Path]::GetTempPath()) } catch { }
 $updater = Join-Path $PSScriptRoot 'UpdaterHost.exe'
 $packageUpdaterSelected = $false
 if (-not [string]::IsNullOrWhiteSpace($PackageRoot)) {
@@ -46,8 +52,8 @@ $escaped = @($forward | ForEach-Object { if ($_ -match '[\s"]') { '"' + ($_ -rep
 if ($Mode -eq 'InstallPackage' -and $packageUpdaterSelected) {
     $escaped += '-DelayMilliseconds'
     $escaped += '1500'
-    Start-Process -FilePath $updater -ArgumentList $escaped | Out-Null
+    Start-Process -FilePath $updater -ArgumentList $escaped -WorkingDirectory ([IO.Path]::GetTempPath()) | Out-Null
     exit 0
 }
-$process = Start-Process -FilePath $updater -ArgumentList $escaped -Wait -PassThru
+$process = Start-Process -FilePath $updater -ArgumentList $escaped -Wait -PassThru -WorkingDirectory ([IO.Path]::GetTempPath())
 exit $process.ExitCode

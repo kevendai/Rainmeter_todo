@@ -24,7 +24,11 @@ internal static partial class TodoApp
             + " -RainmeterRoot " + QuoteArg(CurrentRainmeterRoot())
             + " -Activate"
             + " -AssumeYes";
-        Process.Start(new ProcessStartInfo(UpdaterExecutable, arguments) { UseShellExecute = false, CreateNoWindow = false });
+        // The updater swaps whole skin directories, and Windows cannot rename a
+        // directory that is the current directory of a live process.  Rainmeter
+        // starts this host with its working directory inside the skin folder, so
+        // hand the updater a neutral one instead of letting the chain inherit it.
+        Process.Start(new ProcessStartInfo(UpdaterExecutable, arguments) { UseShellExecute = false, CreateNoWindow = false, WorkingDirectory = Path.GetTempPath() });
     }
 
     private sealed class UpdateCheckResult

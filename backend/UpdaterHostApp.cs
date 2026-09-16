@@ -35,6 +35,7 @@ namespace RainmeterUpdater
                 ServicePointManager.SecurityProtocol |= (SecurityProtocolType)3072;
                 ServicePointManager.Expect100Continue = false;
                 Options options = Options.Parse(args);
+                RelocateWorkingDirectory(options);
                 if (options.DelayMilliseconds > 0) Thread.Sleep(Math.Min(options.DelayMilliseconds, 10000));
                 if (options.Mode.Equals("SelfTest", StringComparison.OrdinalIgnoreCase)) return SelfTest();
                 if (options.Mode.Equals("UpdateUpdater", StringComparison.OrdinalIgnoreCase)) { UpdateUpdater(options); return 0; }
@@ -48,6 +49,21 @@ namespace RainmeterUpdater
                 try { MessageBox.Show("更新失败：" + ex.Message + "\r\n\r\n错误日志：" + ErrorLog, "Rainmeter Desktop Widgets Update", MessageBoxButtons.OK, MessageBoxIcon.Error); } catch { }
                 return 1;
             }
+        }
+
+        // The update chain is started by the skin host, which Rainmeter launches
+        // with its working directory inside the skin folder, and every process
+        // in the chain inherits it.  Windows refuses to rename a directory that
+        // is the current directory of a live process, so the skin swap would
+        // always fail with "access denied" no matter when Rainmeter exits.  Move
+        // our own working directory out of the skin tree before doing any work.
+        private static void RelocateWorkingDirectory(Options options)
+        {
+            // Resolve relative arguments while the original working directory
+            // is still in effect.
+            try { if (!String.IsNullOrWhiteSpace(options.PackageRoot)) options.PackageRoot = Path.GetFullPath(options.PackageRoot.Trim('"')); } catch { }
+            try { if (!String.IsNullOrWhiteSpace(options.RainmeterRoot)) options.RainmeterRoot = Path.GetFullPath(options.RainmeterRoot.Trim('"')); } catch { }
+            try { Directory.SetCurrentDirectory(Path.GetTempPath()); } catch { }
         }
 
         private static int SelfTest()
@@ -88,7 +104,7 @@ namespace RainmeterUpdater
                 string packageRoot = FindPackageRoot(extract);
                 string updater = Path.Combine(packageRoot, "Updater", "UpdaterHost.exe");
                 if (!File.Exists(updater)) throw new InvalidDataException("更新包中缺少 UpdaterHost.exe。");
-                using (Process child = Process.Start(new ProcessStartInfo(updater, BuildArguments("InstallPackage", packageRoot, options.RainmeterRoot, options.Activate) + " -WaitForProcessId " + Process.GetCurrentProcess().Id.ToString(CultureInfo.InvariantCulture)) { UseShellExecute = false, CreateNoWindow = false }))
+                using (Process child = Process.Start(new ProcessStartInfo(updater, BuildArguments("InstallPackage", packageRoot, options.RainmeterRoot, options.Activate) + " -WaitForProcessId " + Process.GetCurrentProcess().Id.ToString(CultureInfo.InvariantCulture)) { UseShellExecute = false, CreateNoWindow = false, WorkingDirectory = temp }))
                 {
                     if (child == null) throw new InvalidOperationException("无法启动新版本更新器。");
                     if (!child.WaitForExit(120000)) throw new TimeoutException("新版本更新器未在 2 分钟内完成。");
@@ -180,7 +196,7 @@ namespace RainmeterUpdater
                 {
                     string target = Path.Combine(roots.SkinsRoot, skin);
                     if (Directory.Exists(target) && !WaitForDirectoryUnlocked(target, 30000))
-                        throw new TimeoutException(skin + " 目录在进程退出后仍处于锁定状态，请关闭 Rainmeter 后重试。");
+                        throw new TimeoutException(skin + " 目录无法重命名，它仍是某个进程的当前工作目录或被其占用。请关闭 Rainmeter 及皮肤宿主进程后重试。");
                 }
 
                 foreach (string skin in new[] { "Todo", "Calendar" })
@@ -199,6 +215,9 @@ namespace RainmeterUpdater
             {
                 RestorePluginState(pluginSnapshot);
                 RollbackSkins(roots.SkinsRoot, transaction, swapped);
+                // A failed update must never leave the user without tiles: the
+                // swap stopped Rainmeter, so bring the previous skins back up.
+                if (rainmeterWasRunning && File.Exists(rainmeterExe)) { try { StartAndRefreshRainmeter(rainmeterExe, activate); } catch { } }
                 throw;
             }
         }
@@ -385,6 +404,10 @@ namespace RainmeterUpdater
             {
                 string target = Path.Combine(skinsRoot, skin); if (Directory.Exists(target)) continue;
                 foreach (string tx in Directory.GetDirectories(skinsRoot, ".rainmeter-update-*" ).OrderByDescending(Directory.GetLastWriteTimeUtc)) { string backup = Path.Combine(tx, "backup", skin); if (Directory.Exists(backup)) { Directory.Move(backup, target); break; } }
+                // The unlock probe momentarily renames the skin directory; put it
+                // back if a previous run was killed in that window.
+                if (Directory.Exists(target)) continue;
+                foreach (string probe in Directory.GetDirectories(skinsRoot, skin + ".rw-unlock-probe-*")) { try { Directory.Move(probe, target); break; } catch { } }
             }
         }
         private sealed class FileSnapshot { public string Path; public bool Existed; public string Backup; }
@@ -462,19 +485,24 @@ namespace RainmeterUpdater
         {
             if (!Directory.Exists(directory)) return true;
             DateTime until = DateTime.UtcNow.AddMilliseconds(timeoutMilliseconds);
-            while (DateTime.UtcNow < until)
+            while (true)
             {
-                string probe = Path.Combine(directory, ".rw-unlock-probe-" + Guid.NewGuid().ToString("N"));
+                // Creating a probe file inside the directory succeeds even while
+                // the directory itself is locked, so the only reliable check is
+                // the rename we are about to perform.  Rename it away and back:
+                // a directory that is the current directory of a live process,
+                // or that still holds an open file, refuses both operations.
+                string probe = directory.TrimEnd('\\') + ".rw-unlock-probe-" + Guid.NewGuid().ToString("N");
                 try
                 {
-                    Directory.CreateDirectory(probe);
-                    Directory.Delete(probe);
+                    Directory.Move(directory, probe);
+                    Directory.Move(probe, directory);
                     return true;
                 }
-                catch { try { if (Directory.Exists(probe)) Directory.Delete(probe, true); } catch { } }
+                catch { try { if (Directory.Exists(probe) && !Directory.Exists(directory)) Directory.Move(probe, directory); } catch { } }
+                if (DateTime.UtcNow >= until) return false;
                 Thread.Sleep(250);
             }
-            return false;
         }
         private static void StartAndRefreshRainmeter(string exe, bool activate)
         {
@@ -484,7 +512,7 @@ namespace RainmeterUpdater
             if (activate) { Thread.Sleep(800); TryStart(exe, "!ActivateConfig \"Todo\" \"Todo.ini\""); TryStart(exe, "!ActivateConfig \"Calendar\" \"Calendar.ini\""); Thread.Sleep(800); TryStart(exe, "!SetWindowPosition \"100%\" \"0%\" \"100%\" \"0%\" \"Todo\""); }
         }
         private static bool IsExactProcessRunning(string name, string exe) { if (String.IsNullOrWhiteSpace(exe)) return false; foreach (Process p in Process.GetProcessesByName(name)) try { if (Path.GetFullPath(p.MainModule.FileName).Equals(Path.GetFullPath(exe), StringComparison.OrdinalIgnoreCase)) return true; } catch { } finally { p.Dispose(); } return false; }
-        private static void TryStart(string file, string args) { try { Process.Start(new ProcessStartInfo(file, args) { UseShellExecute = true }); } catch { } }
+        private static void TryStart(string file, string args) { try { Process.Start(new ProcessStartInfo(file, args) { UseShellExecute = true, WorkingDirectory = Path.GetTempPath() }); } catch { } }
 
         private static void CopyDirectory(string source, string destination) { if (!Directory.Exists(source)) throw new DirectoryNotFoundException(source); Directory.CreateDirectory(destination); foreach (string directory in Directory.GetDirectories(source, "*", SearchOption.AllDirectories)) Directory.CreateDirectory(Path.Combine(destination, directory.Substring(source.Length).TrimStart('\\'))); foreach (string file in Directory.GetFiles(source, "*", SearchOption.AllDirectories)) { string target = Path.Combine(destination, file.Substring(source.Length).TrimStart('\\')); Directory.CreateDirectory(Path.GetDirectoryName(target)); File.Copy(file, target, true); } }
         private static string Sha256(string path) { using (SHA256 hash = SHA256.Create()) using (FileStream stream = File.OpenRead(path)) return BitConverter.ToString(hash.ComputeHash(stream)).Replace("-", "").ToLowerInvariant(); }

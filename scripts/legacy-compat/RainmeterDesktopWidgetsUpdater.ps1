@@ -50,6 +50,12 @@ $ErrorActionPreference = 'Stop'
 $UserAgent = 'RainmeterDesktopWidgetsLegacyCompat/1'
 $LogPath = Join-Path ([IO.Path]::GetTempPath()) 'RainmeterDesktopWidgets-legacy-compat.log'
 
+# Windows cannot rename a directory that is the current directory of a live
+# process.  This script is started from inside the skin folder and then waits
+# for the installer, so it has to leave the skin tree before doing any work.
+if (-not [string]::IsNullOrWhiteSpace($PackageRoot)) { try { $PackageRoot = (Resolve-Path -LiteralPath $PackageRoot).Path } catch { } }
+try { Set-Location -LiteralPath ([IO.Path]::GetTempPath()) } catch { }
+
 # Names inside Skins\<skin>\@Resources that belong to the user.  They are read
 # before the package is copied over the target and written back afterwards, so
 # a release that ships a placeholder copy of them can never clear user data.
@@ -461,7 +467,10 @@ function Install-CompatPackage {
         if (-not $NoProcessControl) {
             if (Test-Path -LiteralPath $rainmeterExe) {
                 Write-Step 'Restarting Rainmeter'
-                Start-Process -FilePath $rainmeterExe | Out-Null
+                # Keep Rainmeter's own working directory out of the skin tree,
+                # otherwise the next update would inherit it and the swap would
+                # fail with "access denied" again.
+                Start-Process -FilePath $rainmeterExe -WorkingDirectory ([IO.Path]::GetTempPath()) | Out-Null
                 Start-Sleep -Milliseconds 1500
                 & $rainmeterExe '!RefreshApp'
                 if ($ShouldActivate) {
@@ -516,7 +525,7 @@ if ($Mode -eq 'CheckAndInstall') {
         if ($Activate) { $forward += '-Activate' }
         if ($AssumeYes) { $forward += '-AssumeYes' }
         $escaped = @($forward | ForEach-Object { if ($_ -match '[\s"]') { '"' + ($_ -replace '"', '\"') + '"' } else { $_ } })
-        $process = Start-Process -FilePath $sibling -ArgumentList $escaped -Wait -PassThru
+        $process = Start-Process -FilePath $sibling -ArgumentList $escaped -Wait -PassThru -WorkingDirectory ([IO.Path]::GetTempPath())
         exit $process.ExitCode
     }
     $TargetVersion = Get-PackageTargetVersion
