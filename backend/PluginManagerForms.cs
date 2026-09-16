@@ -7,6 +7,7 @@ using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Net;
+using System.Text;
 using System.Windows.Forms;
 using RainmeterBackend;
 
@@ -460,18 +461,35 @@ internal static partial class TodoApp
             using (WebClient web = new WebClient())
             {
                 web.Headers[HttpRequestHeader.UserAgent] = "RainmeterDesktopWidgets/" + AppVersion;
-                json = web.DownloadString(PluginRegistryUrl);
+                // Download raw bytes and decode as UTF-8 explicitly.  WebClient.DownloadString
+                // can fall back to the system's default code page on some machines, which turns
+                // Chinese text in the registry into mojibake and later causes JSON parse errors.
+                byte[] raw = web.DownloadData(PluginRegistryUrl);
+                json = Encoding.UTF8.GetString(raw);
+                // Only cache the response after it parses as valid JSON.
+                JsonUtil.Deserialize(json);
                 File.WriteAllText(PluginPaths.RegistryCache, json, RuntimeUtil.Utf8NoBom);
             }
         }
         catch
         {
+            bool usable = false;
             if (File.Exists(PluginPaths.RegistryCache))
             {
-                json = File.ReadAllText(PluginPaths.RegistryCache, RuntimeUtil.Utf8NoBom);
-                sourceLabel = "离线：使用上次成功缓存；";
+                try
+                {
+                    json = File.ReadAllText(PluginPaths.RegistryCache, RuntimeUtil.Utf8NoBom);
+                    JsonUtil.Deserialize(json);
+                    sourceLabel = "离线：使用上次成功缓存；";
+                    usable = true;
+                }
+                catch
+                {
+                    // Cache is corrupt; remove it so the next refresh starts clean.
+                    try { File.Delete(PluginPaths.RegistryCache); } catch { }
+                }
             }
-            else
+            if (!usable)
             {
                 sourcePath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "plugin-registry-v1.json");
                 if (!File.Exists(sourcePath)) throw;
