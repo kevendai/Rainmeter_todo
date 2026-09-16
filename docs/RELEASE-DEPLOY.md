@@ -4,7 +4,7 @@
 
 - `rainmeter-desktop-widgets-*.rmskin`：给新用户或手动重装使用。双击后由 Rainmeter Skin Installer 安装 Todo 和 Calendar。
 - `rainmeter-desktop-widgets-*.zip`：仅供应用内数据保留型自动更新下载，不应手动解压安装。
-- `rainmeter-desktop-widgets-full-*.zip` / `lite-*.zip`：仅为旧升级器保留的内部兼容引导包，不包含皮肤，也不是安装包。
+- `rainmeter-desktop-widgets-full-*.zip` / `lite-*.zip`：仅为旧版升级器保留的内部兼容包。它不含皮肤本体，只有兼容入口和 `Updater\RainmeterDesktopWidgetsUpdater.ps1`；旧版客户端下载后会运行该脚本，由脚本自动去 GitHub Release 取正式包、校验 SHA256、释放占用并完成升级，同时保留用户数据。不要手动解压安装。
 
 ## 初次安装
 
@@ -32,4 +32,4 @@ powershell -ExecutionPolicy Bypass -File .\scripts\Test-Backends.ps1
 powershell -ExecutionPolicy Bypass -File .\scripts\Build-ReleasePackages.ps1
 ```
 
-构建会生成统一 ZIP、统一 `.rmskin` 和仅供旧客户端使用的 full/lite 引导 ZIP。
+构建会生成统一 ZIP、统一 `.rmskin` 和仅供旧客户端使用的 full/lite 兼容 ZIP（三份内容相同，同时写入 `releases\v<版本>\` 并作为 Release 资产发布）。

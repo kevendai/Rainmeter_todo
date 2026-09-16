@@ -272,103 +272,14 @@ function New-Package {
 
 New-Package -DisplayName 'Rainmeter Desktop Widgets'
 
-function New-LegacyBootstrapPackages {
-    # v1.3.5 always selects the newest numeric tag and requests the old
-    # full/lite filename from raw.githubusercontent.com. Keep the first hop at
-    # v1.4.4, but build the bridge with the current updater so handoff fixes are
-    # available before any released package replaces the installed updater.
-    $bridgeVersion = '1.4.4'
-    foreach ($legacyFlavor in @('full','lite')) {
-        $bridgeRoot = Join-Path $OutputRoot ("legacy-$legacyFlavor-bridge-$Version")
-        $updaterRoot = Join-Path $bridgeRoot 'Updater'
-        New-Item -ItemType Directory -Path $updaterRoot -Force | Out-Null
-        New-UpdaterScript (Join-Path $updaterRoot 'RainmeterDesktopWidgetsUpdater.ps1')
-        New-InstallScript (Join-Path $bridgeRoot 'Install-Skins.ps1')
-        $bootstrap = [ordered]@{
-            repository = 'kevendai/Rainmeter_todo'
-            tag = "v$bridgeVersion"
-            version = $bridgeVersion
-            asset = "rainmeter-desktop-widgets-$bridgeVersion.zip"
-            # v1.4.4 predates Release checksum assets. This verified historical
-            # hash is deliberately scoped to the one mandatory compatibility hop.
-            sha256 = '0975c7ba84fecdcfcaa311a0202bbee5f9c3967af6e341bc2c583931b12ef934'
-        } | ConvertTo-Json
-        [IO.File]::WriteAllText((Join-Path $bridgeRoot 'unified-bootstrap.json'), $bootstrap, [Text.UTF8Encoding]::new($false))
-
-        $target = Join-Path $OutputRoot "rainmeter-desktop-widgets-$legacyFlavor-$Version.zip"
-        Compress-Archive -Path (Join-Path $bridgeRoot '*') -DestinationPath $target -Force
-        $verifyRoot = Join-Path $OutputRoot ("verify-legacy-$legacyFlavor-$Version")
-        Expand-Archive -LiteralPath $target -DestinationPath $verifyRoot -Force
-        try {
-            $bootstrapPath = Join-Path $verifyRoot 'unified-bootstrap.json'
-            $installPath = Join-Path $verifyRoot 'Install-Skins.ps1'
-            $updaterPath = Join-Path $verifyRoot 'Updater\RainmeterDesktopWidgetsUpdater.ps1'
-            $updaterVersionPath = Join-Path $verifyRoot 'Updater\updater-version.txt'
-            $updaterExePath = Join-Path $verifyRoot 'Updater\UpdaterHost.exe'
-            if (-not (Test-Path -LiteralPath $bootstrapPath) -or -not (Test-Path -LiteralPath $installPath) -or -not (Test-Path -LiteralPath $updaterPath) -or -not (Test-Path -LiteralPath $updaterVersionPath) -or -not (Test-Path -LiteralPath $updaterExePath)) {
-                throw "Generated $legacyFlavor bridge is incomplete."
-            }
-            $verifiedBootstrap = Get-Content -LiteralPath $bootstrapPath -Raw -Encoding UTF8 | ConvertFrom-Json
-            if ([string]$verifiedBootstrap.version -ne $bridgeVersion -or [string]$verifiedBootstrap.tag -ne "v$bridgeVersion" -or [string]$verifiedBootstrap.asset -ne "rainmeter-desktop-widgets-$bridgeVersion.zip" -or [string]$verifiedBootstrap.sha256 -ne '0975c7ba84fecdcfcaa311a0202bbee5f9c3967af6e341bc2c583931b12ef934') {
-                throw "Generated $legacyFlavor bridge metadata is invalid."
-            }
-            $verifiedUpdater = [IO.File]::ReadAllText($updaterPath, [Text.UTF8Encoding]::new($false))
-            if ($verifiedUpdater.Contains('Invoke-WebRequest') -or $verifiedUpdater.Contains('Expand-Archive') -or -not $verifiedUpdater.Contains('UpdaterHost.exe')) {
-                throw "Generated $legacyFlavor bridge does not use the EXE-only updater implementation."
-            }
-        }
-        finally { Remove-Item -LiteralPath $verifyRoot -Recurse -Force -ErrorAction SilentlyContinue }
-        Write-Host "Created patched two-step $legacyFlavor bridge: $Version -> $bridgeVersion -> $Version"
-    }
-}
-
-New-LegacyBootstrapPackages
-
-function New-RawTransitionBootstrapPackage {
-    # v1.5.3 and earlier unified updaters resolve the next canonical ZIP from
-    # raw.githubusercontent.com before they can install the Release-only updater.
-    # This tiny package satisfies their legacy layout check, self-updates the
-    # updater, and then delegates to the SHA256-verified GitHub Release asset.
-    $transitionRoot = Join-Path $OutputRoot ("legacy-raw-transition-$Version")
-    $updaterRoot = Join-Path $transitionRoot 'Updater'
-    $todoRoot = Join-Path $transitionRoot 'Skins\Todo'
-    $calendarRoot = Join-Path $transitionRoot 'Skins\Calendar'
-    New-Item -ItemType Directory -Path $updaterRoot, $todoRoot, $calendarRoot -Force | Out-Null
-    New-UpdaterScript (Join-Path $updaterRoot 'RainmeterDesktopWidgetsUpdater.ps1')
-    [IO.File]::WriteAllText((Join-Path $todoRoot '.transition'), '', [Text.UTF8Encoding]::new($false))
-    [IO.File]::WriteAllText((Join-Path $calendarRoot '.transition'), '', [Text.UTF8Encoding]::new($false))
-    $manifest = [ordered]@{
-        name = 'Rainmeter Desktop Widgets updater transition'
-        version = $Version
-        updater_version = $UpdaterVersion
-    } | ConvertTo-Json
-    [IO.File]::WriteAllText((Join-Path $transitionRoot 'manifest.json'), $manifest, [Text.UTF8Encoding]::new($false))
-    $bootstrap = [ordered]@{
-        repository = 'kevendai/Rainmeter_todo'
-        tag = "v$Version"
-        version = $Version
-        asset = "rainmeter-desktop-widgets-$Version.zip"
-    } | ConvertTo-Json
-    [IO.File]::WriteAllText((Join-Path $transitionRoot 'unified-bootstrap.json'), $bootstrap, [Text.UTF8Encoding]::new($false))
-
-    $transitionZip = Join-Path $OutputRoot ("rainmeter-desktop-widgets-raw-transition-$Version.zip")
-    Compress-Archive -Path (Join-Path $transitionRoot '*') -DestinationPath $transitionZip -Force
-    Write-Host "Created one-time raw updater transition $transitionZip"
-
-    # Old updaters resolve raw.githubusercontent.com at the newest tag. Keep
-    # these tiny repository-hosted aliases until pre-1.4.4 full/lite clients
-    # have had a chance to self-update; newer clients use the canonical alias.
-    $repositoryTransition = Join-Path $OutputRoot ("repository-transition-v$Version")
-    New-Item -ItemType Directory -Path $repositoryTransition -Force | Out-Null
-    Copy-Item -LiteralPath $transitionZip -Destination (Join-Path $repositoryTransition "rainmeter-desktop-widgets-$Version.zip") -Force
-    foreach ($legacyFlavor in @('full','lite')) {
-        Copy-Item -LiteralPath (Join-Path $OutputRoot "rainmeter-desktop-widgets-$legacyFlavor-$Version.zip") -Destination (Join-Path $repositoryTransition "rainmeter-desktop-widgets-$legacyFlavor-$Version.zip") -Force
-    }
-    Write-Host "Created raw updater compatibility set $repositoryTransition"
-}
-
-New-RawTransitionBootstrapPackage
-
+# Legacy raw bootstrap channel -------------------------------------------------
+# Pre-2.0 clients select the newest numeric tag and download a compatibility
+# archive from raw.githubusercontent.com/<tag>/releases/<tag>/.  Such an archive
+# carries no payload at all: it only contains the compatibility updater that
+# installs the canonical release package.  Build-LegacyCompatPackages.ps1 owns
+# that archive, so a release build can never drift back to the retired two-step
+# v1.4.4 bridge or publish a bootstrap that loops back onto itself.
+& (Join-Path $PSScriptRoot 'Build-LegacyCompatPackages.ps1') -Version $Version -Repository 'kevendai/Rainmeter_todo'
 Get-ChildItem -LiteralPath $OutputRoot -File | Where-Object { $_.Extension -in @('.zip', '.rmskin') } | ForEach-Object {
     $hash = (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
     $checksumPath = $_.FullName + '.sha256'

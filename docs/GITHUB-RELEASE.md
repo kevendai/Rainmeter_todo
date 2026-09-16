@@ -21,7 +21,7 @@ powershell -ExecutionPolicy Bypass -File .\scripts\Build-ReleasePackages.ps1
 
 The build emits a `.sha256` sidecar for every ZIP and RMSKIN. Keep these artifacts in the ignored `release-build` directory until they are uploaded.
 
-Legacy updaters select the newest tag but download from `raw.githubusercontent.com/<tag>/releases/<tag>/`. For every release that must remain reachable from v1.3.5, copy the generated `repository-transition-vX.Y.Z` compatibility set into `releases/vX.Y.Z/`: the canonical alias serves v1.4.4+ and the `full`/`lite` aliases contain the proven v1.4.4 bootstrap for pre-1.4.4 clients, producing an explicit two-step upgrade before v2 migration. These are updater bootstraps only; never commit the full installer or user data. v1.5.4 retains its earlier canonical transition for already-migrated clients.
+Legacy updaters select the newest numeric tag but download from `raw.githubusercontent.com/<tag>/releases/<tag>/`. `scripts\Build-LegacyCompatPackages.ps1` (called by `Build-ReleasePackages.ps1`) writes one tiny updater-only archive into `releases/vX.Y.Z/` and publishes it under all three accepted names: `rainmeter-desktop-widgets-vX.Y.Z.zip` (canonical, used by the v1.4.4+ generations), `rainmeter-desktop-widgets-full-vX.Y.Z.zip` and `rainmeter-desktop-widgets-lite-vX.Y.Z.zip` (flavor-aware clients such as v1.3.5). All three are byte-identical and carry **no application payload**: an `Install-Skins.ps1` root marker, a `manifest.json`, two `Skins\<name>\.transition` placeholders, and `Updater\RainmeterDesktopWidgetsUpdater.ps1`. That updater downloads the canonical package from the GitHub Release, verifies its SHA256, releases every file lock, merges the new skin files in while keeping user data byte for byte, and installs the canonical updater. Never commit the full installer or user data here, and never let this channel point at a tag that itself serves a compatibility archive.
 
 Before committing, inspect the unified zip manifest, app version, runtime feature flag, user-data exclusions, and legacy bootstrap packages:
 
@@ -62,12 +62,17 @@ try {
 finally { $archive.Dispose() }
 
 foreach ($flavor in 'full','lite') {
-  $bootstrap = ".\release-build\rainmeter-desktop-widgets-$flavor-$version.zip"
-  $extract = Join-Path $env:TEMP "rainmeter-bootstrap-$flavor-$version"
-  Expand-Archive $bootstrap $extract -Force
+  $compat = ".\releases\v$version\rainmeter-desktop-widgets-$flavor-$version.zip"
+  $extract = Join-Path $env:TEMP "rainmeter-compat-$flavor-$version"
+  Expand-Archive $compat $extract -Force
   try {
-    if (-not (Test-Path "$extract\unified-bootstrap.json")) { throw "$flavor bootstrap marker missing" }
-    if (Test-Path "$extract\Skins") { throw "$flavor bootstrap unexpectedly contains Skins" }
+    if (-not (Test-Path "$extract\Install-Skins.ps1")) { throw "$flavor compat entry marker missing" }
+    if (Test-Path "$extract\Skins\Todo\@Resources") { throw "$flavor compat unexpectedly contains an application payload" }
+    # The v1.4.4 - v1.5.3 clients resolve the bootstrap marker through the raw
+    # channel, so a marker here would hand them this same archive again and loop.
+    if (Test-Path "$extract\unified-bootstrap.json") { throw "$flavor compat advertises a bootstrap and would loop" }
+    $compatUpdater = Get-Content "$extract\Updater\RainmeterDesktopWidgetsUpdater.ps1" -Raw
+    if ($compatUpdater -notmatch "`$TargetVersion = '$version'") { throw "$flavor compat updater does not target $version" }
   } finally {
     Remove-Item $extract -Recurse -Force
   }
@@ -78,7 +83,8 @@ Expected values:
 
 - Unified package: `Version = X.Y.Z`, `AppVersion = X.Y.Z`, `PaperFeatures = True`, `RuntimeSwitch = True`, `BadEntries` empty.
 - Unified zip contains the complete product and its top-level updater, but `HasInstallEntry = False`; it is an automatic-update transport package, not a manual installer.
-- full/lite zips are the v1.4.4 compatibility bootstrap renamed for the current tag: v1.3.5 installs v1.4.4 first, then a second update installs the current unified release.
+- full/lite zips are the legacy compatibility archives built from `scripts\legacy-compat\RainmeterDesktopWidgetsUpdater.ps1`: a v1.3.5 client downloads one of them from raw, installs the packaged updater, and that updater fetches the canonical release package and performs the upgrade in one hop.
+- The three names under `releases\vX.Y.Z\` are the same archive; only the canonical name is also published as a Release asset, because the v1.4.4+ generations read the Release while the v1.3.x generations read raw.
 - Only the unified `.rmskin` is published.
 - The `.rmskin` must end with the 16-byte Rainmeter package footer: an 8-byte little-endian archive size, one flags byte, and the ASCII key `RMSKIN\0`. A normal ZIP renamed to `.rmskin` is invalid.
 
