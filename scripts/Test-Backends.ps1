@@ -131,6 +131,9 @@ if ($updaterText -match 'Invoke-WebRequest|Expand-Archive|Get-FileHash' -or $upd
 if ($updaterText -notmatch '\$stagedPackage' -or $updaterText -notmatch 'Copy-Item -Path' -or $updaterText -notmatch '\$Mode -eq .InstallPackage. -and \$packageUpdaterSelected') {
     throw 'Legacy compatibility launcher would not stage its package before replacing the active skin.'
 }
+if ($updaterText -notmatch 'DelayMilliseconds') {
+    throw 'Legacy compatibility launcher does not delay the detached updater handoff.'
+}
 Write-Host 'UpdaterHost EXE and minimal legacy PowerShell launcher passed'
         & $calendarRecurrence
         if ($LASTEXITCODE -ne 0) { throw "Calendar recurrence tests failed with exit code $LASTEXITCODE" }

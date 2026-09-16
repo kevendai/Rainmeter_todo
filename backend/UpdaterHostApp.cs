@@ -379,7 +379,30 @@ namespace RainmeterUpdater
             if (plugin) probes.Insert(0, Tuple.Create(Path.Combine(skinsRoot, "Todo", "@Resources", "PluginHost.exe"), "SelfTest"));
             foreach (var probe in probes) { if (!File.Exists(probe.Item1)) throw new FileNotFoundException("安装后的宿主缺失。", probe.Item1); using (Process p = Process.Start(new ProcessStartInfo(probe.Item1, probe.Item2) { UseShellExecute = false, CreateNoWindow = true })) { if (!p.WaitForExit(30000)) { p.Kill(); throw new TimeoutException(Path.GetFileName(probe.Item1) + " 验证超时。"); } if (p.ExitCode != 0) throw new InvalidOperationException(Path.GetFileName(probe.Item1) + " 验证失败：" + p.ExitCode); } }
         }
-        private static void StopRainmeter(string exe) { if (!File.Exists(exe)) return; TryStart(exe, "!Quit"); DateTime until = DateTime.UtcNow.AddSeconds(10); while (DateTime.UtcNow < until && IsExactProcessRunning("Rainmeter", exe)) Thread.Sleep(250); if (IsExactProcessRunning("Rainmeter", exe)) throw new TimeoutException("Rainmeter 未能在 10 秒内退出。"); }
+        private static void StopRainmeter(string exe)
+        {
+            if (!File.Exists(exe)) return;
+            TryStart(exe, "!Quit");
+            DateTime until = DateTime.UtcNow.AddSeconds(5);
+            while (DateTime.UtcNow < until && IsExactProcessRunning("Rainmeter", exe)) Thread.Sleep(250);
+            if (!IsExactProcessRunning("Rainmeter", exe)) return;
+            // Some Rainmeter builds do not process !Quit while a skin/plugin
+            // modal action is active.  Only force-close the process whose
+            // executable path exactly matches the discovered installation.
+            foreach (Process process in Process.GetProcessesByName("Rainmeter"))
+            {
+                try
+                {
+                    if (!Path.GetFullPath(process.MainModule.FileName).Equals(Path.GetFullPath(exe), StringComparison.OrdinalIgnoreCase)) continue;
+                    try { process.CloseMainWindow(); } catch { }
+                    if (!process.WaitForExit(1500)) process.Kill();
+                    process.WaitForExit(5000);
+                }
+                catch { }
+                finally { process.Dispose(); }
+            }
+            if (IsExactProcessRunning("Rainmeter", exe)) throw new TimeoutException("Rainmeter 未能在退出超时后结束。");
+        }
         private static void StartAndRefreshRainmeter(string exe, bool activate)
         {
             if (!File.Exists(exe)) return;
