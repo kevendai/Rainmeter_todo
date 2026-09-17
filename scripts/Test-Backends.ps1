@@ -26,6 +26,7 @@ try {
     $fakeProvider = Join-Path $build 'FakeProvider.exe'
     $providerProbe = Join-Path $build 'ProviderProbe.exe'
     $paperBundleProbe = Join-Path $build 'PaperBundleProbe.exe'
+    $paperSnapshotProbe = Join-Path $build 'PaperSnapshotProbe.exe'
     $dpiAssertions = Join-Path $tests 'DpiLayoutAssertions.cs'
     function Get-ProjectSources([string]$projectPath) {
         [xml]$projectXml = Get-Content -LiteralPath $projectPath -Raw -Encoding UTF8
@@ -41,7 +42,7 @@ try {
     & (Join-Path $PSScriptRoot 'Build-Backend.ps1') -Backend Updater -OutputDirectory $build | Out-Null
     $updaterProbe = Start-Process -FilePath $updater -ArgumentList @('-Mode','SelfTest') -WindowStyle Hidden -PassThru -Wait
     if ($updaterProbe.ExitCode -ne 0) { throw 'UpdaterHost self-test failed' }
-    Set-Content -LiteralPath (Join-Path $build 'app-version.txt') -Value '2.0.0' -Encoding UTF8
+    Set-Content -LiteralPath (Join-Path $build 'app-version.txt') -Value '2.1.0' -Encoding UTF8
     & (Join-Path $PSScriptRoot 'Build-OfficialPlugins.ps1') -OutputDirectory $bundledPlugins -IncludePrivate | Out-Null
     & $csc /nologo /target:exe /main:PluginInstallerProbe /optimize+ @refs "/out:$pluginInstallerProbe" @todoSources (Join-Path $tests 'PluginInstallerProbe.cs')
     if ($LASTEXITCODE -ne 0) { throw 'Plugin installer probe compilation failed' }
@@ -69,6 +70,8 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'Provider probe compilation failed' }
     & $csc /nologo /target:exe /main:PaperBundleProbe /optimize+ @refs "/out:$paperBundleProbe" @todoSources (Join-Path $backend 'PaperBundle.cs') (Join-Path $tests 'PaperBundleProbe.cs')
     if ($LASTEXITCODE -ne 0) { throw 'Paper bundle probe compilation failed' }
+    & $csc /nologo /target:exe /main:PaperSnapshotProbe /optimize+ @refs "/out:$paperSnapshotProbe" @todoSources (Join-Path $tests 'PaperSnapshotProbe.cs')
+    if ($LASTEXITCODE -ne 0) { throw 'Paper snapshot probe compilation failed' }
     $previousCommandDisable = $env:RAINMETER_COMMANDS_DISABLED
     $previousPluginRoot = $env:RAINMETER_PLUGIN_ROOT
     try {
@@ -95,6 +98,8 @@ try {
         & $arxivPlugin PaperServiceSelfTest;if($LASTEXITCODE -ne 0){throw "Paper service tests failed with exit code $LASTEXITCODE"};Write-Host 'Paper service fatal-error fast fail and readable diagnostics passed'
         & $providerProbe;if($LASTEXITCODE -ne 0){throw "Provider probe failed with exit code $LASTEXITCODE"};Write-Host 'Provider manifest validation, binding resolution, broker error_kind/depth, cancel propagation and busy semantics passed'
         & $paperBundleProbe;if($LASTEXITCODE -ne 0){throw "Paper bundle probe failed with exit code $LASTEXITCODE"};Write-Host 'PaperBundle v1 profile_hash normalization, tri-state validation and segmented score ranges passed'
+        $snapshotPlugin=Join-Path $bundledPlugins 'paper-snapshot-sync\bin\PaperSnapshotSyncPlugin.exe';& $snapshotPlugin SnapshotSelfTest;if($LASTEXITCODE -ne 0){throw "Paper snapshot plugin self-tests failed with exit code $LASTEXITCODE"};Write-Host 'Paper snapshot plugin naming, input validation and address takeover self-tests passed'
+        & $paperSnapshotProbe;if($LASTEXITCODE -ne 0){throw "Paper snapshot probe failed with exit code $LASTEXITCODE"};Write-Host 'Paper snapshot provider get/put round-trip, found-vs-error semantics, broker chain and address takeover passed'
         @{version=3;meta=@{};tasks=@()} | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path $build 'tasks.json') -Encoding UTF8
         $eventPath=Join-Path $build 'calendar-event.json';$firstResult=Join-Path $build 'calendar-result-1.json';$secondResult=Join-Path $build 'calendar-result-2.json'
         @{uid='meeting';occurrence_key='meeting#one';title='组会';start_at='2026-09-13T09:00:00+08:00';end_at='2026-09-13T10:00:00+08:00';reminder_at='2026-09-13T08:45:00+08:00';source='caldav';all_day=$false}|ConvertTo-Json -Depth 5|Set-Content -LiteralPath $eventPath -Encoding UTF8

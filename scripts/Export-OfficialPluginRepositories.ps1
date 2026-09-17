@@ -11,9 +11,10 @@ if ($outputRoot.TrimEnd('\') -eq $projectRoot.TrimEnd('\')) {
 }
 
 $definitions = @(
-    @{ Folder='arxiv' },
+    @{ Folder='arxiv'; Sources=@('Common.cs','PaperBundle.cs','TodoPaperService.cs','TodoPaperRssService.cs','TodoUpdateService.cs') },
     @{ Folder='calendar-to-todo' },
-    @{ Folder='ssdp-server-ip' }
+    @{ Folder='ssdp-server-ip' },
+    @{ Folder='paper-snapshot-sync'; Sources=@('Common.cs','PaperBundle.cs') }
 )
 
 $buildScript = @'
@@ -36,7 +37,7 @@ try {
         if (Test-Path -LiteralPath $source) { Copy-Item -LiteralPath $source -Destination $stage }
     }
     New-Item -ItemType Directory -Path $OutputDirectory -Force | Out-Null
-    $slug = if ($manifest.id -eq 'io.github.kevendai.arxiv') { 'arxiv' } elseif ($manifest.id -eq 'io.github.kevendai.ssdp-server-ip') { 'ssdp-server-ip' } else { 'calendar-to-todo' }
+    $slug = $manifest.id -replace '^io\.github\.kevendai\.', ''
     $baseName = $slug + '-' + $manifest.version
     $zip = Join-Path $OutputDirectory ($baseName + '.zip')
     $package = Join-Path $OutputDirectory ($baseName + '.rwplugin')
@@ -81,16 +82,16 @@ foreach ($definition in $definitions) {
     New-Item -ItemType Directory -Path (Split-Path $target -Parent) -Force | Out-Null
     Copy-Item -LiteralPath $source -Destination $target -Recurse
 
-    if ($definition.Folder -eq 'arxiv') {
-        foreach ($name in @('Common.cs','TodoPaperService.cs','TodoPaperRssService.cs','TodoUpdateService.cs')) {
+    if ($definition.Sources) {
+        foreach ($name in $definition.Sources) {
             Copy-Item -LiteralPath (Join-Path $projectRoot ('backend\' + $name)) -Destination (Join-Path $target 'src')
         }
-        $projectPath = Join-Path $target 'src\ArxivPlugin.csproj'
-        $projectText = Get-Content -LiteralPath $projectPath -Raw -Encoding UTF8
-        foreach ($name in @('Common.cs','TodoPaperService.cs','TodoPaperRssService.cs','TodoUpdateService.cs')) {
+        $projectFile = Get-ChildItem -LiteralPath (Join-Path $target 'src') -Filter '*.csproj' | Select-Object -First 1
+        $projectText = Get-Content -LiteralPath $projectFile.FullName -Raw -Encoding UTF8
+        foreach ($name in $definition.Sources) {
             $projectText = $projectText.Replace(('..\..\..\..\backend\' + $name), $name)
         }
-        Set-Content -LiteralPath $projectPath -Value $projectText -Encoding UTF8
+        Set-Content -LiteralPath $projectFile.FullName -Value $projectText -Encoding UTF8
     }
 
     # 必须写成无 BOM 的 ASCII：Windows PowerShell 5.1 的 -Encoding UTF8 会写入 BOM，

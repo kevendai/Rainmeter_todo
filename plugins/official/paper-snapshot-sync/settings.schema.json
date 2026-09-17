@@ -1,0 +1,10 @@
+{
+  "type": "object",
+  "properties": {
+    "enabled": {"type":"boolean","title":"启用论文快照同步","default":false,"x-order":1},
+    "auto_download": {"type":"boolean","title":"自动下载当日快照","default":true,"x-order":2},
+    "file_url": {"type":"string","title":"File Browser 地址","default":"","x-address":true,"x-order":3},
+    "file_account": {"type":"string","title":"文件服务器账号","default":"","x-order":4},
+    "file_password": {"type":"password","title":"文件服务器密码","x-secret":true,"x-order":5}
+  }
+}

@@ -14,7 +14,8 @@ if (-not (Test-Path -LiteralPath $msbuild)) { throw 'MSBuild was not found.' }
 
 $definitions = @(
     @{ Folder = 'calendar-to-todo'; Project = 'CalendarToTodoPlugin.csproj'; Exe = 'CalendarToTodoPlugin.exe' },
-    @{ Folder = 'arxiv'; Project = 'ArxivPlugin.csproj'; Exe = 'ArxivPlugin.exe' }
+    @{ Folder = 'arxiv'; Project = 'ArxivPlugin.csproj'; Exe = 'ArxivPlugin.exe' },
+    @{ Folder = 'paper-snapshot-sync'; Project = 'PaperSnapshotSyncPlugin.csproj'; Exe = 'PaperSnapshotSyncPlugin.exe' }
 )
 if ($IncludePrivate) {
     $definitions = @(@{ Folder = 'ssdp-server-ip'; Project = 'SsdpServerIpPlugin.csproj'; Exe = 'SsdpServerIpPlugin.exe' }) + $definitions

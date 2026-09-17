@@ -1,0 +1,20 @@
+{
+  "id": "io.github.kevendai.paper-snapshot-sync",
+  "name": "Paper Snapshot Sync",
+  "description": "官方 Provider：把评分完成的论文推荐快照（PaperBundle）存进文件服务器并在多台机器间同步。",
+  "version": "1.0.0",
+  "api_version": 1,
+  "min_host_version": "2.1.0",
+  "entry": "bin/PaperSnapshotSyncPlugin.exe",
+  "capabilities": [],
+  "provides": ["paper_snapshot_provider@1"],
+  "billing": "free",
+  "permissions": ["network"],
+  "settings_schema": "settings.schema.json",
+  "address_target": "paper_snapshot.file_server",
+  "homepage": "https://github.com/kevendai/Rainmeter_todo-plugin-registry/tree/master/official-plugins/paper-snapshot-sync",
+  "default_enabled": false,
+  "actions": [
+    {"id":"test_connection","name":"测试连接","confirm":false,"long_running":false}
+  ]
+}

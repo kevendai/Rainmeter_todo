@@ -2,7 +2,7 @@
   "id": "io.github.kevendai.ssdp-server-ip",
   "name": "SSDP 服务器 IP 同步",
   "description": "私人插件，不随主程序捆绑；请从插件市场按需安装。",
-  "version": "1.0.4",
+  "version": "1.1.0",
   "api_version": 1,
   "min_host_version": "2.0.0",
   "entry": "bin/SsdpServerIpPlugin.exe",
@@ -28,7 +28,8 @@
     "value": "server_ip",
     "targets": [
       "calendar.caldav",
-      "arxiv.file_server"
+      "arxiv.file_server",
+      "paper_snapshot.file_server"
     ]
   }
 }

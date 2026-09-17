@@ -7,3 +7,12 @@
 首次配置会完整扫描并按 `SERVER / USN / IP` 列出设备；保存后以完整 USN 为身份，后续先探测上次 IP，未命中才扫描配置范围。插件输出 `server_ip`、`server`、`usn` 和 `location`，可通过 `{{plugin:io.github.kevendai.ssdp-server-ip:server_ip}}` 引用。
 
 此插件随主程序提供，但不在公开插件市场中展示。
+
+# 代管目标（1.1.0 起）
+
+发现的 `server_ip` 可代管三类下游地址（只替换主机，端口与路径保留）：
+
+- `calendar.caldav` —— 日历的 CalDAV 服务器
+- `arxiv.file_server` —— 旧版（≤1.0.2）arxiv 插件的文件服务器地址
+- `paper_snapshot.file_server` —— Paper Snapshot Sync 插件的文件服务器地址（v2.1 起）
+
