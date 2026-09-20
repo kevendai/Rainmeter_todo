@@ -14,7 +14,8 @@ $definitions = @(
     @{ Folder='arxiv'; Sources=@('Common.cs','PaperBundle.cs','TodoPaperService.cs','TodoPaperRssService.cs','TodoUpdateService.cs') },
     @{ Folder='calendar-to-todo' },
     @{ Folder='ssdp-server-ip' },
-    @{ Folder='paper-snapshot-sync'; Sources=@('Common.cs','PaperBundle.cs') }
+    @{ Folder='paper-snapshot-sync'; Sources=@('Common.cs','PaperBundle.cs') },
+    @{ Folder='ai-deepseek'; Sources=@('Common.cs') }
 )
 
 $buildScript = @'

@@ -1,0 +1,19 @@
+{
+  "id": "io.github.kevendai.ai-deepseek",
+  "name": "DeepSeek AI",
+  "description": "官方 Provider：把 DeepSeek 聊天补全封装成 ai_provider@1 服务，供其他插件请求结构化 JSON 结果。按 token 计费，可能产生费用。",
+  "version": "1.0.0",
+  "api_version": 1,
+  "min_host_version": "2.1.0",
+  "entry": "bin/AiDeepSeekPlugin.exe",
+  "capabilities": [],
+  "provides": ["ai_provider@1"],
+  "billing": "may_charge",
+  "permissions": ["network"],
+  "settings_schema": "settings.schema.json",
+  "homepage": "https://github.com/kevendai/Rainmeter_todo-plugin-registry/tree/master/official-plugins/ai-deepseek",
+  "default_enabled": false,
+  "actions": [
+    {"id":"test_connection","name":"测试连接","confirm":false,"long_running":false}
+  ]
+}

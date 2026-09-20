@@ -1,0 +1,10 @@
+{
+  "type": "object",
+  "properties": {
+    "api_url": {"type":"string","title":"Chat Completions 地址","default":"https://api.deepseek.com/chat/completions","x-order":1,"x-section":"基本"},
+    "api_key": {"type":"password","title":"API Key","x-secret":true,"x-order":2,"x-section":"基本"},
+    "api_model": {"type":"string","title":"模型","default":"deepseek-v4-flash","x-order":3,"x-section":"基本"},
+    "timeout_seconds": {"type":"integer","title":"请求超时秒数","minimum":30,"maximum":600,"default":180,"x-order":10,"x-section":"高级","x-advanced":true},
+    "max_concurrency": {"type":"integer","title":"最大并发","minimum":1,"maximum":32,"default":8,"x-order":11,"x-section":"高级","x-advanced":true}
+  }
+}

@@ -27,6 +27,7 @@ try {
     $providerProbe = Join-Path $build 'ProviderProbe.exe'
     $paperBundleProbe = Join-Path $build 'PaperBundleProbe.exe'
     $paperSnapshotProbe = Join-Path $build 'PaperSnapshotProbe.exe'
+    $aiDeepSeekProbe = Join-Path $build 'AiDeepSeekProbe.exe'
     $dpiAssertions = Join-Path $tests 'DpiLayoutAssertions.cs'
     function Get-ProjectSources([string]$projectPath) {
         [xml]$projectXml = Get-Content -LiteralPath $projectPath -Raw -Encoding UTF8
@@ -72,6 +73,8 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'Paper bundle probe compilation failed' }
     & $csc /nologo /target:exe /main:PaperSnapshotProbe /optimize+ @refs "/out:$paperSnapshotProbe" @todoSources (Join-Path $tests 'PaperSnapshotProbe.cs')
     if ($LASTEXITCODE -ne 0) { throw 'Paper snapshot probe compilation failed' }
+    & $csc /nologo /target:exe /main:AiDeepSeekProbe /optimize+ @refs "/out:$aiDeepSeekProbe" @todoSources (Join-Path $tests 'AiDeepSeekProbe.cs')
+    if ($LASTEXITCODE -ne 0) { throw 'AI DeepSeek probe compilation failed' }
     $previousCommandDisable = $env:RAINMETER_COMMANDS_DISABLED
     $previousPluginRoot = $env:RAINMETER_PLUGIN_ROOT
     try {
@@ -100,6 +103,8 @@ try {
         & $paperBundleProbe;if($LASTEXITCODE -ne 0){throw "Paper bundle probe failed with exit code $LASTEXITCODE"};Write-Host 'PaperBundle v1 profile_hash normalization, tri-state validation and segmented score ranges passed'
         $snapshotPlugin=Join-Path $bundledPlugins 'paper-snapshot-sync\bin\PaperSnapshotSyncPlugin.exe';& $snapshotPlugin SnapshotSelfTest;if($LASTEXITCODE -ne 0){throw "Paper snapshot plugin self-tests failed with exit code $LASTEXITCODE"};Write-Host 'Paper snapshot plugin naming, input validation and address takeover self-tests passed'
         & $paperSnapshotProbe;if($LASTEXITCODE -ne 0){throw "Paper snapshot probe failed with exit code $LASTEXITCODE"};Write-Host 'Paper snapshot provider get/put round-trip, found-vs-error semantics, broker chain and address takeover passed'
+        $aiPlugin=Join-Path $bundledPlugins 'ai-deepseek\bin\AiDeepSeekPlugin.exe';& $aiPlugin AiProviderSelfTest;if($LASTEXITCODE -ne 0){throw "AI DeepSeek plugin self-tests failed with exit code $LASTEXITCODE"};Write-Host 'AI DeepSeek plugin request shape, input validation, fatal-error and proxy-bypass self-tests passed'
+        & $aiDeepSeekProbe;if($LASTEXITCODE -ne 0){throw "AI DeepSeek probe failed with exit code $LASTEXITCODE"};Write-Host 'AI provider structured completion, usage, fatal-vs-retryable errors, zero-call input rejection and broker chain passed'
         @{version=3;meta=@{};tasks=@()} | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path $build 'tasks.json') -Encoding UTF8
         $eventPath=Join-Path $build 'calendar-event.json';$firstResult=Join-Path $build 'calendar-result-1.json';$secondResult=Join-Path $build 'calendar-result-2.json'
         @{uid='meeting';occurrence_key='meeting#one';title='组会';start_at='2026-09-13T09:00:00+08:00';end_at='2026-09-13T10:00:00+08:00';reminder_at='2026-09-13T08:45:00+08:00';source='caldav';all_day=$false}|ConvertTo-Json -Depth 5|Set-Content -LiteralPath $eventPath -Encoding UTF8
