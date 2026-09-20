@@ -298,7 +298,11 @@ internal static partial class TodoApp
         toggle.Click+=delegate{try{PluginManifest m=SelectedPlugin(list);Dictionary<string,object> c=PluginRuntime.Current(m.Id);c["enabled"]=!JsonUtil.Bool(c,"enabled",false);JsonUtil.SaveAtomic(Path.Combine(PluginPaths.PluginRoot(m.Id),"current.json"),c);reload();}catch(Exception ex){LightUi.Error(ex.Message);}};
         configure.Click+=delegate{try{ShowPluginConfig(SelectedPlugin(list));reload();}catch(Exception ex){LightUi.Error(ex.Message);}};
         run.Click+=delegate{try{PluginManifest m=SelectedPlugin(list);string verb=m.Capabilities.Contains("value_provider")?"Values":m.Capabilities.Contains("todo_source")?"Sync":"";if(verb=="")throw new Exception("此插件由日历按需调用。 ");StartPluginCommand(verb,m.Id);status.Text="已启动 "+m.Name;}catch(Exception ex){LightUi.Error(ex.Message);}};
-        actions.Click+=delegate{try{PluginManifest m=SelectedPlugin(list);ContextMenuStrip menu=new ContextMenuStrip();ToolStripItem cancel=menu.Items.Add("取消当前任务");cancel.Click+=delegate{Process.Start(new ProcessStartInfo(PluginHostPath,"Cancel "+m.Id){UseShellExecute=false,CreateNoWindow=true});};ToolStripItem clear=menu.Items.Add("清除该插件创建的待办");clear.Click+=delegate{Process.Start(new ProcessStartInfo(Application.ExecutablePath,"PluginClearTasks "+m.Id){UseShellExecute=false,CreateNoWindow=true});};ToolStripItem log=menu.Items.Add("查看最近错误");log.Click+=delegate{string path=Path.Combine(PluginPaths.Logs,m.Id+".log");MessageBox.Show(File.Exists(path)?File.ReadAllText(path,RuntimeUtil.Utf8NoBom):"暂无插件日志",m.Name+" 日志",MessageBoxButtons.OK,MessageBoxIcon.Information);};if(!String.IsNullOrWhiteSpace(m.Homepage)){ToolStripItem home=menu.Items.Add("打开主页");home.Click+=delegate{RuntimeUtil.Run(m.Homepage);};}if(m.Actions.Count>0)menu.Items.Add(new ToolStripSeparator());foreach(Dictionary<string,object> action in m.Actions){ToolStripItem item=menu.Items.Add(JsonUtil.String(action,"name",JsonUtil.String(action,"id","操作")));item.Tag=action;item.Click+=delegate(object sender,EventArgs ignored){Dictionary<string,object> selectedAction=(Dictionary<string,object>)((ToolStripItem)sender).Tag;string warning=JsonUtil.String(selectedAction,"risk","");if(JsonUtil.Bool(selectedAction,"confirm",false)&&!LightUi.Confirm((warning==""?"确定执行此操作？":warning),"插件操作"))return;Process.Start(new ProcessStartInfo(PluginHostPath,"PluginAction "+m.Id+" "+JsonUtil.String(selectedAction,"id","") ){UseShellExecute=false,CreateNoWindow=true});};}menu.Show(actions,new Point(0,actions.Height));}catch(Exception ex){LightUi.Error(ex.Message);}};
+        actions.Click+=delegate{try{PluginManifest m=SelectedPlugin(list);ContextMenuStrip menu=new ContextMenuStrip();ToolStripItem cancel=menu.Items.Add("取消当前任务");cancel.Click+=delegate{Process.Start(new ProcessStartInfo(PluginHostPath,"Cancel "+m.Id){UseShellExecute=false,CreateNoWindow=true});};ToolStripItem clear=menu.Items.Add("清除该插件创建的待办");clear.Click+=delegate{Process.Start(new ProcessStartInfo(Application.ExecutablePath,"PluginClearTasks "+m.Id){UseShellExecute=false,CreateNoWindow=true});};ToolStripItem log=menu.Items.Add("查看最近错误");log.Click+=delegate{string path=Path.Combine(PluginPaths.Logs,m.Id+".log");MessageBox.Show(File.Exists(path)?File.ReadAllText(path,RuntimeUtil.Utf8NoBom):"暂无插件日志",m.Name+" 日志",MessageBoxButtons.OK,MessageBoxIcon.Information);};
+        // 规格 §5.3/§5.5：attention 的处理入口与磁贴按钮走**同一条**路径（都是 TodoHost 的确认框），
+        // 免得长出第二套付费确认实现 —— 付费确认只允许有一个产生"用户已同意"的地方。
+        if(PluginAttentionResumable(m.Id)){ToolStripItem resume=menu.Items.Add("处理待确认…");resume.Click+=delegate{Process.Start(new ProcessStartInfo(Application.ExecutablePath,"PluginConfirmAttention "+m.Id){UseShellExecute=false,CreateNoWindow=true});};}
+        if(!String.IsNullOrWhiteSpace(m.Homepage)){ToolStripItem home=menu.Items.Add("打开主页");home.Click+=delegate{RuntimeUtil.Run(m.Homepage);};}if(m.Actions.Count>0)menu.Items.Add(new ToolStripSeparator());foreach(Dictionary<string,object> action in m.Actions){ToolStripItem item=menu.Items.Add(JsonUtil.String(action,"name",JsonUtil.String(action,"id","操作")));item.Tag=action;item.Click+=delegate(object sender,EventArgs ignored){Dictionary<string,object> selectedAction=(Dictionary<string,object>)((ToolStripItem)sender).Tag;string warning=JsonUtil.String(selectedAction,"risk","");if(JsonUtil.Bool(selectedAction,"confirm",false)&&!LightUi.Confirm((warning==""?"确定执行此操作？":warning),"插件操作"))return;Process.Start(new ProcessStartInfo(PluginHostPath,"PluginAction "+m.Id+" "+JsonUtil.String(selectedAction,"id","") ){UseShellExecute=false,CreateNoWindow=true});};}menu.Show(actions,new Point(0,actions.Height));}catch(Exception ex){LightUi.Error(ex.Message);}};
         uninstall.Click+=delegate{try{PluginManifest m=SelectedPlugin(list);if(!LightUi.Confirm("卸载 "+m.Name+" 的程序版本？插件数据默认保留。","卸载插件"))return;Directory.Delete(PluginPaths.PluginRoot(m.Id),true);if(Directory.Exists(PluginPaths.DataRoot(m.Id))&&LightUi.Confirm("程序已卸载。是否同时永久删除该插件的配置、secret、状态和缓存？","删除插件数据"))Directory.Delete(PluginPaths.DataRoot(m.Id),true);reload();}catch(Exception ex){LightUi.Error(ex.Message);}};
         local.Click+=delegate{try{InstallLocalPlugin(form);reload();}catch(Exception ex){LightUi.Error(ex.Message);}};
 
@@ -388,6 +392,19 @@ internal static partial class TodoApp
         }
         catch{}
         return "尚未获取 IP";
+    }
+    // 有「可重新启动一次」的确认入口：attention 中等用户决定，或今天已经被拒绝过
+    // （规格 §4.6-6 第 2 条要求入口必须留着）。两者都由 resume_action 撑着。
+    private static bool PluginAttentionResumable(string id)
+    {
+        try
+        {
+            string path=Path.Combine(PluginPaths.Jobs,id+".json");if(!File.Exists(path))return false;
+            Dictionary<string,object> job=JsonUtil.LoadObject(path);
+            if(JsonUtil.String(job,"resume_action","")=="")return false;
+            return JsonUtil.String(job,"state","")=="attention"||PluginRuntime.PaidDeclinedToday(id);
+        }
+        catch{return false;}
     }
     private static string PluginJobStatus(string id)
     {

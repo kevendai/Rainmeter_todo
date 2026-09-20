@@ -133,6 +133,26 @@ namespace RainmeterBackend
         public const string HostExeVariable="RW_PLUGIN_HOST_EXE";
         public const string ParentPidVariable="RW_PLUGIN_PID";
         public const string DepthVariable="RW_SERVICE_CALL_DEPTH";
+        // 一次性付费同意标记（规格 §5.6「不允许自动同意」）。只有 TodoHost 的确认框会在**自己进程**里
+        // 设它，再由它启动的 PluginHost 读得到；插件子进程的环境块里一律被剔除，
+        // 所以插件既看不到、也伪造不出"用户已同意"（与 RW_PLUGIN_HOST_EXE 同一手法：机制而非约定）。
+        public const string PaidConsentVariable="RW_PAID_CONSENT";
+        // 让 consumer 插件不查宿主文件就知道"同一天内已经被用户拒绝过"（规格 §4.6-6 第 2 条）。
+        public const string DeclinedTodayVariable="RW_PLUGIN_DECLINED_TODAY";
+
+        public static bool HasPaidConsent(){return !String.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable(PaidConsentVariable));}
+
+        // 本机日期。规格 §4.6-6 的"同一天内已拒绝过"按它判定，跨天自然失效。
+        public static string LocalDate(){return DateTimeOffset.Now.ToString("yyyy-MM-dd",CultureInfo.InvariantCulture);}
+
+        // 只看**粘性**字段 paid_declined_date：后续同步会把 job 的 state 从 cancelled 改成
+        // running/attention，若按 state+cancel_reason 现算，用户刚拒绝完就被下一次同步"忘记"了。
+        // 放在 PluginRuntime 是因为 PluginHost（写）与 TodoHost（渲染/注入环境）都要用。
+        public static bool PaidDeclinedToday(string id)
+        {
+            try{string path=Path.Combine(PluginPaths.Jobs,id+".json");if(!File.Exists(path))return false;return JsonUtil.String(JsonUtil.LoadObject(path),"paid_declined_date","")==LocalDate();}
+            catch{return false;}
+        }
 
         // 本次 job 的 uuid，由 PluginHostApp 在起 job 时赋值；空 = 该次调用不参与取消传播。
         public static string CurrentJobId="";
@@ -193,7 +213,10 @@ namespace RainmeterBackend
             List<string> lines=new List<string>();StringBuilder errors=new StringBuilder();object gate=new object();Exception progressError=null;
             ProcessStartInfo info=new ProcessStartInfo(entry){WorkingDirectory=root,UseShellExecute=false,CreateNoWindow=true,RedirectStandardInput=true,RedirectStandardOutput=true,RedirectStandardError=true};
             Dictionary<string,string> environment=new Dictionary<string,string>(StringComparer.OrdinalIgnoreCase){
-                {PluginIdVariable,id},{JobIdVariable,CurrentJobId??""},{HostExeVariable,BrokerHostExe},{ParentPidVariable,Process.GetCurrentProcess().Id.ToString(CultureInfo.InvariantCulture)}};
+                {PluginIdVariable,id},{JobIdVariable,CurrentJobId??""},{HostExeVariable,BrokerHostExe},{ParentPidVariable,Process.GetCurrentProcess().Id.ToString(CultureInfo.InvariantCulture)},
+                // 显式剔除（值传 null）：付费同意标记绝不下发给插件 —— 否则插件只要自己再起一个
+                // PluginHost 就能把"同意"传染给二级调用（规格 §5.6）。
+                {PaidConsentVariable,null}};
             foreach(KeyValuePair<string,string> pair in ServiceRegistry.ToEnvironment(services))environment[pair.Key]=pair.Value;
             if(extraEnvironment!=null)foreach(KeyValuePair<string,string> pair in extraEnvironment)environment[pair.Key]=pair.Value;
             ApplyPluginEnvironment(info,PluginPaths.DataRoot(id),UiScale.Current.ToString("0.###",CultureInfo.InvariantCulture),environment);

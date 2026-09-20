@@ -994,10 +994,32 @@ namespace RainmeterBackend
 
         public static bool Confirm(string text, string title)
         {
-            Form form = Form(title, 480, 250); Heading(form, title, "此操作无法撤销。");
-            Label message = new Label { Text = text, Left = 26, Top = 98, Width = 428, Height = 72, ForeColor = Text, BackColor = Surface, Padding = new Padding(14, 14, 14, 8), Font = UiFont(10F) };
+            return ConfirmRisk(text, title, "此操作无法撤销。", "确认删除", true);
+        }
+
+        // 规格 §5.3：把风险确认抽成可复用函数 —— 付费确认（§5.2）必须走同一条 LightUi 路径，
+        // 不另起一套样式。danger=false 时确认按钮是主色而非红字：付费确认不是"危险操作"，
+        // 但它必须同样清楚地说明后果（费用由 note 承载）。
+        public static bool ConfirmRisk(string text, string title, string note, string confirmText)
+        {
+            return ConfirmRisk(text, title, note, confirmText, false);
+        }
+
+        private static bool ConfirmRisk(string text, string title, string note, string confirmText, bool danger)
+        {
+            Font bodyFont = UiFont(10F), buttonFont = UiFont(9F);
+            // 文案可能比原来的删除确认长得多（付费确认要写清楚花谁的钱），所以高度按实际测量走；
+            // 按钮仍右对齐在 454，宽度按确认文案实测，于是短文案（原「确认删除」）与既有位置基本重合。
+            Size measured = TextRenderer.MeasureText(text ?? "", bodyFont, new Size(428 - 28, Int32.MaxValue), TextFormatFlags.WordBreak);
+            int messageHeight = Math.Max(72, measured.Height + 34);
+            int formHeight = 250 + (messageHeight - 72);
+            Form form = Form(title, 480, formHeight); Heading(form, title, note);
+            Label message = new Label { Text = text, Left = 26, Top = 98, Width = 428, Height = messageHeight, ForeColor = Text, BackColor = Surface, Padding = new Padding(14, 14, 14, 8), Font = bodyFont };
             Round(message, 10); form.Controls.Add(message);
-            Button cancel = Button("取消", 264, 184, 84, DialogResult.Cancel), confirm = DangerButton("确认删除", 358, 184, 96, DialogResult.Yes);
+            int buttonWidth = Math.Max(96, TextRenderer.MeasureText(confirmText ?? "", buttonFont).Width + 36);
+            int buttonTop = formHeight - 66, confirmLeft = 454 - buttonWidth, cancelLeft = confirmLeft - 94;
+            Button cancel = Button("取消", cancelLeft, buttonTop, 84, DialogResult.Cancel);
+            Button confirm = danger ? DangerButton(confirmText, confirmLeft, buttonTop, buttonWidth, DialogResult.Yes) : PrimaryButton(confirmText, confirmLeft, buttonTop, buttonWidth, DialogResult.Yes);
             form.Controls.AddRange(new Control[] { cancel, confirm }); form.CancelButton = cancel;
             return form.ShowDialog() == DialogResult.Yes;
         }

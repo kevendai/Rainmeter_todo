@@ -31,6 +31,23 @@ internal static partial class TodoApp
         List<string> lines = new List<string>(); int y = 86, row = 0;
         Meter(lines, "HeaderSummary", "Meter=String", "MeterStyle=StyleText", "X=24", "Y=49", "W=285", "H=16", "FontSize=9", "FontColor=#MutedColor#", "Text=" + pending.Count + " 项待办  ·  " + done.Count + " 项已办");
 
+        // 规格 §5.5：attention 的提示与入口必须由 meter 渲染 —— 后端往 job 里加字段不会自己出现在桌面上。
+        List<AttentionEntry> attention = TodoSourceAttention();
+        AttentionEntry pendingAttention = attention.FirstOrDefault(entry => !entry.DeclinedToday);
+        AttentionEntry declinedAttention = attention.FirstOrDefault(entry => entry.DeclinedToday);
+        if (pendingAttention != null)
+        {
+            string hint = pendingAttention.Message == "" ? "这个任务需要你确认后才能继续。" : RuntimeUtil.CleanRainmeter(pendingAttention.Message);
+            if (attention.Count > 1) hint += "（另有 " + (attention.Count - 1) + " 个插件也在等待确认）";
+            Meter(lines, "AttentionSurface", "Meter=Shape", "X=16", "Y=" + y, "Shape=Rectangle 0,0,488,56,14 | Fill Color 253,246,227,246 | Stroke Color 232,196,106,255 | StrokeWidth 1");
+            Meter(lines, "AttentionIcon", "Meter=String", "X=40", "Y=" + (y + 30), "FontFace=" + LightUi.IconFontName, "FontSize=12", "FontColor=176,124,26,255", "StringAlign=CenterCenter", "AntiAlias=1", "Text=\xE7BA");
+            Meter(lines, "AttentionTitle", "Meter=String", "MeterStyle=StyleText", "X=64", "Y=" + (y + 9), "W=262", "H=20", "FontSize=10", "FontColor=122,84,20,255", "ClipString=2", "Text=需要确认：" + hint);
+            Meter(lines, "AttentionHint", "Meter=String", "MeterStyle=StyleText", "X=64", "Y=" + (y + 32), "W=262", "H=16", "FontSize=9", "FontColor=150,116,58,255", "Text=继续会用你的 API Key 调用一次模型并计费");
+            Meter(lines, "AttentionButton", "Meter=Shape", "X=340", "Y=" + (y + 14), "Shape=Rectangle 0,0,150,28,9 | Fill Color 217,144,20,255 | Stroke Color 217,144,20,255 | StrokeWidth 1", Action("PluginConfirmAttention", pendingAttention.PluginId), "ToolTipText=" + pendingAttention.Name + " · 点这里确认是否使用 AI");
+            Meter(lines, "AttentionButtonText", "Meter=String", "X=415", "Y=" + (y + 28), "FontFace=#FontFace#", "FontSize=9", "FontColor=255,255,255,255", "StringAlign=CenterCenter", "AntiAlias=1", "Text=使用 DeepSeek AI", Action("PluginConfirmAttention", pendingAttention.PluginId), "ToolTipText=使用 DeepSeek AI");
+            y += 64;
+        }
+
         int pendingHeight = pending.Count == 0 ? 54 : pending.Sum(t => String.IsNullOrEmpty(TimeLabel(t, now)) ? 44 : 56);
         Meter(lines, "PendingSurface", "Meter=Shape", "X=16", "Y=" + y, "Shape=Rectangle 0,0,488," + pendingHeight + ",14 | Fill Color #CardColor# | Stroke Color #BorderColor# | StrokeWidth 1");
         if (pending.Count == 0)
@@ -71,7 +88,15 @@ internal static partial class TodoApp
         if (done.Count > 8) { Meter(lines, "DoneMore", "Meter=String", "MeterStyle=StyleText", "X=60", "Y=" + (y + 7), "W=420", "H=20", "FontSize=9", "FontColor=#MutedColor#", "Text=另有 " + (done.Count - 8) + " 项未展开"); y += 30; }
         string status = RuntimeUtil.CleanRainmeter(PluginDisplayStatus(state)); y += 18;
         Meter(lines, "FooterRule", "Meter=Shape", "X=24", "Y=" + y, "Shape=Rectangle 0,0,472,1 | Fill Color #BorderColor# | StrokeWidth 0");
-        Meter(lines, "Status", "Meter=String", "MeterStyle=StyleText", "X=24", "Y=" + (y + 13), "W=470", "H=18", "FontSize=9", "FontColor=#MutedColor#", "Text=" + status, "ToolTipText=" + status); y += 42;
+        Meter(lines, "Status", "Meter=String", "MeterStyle=StyleText", "X=24", "Y=" + (y + 13), "W=470", "H=18", "FontSize=9", "FontColor=#MutedColor#", "Text=" + status, "ToolTipText=" + status);
+        // 规格 §4.6-6 第 2 条：同一天里用户已经拒绝过一次 ⇒ 不再显示醒目横幅打扰他，
+        // 但入口必须还在，于是降到页脚、文案弱化，点进去还是同一个确认流程。
+        if (declinedAttention != null)
+        {
+            Meter(lines, "DeclinedAiEntry", "Meter=String", "MeterStyle=StyleText", "X=24", "Y=" + (y + 33), "W=470", "H=18", "FontSize=9", "FontColor=#AccentColor#", "Text=" + RuntimeUtil.CleanRainmeter("今天已跳过 AI 评分 · 点此使用 AI 评分"), Action("PluginConfirmAttention", declinedAttention.PluginId), "ToolTipText=点这里今天改用 AI 评分");
+            y += 22;
+        }
+        y += 42;
         Meter(lines, "BottomSpacer", "Meter=Shape", "X=0", "Y=" + y, "Shape=Rectangle 0,0,520,1 | Fill Color 0,0,0,0 | StrokeWidth 0");
 
         List<string> output = new List<string>();
@@ -99,6 +124,45 @@ internal static partial class TodoApp
 
     private static void Meter(List<string> lines, string name, params string[] body) { lines.Add("[" + name + "]"); lines.AddRange(body.Select(option => UiScale.RainmeterOption(option, RainmeterRenderScale))); lines.Add(""); }
     private static string Action(string action, string id) { return "LeftMouseUpAction=[\"#@#TodoHost.exe\" \"" + action + "\" \"" + id + "\"]"; }
+
+    // 磁贴上待确认的一条（规格 §5.2/§5.5）。
+    private sealed class AttentionEntry
+    {
+        public string PluginId = "", Name = "", Message = "";
+        // 同一天里已经被用户拒绝过一次：不再显示醒目横幅，只留页脚的弱入口（§4.6-6 第 2 条）。
+        public bool DeclinedToday;
+    }
+
+    // 只挑 `todo_source` 插件：待办磁贴关心的是"论文同步要不要用 AI 续跑"。
+    // value_provider（例如地址插件）的确认不该出现在这里 —— 它们由插件管理页处理。
+    // 只认**已启用**的插件：插件被禁用后还留在桌面上的确认按钮只会让人困惑。
+    private static List<AttentionEntry> TodoSourceAttention()
+    {
+        List<AttentionEntry> attention = new List<AttentionEntry>();
+        if (!Directory.Exists(PluginPaths.Plugins)) return attention;
+        foreach (string root in Directory.GetDirectories(PluginPaths.Plugins))
+        {
+            string id = Path.GetFileName(root);
+            try
+            {
+                PluginManifest manifest = PluginRuntime.Resolve(id, true);
+                if (!manifest.Capabilities.Contains("todo_source")) continue;
+                string path = Path.Combine(PluginPaths.Jobs, id + ".json");
+                if (!File.Exists(path)) continue;
+                Dictionary<string, object> job = JsonUtil.LoadObject(path);
+                // 没有 resume_action 就无从"重新启动一次"，也就没有可点的入口。
+                if (JsonUtil.String(job, "resume_action", "") == "") continue;
+                string state = JsonUtil.String(job, "state", "");
+                bool declined = state == "cancelled"
+                    && JsonUtil.String(job, "cancel_reason", "") == "user_declined"
+                    && JsonUtil.String(job, "paid_declined_date", "") == PluginRuntime.LocalDate();
+                if (state != "attention" && !declined) continue;
+                attention.Add(new AttentionEntry { PluginId = id, Name = manifest.Name, Message = JsonUtil.String(job, "message", ""), DeclinedToday = declined });
+            }
+            catch { }
+        }
+        return attention;
+    }
 
 }
 

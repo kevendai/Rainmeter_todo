@@ -28,6 +28,8 @@ try {
     $paperBundleProbe = Join-Path $build 'PaperBundleProbe.exe'
     $paperSnapshotProbe = Join-Path $build 'PaperSnapshotProbe.exe'
     $aiDeepSeekProbe = Join-Path $build 'AiDeepSeekProbe.exe'
+    $paidConsentProbe = Join-Path $build 'PaidConsentProbe.exe'
+    $fakeTodoSource = Join-Path $build 'FakeTodoSource.exe'
     $dpiAssertions = Join-Path $tests 'DpiLayoutAssertions.cs'
     function Get-ProjectSources([string]$projectPath) {
         [xml]$projectXml = Get-Content -LiteralPath $projectPath -Raw -Encoding UTF8
@@ -75,6 +77,10 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'Paper snapshot probe compilation failed' }
     & $csc /nologo /target:exe /main:AiDeepSeekProbe /optimize+ @refs "/out:$aiDeepSeekProbe" @todoSources (Join-Path $tests 'AiDeepSeekProbe.cs')
     if ($LASTEXITCODE -ne 0) { throw 'AI DeepSeek probe compilation failed' }
+    & $csc /nologo /target:exe /optimize+ /r:System.Web.Extensions.dll "/out:$fakeTodoSource" (Join-Path $tests 'FakeTodoSource.cs')
+    if ($LASTEXITCODE -ne 0) { throw 'Fake todo source compilation failed' }
+    & $csc /nologo /target:exe /main:PaidConsentProbe /optimize+ @refs "/out:$paidConsentProbe" @todoSources (Join-Path $tests 'PaidConsentProbe.cs')
+    if ($LASTEXITCODE -ne 0) { throw 'Paid consent probe compilation failed' }
     $previousCommandDisable = $env:RAINMETER_COMMANDS_DISABLED
     $previousPluginRoot = $env:RAINMETER_PLUGIN_ROOT
     try {
@@ -105,6 +111,19 @@ try {
         & $paperSnapshotProbe;if($LASTEXITCODE -ne 0){throw "Paper snapshot probe failed with exit code $LASTEXITCODE"};Write-Host 'Paper snapshot provider get/put round-trip, found-vs-error semantics, broker chain and address takeover passed'
         $aiPlugin=Join-Path $bundledPlugins 'ai-deepseek\bin\AiDeepSeekPlugin.exe';& $aiPlugin AiProviderSelfTest;if($LASTEXITCODE -ne 0){throw "AI DeepSeek plugin self-tests failed with exit code $LASTEXITCODE"};Write-Host 'AI DeepSeek plugin request shape, input validation, fatal-error and proxy-bypass self-tests passed'
         & $aiDeepSeekProbe;if($LASTEXITCODE -ne 0){throw "AI DeepSeek probe failed with exit code $LASTEXITCODE"};Write-Host 'AI provider structured completion, usage, fatal-vs-retryable errors, zero-call input rejection and broker chain passed'
+        & $paidConsentProbe;if($LASTEXITCODE -ne 0){throw "Paid consent probe failed with exit code $LASTEXITCODE"};Write-Host 'Paid consent gate, headless denial, same-day decline reset, cancel markers and tile entry rendering passed'
+        $paidSourceId='io.github.test.todo-source';$paidJobPath=Join-Path $env:RAINMETER_PLUGIN_ROOT ('PluginJobs\'+$paidSourceId+'.json');$paidCalls=Join-Path $env:RAINMETER_PLUGIN_ROOT ('PluginData\'+$paidSourceId+'\calls.log')
+        @{job_id='smoke';plugin_id=$paidSourceId;state='attention';current=0;total=0;resume_action='sync_with_ai';resume_input=@{allow_paid_ai=$true};message='远端论文同步失败，是否使用 DeepSeek AI 重新评分？'}|ConvertTo-Json -Depth 6|Set-Content -LiteralPath $paidJobPath -Encoding UTF8
+        $callsBefore=@(Get-Content -LiteralPath $paidCalls -Encoding UTF8 -ErrorAction SilentlyContinue).Count
+        $env:RAINMETER_UI_SMOKE='1';& $todo PluginConfirmAttention $paidSourceId;$confirmExit=$LASTEXITCODE;Remove-Item Env:RAINMETER_UI_SMOKE
+        if($confirmExit -ne 0){throw ('Confirm dialog path failed with exit code '+$confirmExit)}
+        $paidJob=$null
+        for($attempt=0;$attempt -lt 40;$attempt++){try{$paidJob=Get-Content -LiteralPath $paidJobPath -Raw -Encoding UTF8|ConvertFrom-Json;if($paidJob.state -eq 'cancelled'){break}}catch [IO.IOException]{$paidJob=$null};Start-Sleep -Milliseconds 100}
+        if($null-eq $paidJob-or $paidJob.state -ne 'cancelled'){throw ('Declining the confirmation did not record a cancelled job: '+$paidJob.state)}
+        if($paidJob.cancel_reason -ne 'user_declined'){throw ('Decline reason was not recorded: '+$paidJob.cancel_reason)}
+        $callsAfter=@(Get-Content -LiteralPath $paidCalls -Encoding UTF8 -ErrorAction SilentlyContinue).Count
+        if($callsAfter -ne $callsBefore){throw 'Declining still called the plugin'}
+        Write-Host 'Confirm dialog decline path records user_declined with zero plugin calls passed'
         @{version=3;meta=@{};tasks=@()} | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path $build 'tasks.json') -Encoding UTF8
         $eventPath=Join-Path $build 'calendar-event.json';$firstResult=Join-Path $build 'calendar-result-1.json';$secondResult=Join-Path $build 'calendar-result-2.json'
         @{uid='meeting';occurrence_key='meeting#one';title='组会';start_at='2026-09-13T09:00:00+08:00';end_at='2026-09-13T10:00:00+08:00';reminder_at='2026-09-13T08:45:00+08:00';source='caldav';all_day=$false}|ConvertTo-Json -Depth 5|Set-Content -LiteralPath $eventPath -Encoding UTF8

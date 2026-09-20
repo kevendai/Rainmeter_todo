@@ -45,6 +45,17 @@ internal static class PluginHostApp
             bool sync=action=="Sync"||action=="SyncAuto";
             int timeout = sync||custom ? 1800 : id==DynamicPluginValues.SsdpPluginId ? 90 : 30;
             string pluginAction = custom?(args.Length>2?args[2]:""):sync ? "sync" : action == "Transform" ? "transform" : action == "Values" ? "get_values" : action;
+            // 规格 §5.6：`allow_paid_ai:true` 只在**带一次性同意标记**时才算数。标记只能由 TodoHost 的
+            // 确认框注入（TodoApp.PluginConfirmAttention），且绝不下发给插件子进程。没有标记却要求付费
+            // 调用（定时/后台/无人值守，或插件想偷偷把请求升级成付费）一律拒绝：**一个字节都不写 job**，
+            // 于是 job 保持 attention 等用户在界面上点，本轮 0 次 API 调用。
+            if(JsonUtil.Bool(input,"allow_paid_ai",false)&&!PluginRuntime.HasPaidConsent())
+            {
+                Console.Error.WriteLine("没有人确认这次付费调用，已拒绝（provider_denied）");
+                Dictionary<string,object> deniedResponse=new Dictionary<string,object>{{"ok",false},{"status","error"},{"error_kind","provider_denied"},{"paid_ai","denied"},{"payload",null},{"error","没有人确认这次付费调用。请先在磁贴上点【使用 DeepSeek AI】。"}};
+                if(outputPath != "") JsonUtil.SaveAtomic(outputPath, deniedResponse); else Console.Out.WriteLine(JsonUtil.Serialize(deniedResponse));
+                return 1;
+            }
             string jobId=Guid.NewGuid().ToString("N");
             PluginCallResult result;
             try
@@ -173,14 +184,21 @@ internal static class PluginHostApp
 
     private static PluginCallResult InvokeLocked(string id,string action,object input,string trigger,int timeout,bool exclusive,Action<Dictionary<string,object>> progress,Action onStart)
     {
-        if(!exclusive){if(onStart!=null)onStart();return PluginRuntime.Invoke(id,action,input,trigger,timeout,progress);}
+        if(!exclusive){if(onStart!=null)onStart();return PluginRuntime.Invoke(id,action,input,trigger,timeout,progress,InvocationEnvironment(id));}
         using(System.Threading.Mutex mutex=new System.Threading.Mutex(false,@"Global\RainmeterPluginSync_"+Regex.Replace(id,@"[^A-Za-z0-9]","_")))
         {
             bool held=false;try{try{held=mutex.WaitOne(TimeSpan.Zero);}catch(System.Threading.AbandonedMutexException){held=true;}if(!held)throw new PluginBusyException("该插件已有同步任务正在运行");
             // 拿到锁之后才写 job：否则第二个请求会先把在跑的 job 的进度打回 0/0。
             if(onStart!=null)onStart();
-            return PluginRuntime.Invoke(id,action,input,trigger,timeout,progress);}finally{if(held)mutex.ReleaseMutex();}
+            return PluginRuntime.Invoke(id,action,input,trigger,timeout,progress,InvocationEnvironment(id));}finally{if(held)mutex.ReleaseMutex();}
         }
+    }
+
+    // 规格 §4.6-6 第 2 条：同一天内已经被用户拒绝过付费 AI ⇒ 插件下一次运行时应当能直接知道，
+    // 不必自己去解析宿主独占写入的 job 文件。跨天自动失效（比日期）。
+    private static Dictionary<string,string> InvocationEnvironment(string id)
+    {
+        return new Dictionary<string,string>(StringComparer.OrdinalIgnoreCase){{PluginRuntime.DeclinedTodayVariable,PluginRuntime.PaidDeclinedToday(id)?"1":"0"}};
     }
 
     // 起一个 job：写 job_id 与空 children[]，并把 job_id 交给 PluginRuntime 注入插件环境。
@@ -189,7 +207,9 @@ internal static class PluginHostApp
         PluginRuntime.CurrentJobId=jobId;
         WriteJob(id,new Dictionary<string,object>{
             {"job_id",jobId},{"state","running"},{"current",0},{"total",0},{"message","正在运行"},
-            {"started_at",DateTimeOffset.Now.ToString("o",CultureInfo.InvariantCulture)},{"children",new List<object>()}});
+            {"started_at",DateTimeOffset.Now.ToString("o",CultureInfo.InvariantCulture)},{"children",new List<object>()},
+            // 清掉上一轮的确认信息：用户点了按钮或换了一轮之后，磁贴不该再读到陈旧的 attention/resume。
+            {"attention",null},{"resume_action",""},{"resume_input",null}});
     }
 
     private static void WriteJob(string id, Dictionary<string, object> progress)
@@ -244,7 +264,14 @@ internal static class PluginHostApp
         if(state=="completed"||state=="failed"||state=="cancelled")return 1;
         if(!killed&&state!="running"&&state!="attention")return 1;
         string cancelReason=String.IsNullOrWhiteSpace(reason)?"user_cancelled":reason.Trim();
-        WriteJob(id,new Dictionary<string,object>{{"state","cancelled"},{"current",0},{"total",1},{"message",CancelMessage(cancelReason)},{"cancel_reason",cancelReason},{"cancelled_at",DateTimeOffset.Now.ToString("o",CultureInfo.InvariantCulture)}});
+        Dictionary<string,object> cancelled=new Dictionary<string,object>{{"state","cancelled"},{"current",0},{"total",1},{"message",CancelMessage(cancelReason)},{"cancel_reason",cancelReason},{"cancel_date",PluginRuntime.LocalDate()},{"cancelled_at",DateTimeOffset.Now.ToString("o",CultureInfo.InvariantCulture)}};
+        // 规格 §4.6-6 第 2 条：只有用户**明确拒绝**才算"今天别再问"，headless 无人确认（provider_denied）
+        // 与用户主动中断正在跑的任务（user_cancelled）都不写这天记号。
+        // 记的是粘性字段：后续同步会把 state 改回 running/attention，粘性字段保证同日不再打扰。
+        if(cancelReason=="user_declined"){cancelled["paid_declined_date"]=PluginRuntime.LocalDate();cancelled["paid_declined_at"]=DateTimeOffset.Now.ToString("o",CultureInfo.InvariantCulture);}
+        // resume_action / resume_input 刻意**不清**：用户拒绝后磁贴仍要保留可点的「使用 DeepSeek AI」入口
+        // （规格 §4.6-6 第 2 条），入口就靠这两个字段重建。
+        WriteJob(id,cancelled);
         return 0;
     }
 
