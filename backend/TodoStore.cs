@@ -26,6 +26,9 @@ internal static partial class TodoApp
     {
         PluginRuntime.BootstrapBundled(Path.Combine(ResourceDir,"BundledPlugins"));
         PluginRuntime.MigrateInstallation(ResourceDir,StatePath,Path.GetFullPath(Path.Combine(ResourceDir,"..","..","Calendar","@Resources","calendar-state.json")));
+        // v2.1：把 arxiv 的旧 AI / 翻译 / 文件服务器配置复制一份给三个官方 Provider（复制不删除，§9.2）。
+        // 靠 migration-v2.1.json 的 step 级 marker 幂等；全部终态时这里只剩一次 File.Exists。
+        ProviderMigration.Run();
         if (!File.Exists(StatePath)) return NewState();
         try
         {

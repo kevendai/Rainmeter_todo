@@ -24,6 +24,7 @@
     <Compile Include="Common.cs" />
     <Compile Include="PluginRuntime.cs" />
     <Compile Include="ServiceRegistry.cs" />
+    <Compile Include="ProviderMigration.cs" />
     <Compile Include="PluginHostApp.cs" />
   </ItemGroup>
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />

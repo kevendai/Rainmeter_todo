@@ -27,6 +27,7 @@
     <Compile Include="Common.cs" />
     <Compile Include="PluginRuntime.cs" />
     <Compile Include="ServiceRegistry.cs" />
+    <Compile Include="ProviderMigration.cs" />
     <Compile Include="PluginSettingsLayout.cs" />
     <Compile Include="PluginPackageInstaller.cs" />
     <Compile Include="PluginManagerForms.cs" />

@@ -45,8 +45,24 @@ namespace RainmeterBackend
         // capabilities 是"宿主可以主动执行的入口"，provides 是"给别的插件用的服务"。
         public List<string> Provides = new List<string>();
         public List<ServiceUse> Uses = new List<ServiceUse>();
+        // v2.1 回滚保护（§10）：插件要求的主程序版本高于当前主程序。只有 LoadForStatus 会把它置位，
+        // 正常 Load 遇到这种情况仍然抛异常拒跑。UI 靠它给出**可见**提示而不是静默算成"安装损坏"。
+        public bool HostTooOld;
 
         public static PluginManifest Load(string root)
+        {
+            return Parse(root, true);
+        }
+
+        // v2.1 回滚保护（§10 第 1 条）：本体被降级到 2.0.4 之后，arxiv 2.0.0 这类插件会因
+        // min_host_version 被拒跑。插件列表必须**看得见**它并说明原因，所以这里不因"宿主太旧"
+        // 而抛异常，只把 HostTooOld 置位；其余校验照旧（真的坏了还是要抛）。
+        public static PluginManifest LoadForStatus(string root)
+        {
+            return Parse(root, false);
+        }
+
+        private static PluginManifest Parse(string root, bool enforceHostVersion)
         {
             string path = Path.Combine(root, "plugin.json");
             if (!File.Exists(path)) throw new InvalidDataException("插件缺少 plugin.json");
@@ -69,15 +85,20 @@ namespace RainmeterBackend
             }
             m.Actions=JsonUtil.Array(JsonUtil.Get(v,"actions")).Select(JsonUtil.Object).ToList();Dictionary<string,object> address=JsonUtil.Object(JsonUtil.Get(v,"address_provider"));m.AddressPriority=JsonUtil.Int(address,"priority",0);m.AddressValueKey=JsonUtil.String(address,"value","");m.AddressTargets=JsonUtil.Array(JsonUtil.Get(address,"targets")).Select(Convert.ToString).Where(x=>!String.IsNullOrWhiteSpace(x)).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
             m.AddressTarget=JsonUtil.String(v,"address_target","").Trim();
-            m.Validate(root); return m;
+            m.Validate(root,enforceHostVersion); return m;
         }
 
-        private void Validate(string root)
+        private void Validate(string root,bool enforceHostVersion)
         {
             if(!Regex.IsMatch(Id??"",@"^[a-z0-9]+(?:[.-][a-z0-9]+)+$"))throw new InvalidDataException("插件 ID 格式无效");
             if(!Regex.IsMatch(Version??"",@"^\d+\.\d+\.\d+$"))throw new InvalidDataException("插件版本必须为 x.y.z");
             if(ApiVersion!=1)throw new InvalidDataException("不支持的插件 API 版本");
-            if(!Regex.IsMatch(MinHostVersion??"",@"^\d+\.\d+\.\d+$")||CompareVersion(MinHostVersion,PluginRuntime.HostVersion)>0)throw new InvalidDataException("插件要求更高版本的宿主");
+            if(!Regex.IsMatch(MinHostVersion??"",@"^\d+\.\d+\.\d+$"))throw new InvalidDataException("插件最低宿主版本无效");
+            if(CompareVersion(MinHostVersion,PluginRuntime.HostVersion)>0)
+            {
+                if(enforceHostVersion)throw new InvalidDataException("插件要求更高版本的宿主");
+                HostTooOld=true;
+            }
             if(String.IsNullOrWhiteSpace(Name))throw new InvalidDataException("插件名称不能为空");
             HashSet<string> allowed=new HashSet<string>(new[]{"todo_source","todo_transform","value_provider"},StringComparer.OrdinalIgnoreCase);
             // capabilities 可以为空（纯 Provider 插件），但"能被宿主调用"与"能提供服务"至少要有一样。
@@ -169,6 +190,15 @@ namespace RainmeterBackend
             Dictionary<string,object> c=Current(id);if(c.Count==0)throw new InvalidOperationException("插件未安装："+id);
             if(enabled&&!JsonUtil.Bool(c,"enabled",false))throw new InvalidOperationException("插件未启用："+id);
             string version=JsonUtil.String(c,"version","");PluginManifest m=PluginManifest.Load(PluginPaths.VersionRoot(id,version));
+            if(!m.Id.Equals(id,StringComparison.OrdinalIgnoreCase))throw new InvalidDataException("插件 ID 与安装目录不一致");
+            return m;
+        }
+
+        // 列表页专用：宿主太旧的插件也返回（HostTooOld=true），其余错误照旧抛出交给 UI 计"安装损坏"。
+        public static PluginManifest ResolveForStatus(string id)
+        {
+            Dictionary<string,object> c=Current(id);if(c.Count==0)throw new InvalidOperationException("插件未安装："+id);
+            string version=JsonUtil.String(c,"version","");PluginManifest m=PluginManifest.LoadForStatus(PluginPaths.VersionRoot(id,version));
             if(!m.Id.Equals(id,StringComparison.OrdinalIgnoreCase))throw new InvalidDataException("插件 ID 与安装目录不一致");
             return m;
         }

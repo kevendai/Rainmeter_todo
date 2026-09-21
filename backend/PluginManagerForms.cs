@@ -296,14 +296,14 @@ internal static partial class TodoApp
         Button local=LightUi.Button("从本地安装",576,506,118,DialogResult.None);
         installedPage.Controls.Add(list);installedPage.Controls.Add(status);
         installedPage.Controls.AddRange(new Control[]{toggle,configure,run,actions,uninstall,local});
-        Action updateInstalledButtons=delegate{bool has=list.SelectedRow!=null;toggle.Enabled=configure.Enabled=run.Enabled=actions.Enabled=uninstall.Enabled=has;};
+        Action updateInstalledButtons=delegate{PluginRow chosen=list.SelectedRow;PluginManifest manifest=chosen==null?null:chosen.Tag as PluginManifest;bool has=manifest!=null;bool runnable=has&&!manifest.HostTooOld;toggle.Enabled=configure.Enabled=run.Enabled=runnable;actions.Enabled=uninstall.Enabled=has;};
         list.SelectionChanged+=delegate{updateInstalledButtons();};
         list.RowActivated+=delegate{if(configure.Enabled)configure.PerformClick();};
         Action reload=delegate{ReloadPlugins(list,status);updateInstalledButtons();};reload();
         System.Windows.Forms.Timer jobTimer=new System.Windows.Forms.Timer{Interval=500};jobTimer.Tick+=delegate{PluginRow selectedRow=list.SelectedRow;if(selectedRow==null)return;PluginManifest selectedManifest=selectedRow.Tag as PluginManifest;if(selectedManifest==null)return;string path=Path.Combine(PluginPaths.Jobs,selectedManifest.Id+".json");try{if(File.Exists(path)){Dictionary<string,object> job=JsonUtil.LoadObject(path);string state=JsonUtil.String(job,"state",""),message=JsonUtil.String(job,"message","");int current=JsonUtil.Int(job,"current",0),total=JsonUtil.Int(job,"total",0);status.Text=state+(total>0?" "+current+"/"+total:"")+(message==""?"":" · "+message);}}catch{}};jobTimer.Start();form.FormClosed+=delegate{jobTimer.Stop();jobTimer.Dispose();};
-        toggle.Click+=delegate{try{PluginManifest m=SelectedPlugin(list);Dictionary<string,object> c=PluginRuntime.Current(m.Id);c["enabled"]=!JsonUtil.Bool(c,"enabled",false);JsonUtil.SaveAtomic(Path.Combine(PluginPaths.PluginRoot(m.Id),"current.json"),c);reload();}catch(Exception ex){LightUi.Error(ex.Message);}};
-        configure.Click+=delegate{try{ShowPluginConfig(SelectedPlugin(list));reload();}catch(Exception ex){LightUi.Error(ex.Message);}};
-        run.Click+=delegate{try{PluginManifest m=SelectedPlugin(list);string verb=m.Capabilities.Contains("value_provider")?"Values":m.Capabilities.Contains("todo_source")?"Sync":"";if(verb=="")throw new Exception("此插件由日历按需调用。 ");StartPluginCommand(verb,m.Id);status.Text="已启动 "+m.Name;}catch(Exception ex){LightUi.Error(ex.Message);}};
+        toggle.Click+=delegate{try{PluginManifest m=SelectedRunnablePlugin(list);Dictionary<string,object> c=PluginRuntime.Current(m.Id);c["enabled"]=!JsonUtil.Bool(c,"enabled",false);JsonUtil.SaveAtomic(Path.Combine(PluginPaths.PluginRoot(m.Id),"current.json"),c);reload();}catch(Exception ex){LightUi.Error(ex.Message);}};
+        configure.Click+=delegate{try{ShowPluginConfig(SelectedRunnablePlugin(list));reload();}catch(Exception ex){LightUi.Error(ex.Message);}};
+        run.Click+=delegate{try{PluginManifest m=SelectedRunnablePlugin(list);string verb=m.Capabilities.Contains("value_provider")?"Values":m.Capabilities.Contains("todo_source")?"Sync":"";if(verb=="")throw new Exception("此插件由日历按需调用。 ");StartPluginCommand(verb,m.Id);status.Text="已启动 "+m.Name;}catch(Exception ex){LightUi.Error(ex.Message);}};
         actions.Click+=delegate{try{PluginManifest m=SelectedPlugin(list);ContextMenuStrip menu=new ContextMenuStrip();ToolStripItem cancel=menu.Items.Add("取消当前任务");cancel.Click+=delegate{Process.Start(new ProcessStartInfo(PluginHostPath,"Cancel "+m.Id){UseShellExecute=false,CreateNoWindow=true});};ToolStripItem clear=menu.Items.Add("清除该插件创建的待办");clear.Click+=delegate{Process.Start(new ProcessStartInfo(Application.ExecutablePath,"PluginClearTasks "+m.Id){UseShellExecute=false,CreateNoWindow=true});};ToolStripItem log=menu.Items.Add("查看最近错误");log.Click+=delegate{string path=Path.Combine(PluginPaths.Logs,m.Id+".log");MessageBox.Show(File.Exists(path)?File.ReadAllText(path,RuntimeUtil.Utf8NoBom):"暂无插件日志",m.Name+" 日志",MessageBoxButtons.OK,MessageBoxIcon.Information);};
         // 规格 §5.3/§5.5：attention 的处理入口与磁贴按钮走**同一条**路径（都是 TodoHost 的确认框），
         // 免得长出第二套付费确认实现 —— 付费确认只允许有一个产生"用户已同意"的地方。
@@ -361,24 +361,51 @@ internal static partial class TodoApp
 
     private static void ReloadPlugins(PluginListControl view,Label status)
     {
-        view.Rows.Clear();int invalid=0;
-        foreach(string root in Directory.Exists(PluginPaths.Plugins)?Directory.GetDirectories(PluginPaths.Plugins):new string[0])try
+        view.Rows.Clear();int invalid=0,staleHost=0;
+        foreach(string root in Directory.Exists(PluginPaths.Plugins)?Directory.GetDirectories(PluginPaths.Plugins):new string[0])
         {
-            string id=Path.GetFileName(root);PluginManifest m=PluginRuntime.Resolve(id,false);Dictionary<string,object> c=PluginRuntime.Current(id);
-            bool enabled=JsonUtil.Bool(c,"enabled",false);
-            List<string> facts=new List<string>();facts.Add("v"+m.Version);
-            if(m.Capabilities.Count>0)facts.Add(String.Join(", ",m.Capabilities.ToArray()));
-            if(m.Permissions.Count>0)facts.Add("权限 "+String.Join(", ",m.Permissions.ToArray()));
-            string runtimeStatus=PluginRuntimeStatus(id,m);if(runtimeStatus!="")facts.Add(runtimeStatus);
-            PluginRow row=new PluginRow();row.Title=m.Name;row.Subtitle=String.Join("  ·  ",facts.ToArray());
-            row.Badge=enabled?"已启用":"已禁用";
-            row.BadgeFore=enabled?PluginDoneGreen:LightUi.Muted;
-            row.BadgeBack=enabled?PluginBadgeBackOn:PluginBadgeBackOff;
-            row.Tag=m;view.Rows.Add(row);
-        }catch{invalid++;}
+            string id=Path.GetFileName(root);PluginManifest m=null;
+            try{m=PluginRuntime.Resolve(id,false);}
+            catch
+            {
+                // §10 回滚保护第 1 条：本体被降级（例如回退到 2.0.4）后，arxiv 2.0.0 这类插件会被
+                // min_host_version 拒跑。这种插件**必须看得见**并说明原因，绝不能静默算成"安装损坏"。
+                try{PluginManifest stale=PluginRuntime.ResolveForStatus(id);if(stale.HostTooOld)m=stale;}catch{}
+            }
+            if(m==null){invalid++;continue;}
+            try
+            {
+                Dictionary<string,object> c=PluginRuntime.Current(id);
+                bool enabled=JsonUtil.Bool(c,"enabled",false);
+                List<string> facts=new List<string>();facts.Add("v"+m.Version);
+                if(m.HostTooOld)facts.Add("需要主程序 "+m.MinHostVersion+" 或更高版本（当前 "+AppVersion+"）");
+                else
+                {
+                    if(m.Capabilities.Count>0)facts.Add(String.Join(", ",m.Capabilities.ToArray()));
+                    if(m.Permissions.Count>0)facts.Add("权限 "+String.Join(", ",m.Permissions.ToArray()));
+                    string runtimeStatus=PluginRuntimeStatus(id,m);if(runtimeStatus!="")facts.Add(runtimeStatus);
+                }
+                PluginRow row=new PluginRow();row.Title=m.Name;row.Subtitle=String.Join("  ·  ",facts.ToArray());
+                if(m.HostTooOld)
+                {
+                    staleHost++;
+                    row.Badge="版本不匹配";row.BadgeFore=LightUi.Danger;row.BadgeBack=PluginBadgeBackOff;
+                }
+                else
+                {
+                    row.Badge=enabled?"已启用":"已禁用";
+                    row.BadgeFore=enabled?PluginDoneGreen:LightUi.Muted;
+                    row.BadgeBack=enabled?PluginBadgeBackOn:PluginBadgeBackOff;
+                }
+                row.Tag=m;view.Rows.Add(row);
+            }
+            catch{invalid++;}
+        }
         view.AfterReload();
-        status.ForeColor=LightUi.Muted;
-        status.Text="已安装 "+view.Rows.Count.ToString(CultureInfo.InvariantCulture)+" 个插件"+(invalid>0?"；"+invalid+" 个安装损坏":"");
+        status.ForeColor=staleHost>0?LightUi.Danger:LightUi.Muted;
+        status.Text="已安装 "+view.Rows.Count.ToString(CultureInfo.InvariantCulture)+" 个插件"
+            +(staleHost>0?"；"+staleHost+" 个因主程序版本过低已暂停，请升级主程序":"")
+            +(invalid>0?"；"+invalid+" 个安装损坏":"");
     }
     private static string PluginRuntimeStatus(string id,PluginManifest manifest)
     {
@@ -426,6 +453,14 @@ internal static partial class TodoApp
         catch{return "";}
     }
     private static PluginManifest SelectedPlugin(PluginListControl view){PluginRow row=view.SelectedRow;if(row==null)throw new Exception("请先选择一个插件。");return (PluginManifest)row.Tag;}
+    // 版本不匹配的插件可以被看见、可以被选中（这是 §10 要求的可见提示），但不能被启用/配置/运行
+    // ——它根本跑不起来，放行只会得到一串看不懂的异常。
+    private static PluginManifest SelectedRunnablePlugin(PluginListControl view)
+    {
+        PluginManifest m=SelectedPlugin(view);
+        if(m.HostTooOld)throw new Exception("「"+m.Name+"」需要主程序 "+m.MinHostVersion+" 或更高版本（当前 "+AppVersion+"），请先升级主程序。");
+        return m;
+    }
 
     // 设置页里的一个排版单元：一行（标签 + 控件 [+ 状态 + 按钮]），或一个分组标题。
     // 位置统一由 LayoutSettings 计算，因为「高级设置」折叠/展开时要整页重排（规格 §7.4）。

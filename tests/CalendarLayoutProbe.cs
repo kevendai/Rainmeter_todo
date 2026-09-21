@@ -24,7 +24,14 @@ internal static class CalendarLayoutProbe
         else if (scenario == "editor-recurrence") ProbeEditorRecurrence();
         else if (scenario == "recurrence-dialog") ProbeRecurrenceDialog();
         else throw new ArgumentException("Unknown scenario: " + scenario);
-        if (failure != null) { Console.Error.WriteLine(scenario + ": " + failure.Message); Environment.ExitCode = 1; return; }
+        if (failure != null)
+        {
+            // 套件用 Start-Process 起这些探针，它的 stderr 拿不到（本机 Start-Process 加重定向还会撞上
+            // ProcessStartInfo.EnvironmentVariables 的 Path/PATH 冲突）⇒ 失败原因额外落一份盘。
+            Console.Error.WriteLine(scenario + ": " + failure.Message);
+            ProbeFailureLog.Record(scenario, failure);
+            Environment.ExitCode = 1; return;
+        }
         Console.WriteLine("PASS " + scenario);
     }
 

@@ -31,6 +31,7 @@ try {
     $paidConsentProbe = Join-Path $build 'PaidConsentProbe.exe'
     $translateTencentProbe = Join-Path $build 'TranslateTencentProbe.exe'
     $pluginSettingsProbe = Join-Path $build 'PluginSettingsProbe.exe'
+    $providerMigrationProbe = Join-Path $build 'ProviderMigrationProbe.exe'
     $fakeTodoSource = Join-Path $build 'FakeTodoSource.exe'
     $dpiAssertions = Join-Path $tests 'DpiLayoutAssertions.cs'
     function Get-ProjectSources([string]$projectPath) {
@@ -59,9 +60,9 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'Plugin environment probe failed' }
     & $csc /nologo /target:exe /optimize+ /r:System.Web.Extensions.dll "/out:$smoke" (Join-Path $backend 'SmokeTests.cs')
     if ($LASTEXITCODE -ne 0) { throw 'Smoke test compilation failed' }
-    & $csc /nologo /target:exe /main:TodoLayoutProbe /optimize+ @refs "/out:$todoLayout" @todoSources $dpiAssertions (Join-Path $tests 'TodoLayoutProbe.cs')
+    & $csc /nologo /target:exe /main:TodoLayoutProbe /optimize+ @refs "/out:$todoLayout" @todoSources $dpiAssertions (Join-Path $tests 'ProbeFailureLog.cs') (Join-Path $tests 'TodoLayoutProbe.cs')
     if ($LASTEXITCODE -ne 0) { throw 'Todo layout probe compilation failed' }
-    & $csc /nologo /target:exe /main:CalendarLayoutProbe /optimize+ @refs "/out:$calendarLayout" @calendarSources $dpiAssertions (Join-Path $tests 'CalendarLayoutProbe.cs')
+    & $csc /nologo /target:exe /main:CalendarLayoutProbe /optimize+ @refs "/out:$calendarLayout" @calendarSources $dpiAssertions (Join-Path $tests 'ProbeFailureLog.cs') (Join-Path $tests 'CalendarLayoutProbe.cs')
     if ($LASTEXITCODE -ne 0) { throw 'Calendar layout probe compilation failed' }
     & $csc /nologo /target:exe /main:CalendarRecurrenceProbe /optimize+ @refs "/out:$calendarRecurrence" @calendarSources (Join-Path $tests 'CalendarRecurrenceProbe.cs')
     if ($LASTEXITCODE -ne 0) { throw 'Calendar recurrence probe compilation failed' }
@@ -87,6 +88,8 @@ try {
     if ($LASTEXITCODE -ne 0) { throw ('Translate Tencent probe compilation failed: ' + $translateCompileOutput) }
     $settingsCompileOutput = & $csc /nologo /target:exe /main:PluginSettingsProbe /optimize+ @refs "/out:$pluginSettingsProbe" @todoSources (Join-Path $tests 'PluginSettingsProbe.cs') 2>&1 | Out-String
     if ($LASTEXITCODE -ne 0) { throw ('Plugin settings probe compilation failed: ' + $settingsCompileOutput) }
+    $migrationCompileOutput = & $csc /nologo /target:exe /main:ProviderMigrationProbe /optimize+ @refs "/out:$providerMigrationProbe" @todoSources (Join-Path $tests 'ProviderMigrationProbe.cs') 2>&1 | Out-String
+    if ($LASTEXITCODE -ne 0) { throw ('Provider migration probe compilation failed: ' + $migrationCompileOutput) }
     $previousCommandDisable = $env:RAINMETER_COMMANDS_DISABLED
     $previousPluginRoot = $env:RAINMETER_PLUGIN_ROOT
     try {
@@ -121,6 +124,7 @@ try {
         $translatePlugin=Join-Path $bundledPlugins 'translate-tencent\bin\TranslateTencentPlugin.exe';& $translatePlugin TranslationProviderSelfTest;if($LASTEXITCODE -ne 0){throw "Translate Tencent plugin self-tests failed with exit code $LASTEXITCODE"};Write-Host 'Translate Tencent plugin TC3 known answers, language mapping, chunking, cache-key and error-code grading self-tests passed'
         & $translateTencentProbe;if($LASTEXITCODE -ne 0){throw "Translate Tencent probe failed with exit code $LASTEXITCODE"};Write-Host 'Translation provider TC3 signature verification, batch order, cache reuse, throttling, zero-call input rejection and vendor error grading passed'
         & $pluginSettingsProbe;if($LASTEXITCODE -ne 0){throw "Plugin settings probe failed with exit code $LASTEXITCODE"};Write-Host 'Plugin settings section grouping, collapsed advanced items, service binding selection, x-requires greying and binding-table writes passed'
+        & $providerMigrationProbe;if($LASTEXITCODE -ne 0){throw "Provider migration probe failed with exit code $LASTEXITCODE"};Write-Host 'v2.1 config migration: step-level marker, copy-without-delete, idempotency, retry-only-unfinished and host-too-old visibility passed'
         $paidSourceId='io.github.test.todo-source';$paidJobPath=Join-Path $env:RAINMETER_PLUGIN_ROOT ('PluginJobs\'+$paidSourceId+'.json');$paidCalls=Join-Path $env:RAINMETER_PLUGIN_ROOT ('PluginData\'+$paidSourceId+'\calls.log')
         @{job_id='smoke';plugin_id=$paidSourceId;state='attention';current=0;total=0;resume_action='sync_with_ai';resume_input=@{allow_paid_ai=$true};message='远端论文同步失败，是否使用 DeepSeek AI 重新评分？'}|ConvertTo-Json -Depth 6|Set-Content -LiteralPath $paidJobPath -Encoding UTF8
         $callsBefore=@(Get-Content -LiteralPath $paidCalls -Encoding UTF8 -ErrorAction SilentlyContinue).Count
@@ -208,6 +212,8 @@ Write-Host 'UpdaterHost EXE and minimal legacy PowerShell launcher passed'
     Write-Host 'Independent tile/window scale persistence and legacy fallback passed'
     $previousScaleOverride = $env:RAINMETER_UI_SCALE_OVERRIDE
     $previousDpiOverride = $env:RAINMETER_UI_DPI_OVERRIDE
+    $previousProbeFailureLog = $env:RAINMETER_PROBE_FAILURE_LOG
+    $env:RAINMETER_PROBE_FAILURE_LOG = Join-Path $build 'probe-failures.log'
     try {
         foreach ($scale in @('0.70','0.75','0.80','0.90','1.00','1.10','1.25')) {
             $env:RAINMETER_UI_SCALE_OVERRIDE = $scale
@@ -240,12 +246,21 @@ Write-Host 'UpdaterHost EXE and minimal legacy PowerShell launcher passed'
                 @{ File = $calendarLayout; Argument = 'editor-recurrence'; Name = 'Calendar editor recurrence' },
                 @{ File = $calendarLayout; Argument = 'recurrence-dialog'; Name = 'Calendar recurrence dialog' }
             )) {
+                $probeFailureLog = Join-Path $build 'probe-failures.log'
+                if (Test-Path -LiteralPath $probeFailureLog) { Remove-Item -LiteralPath $probeFailureLog -Force -ErrorAction SilentlyContinue }
                 $process = Start-Process -FilePath $probe.File -ArgumentList $probe.Argument -WindowStyle Hidden -PassThru
                 if (-not $process.WaitForExit(20000)) {
                     try { $process.Kill() } catch {}
                     throw "$($probe.Name) layout probe timed out at $scale"
                 }
-                if ($process.ExitCode -ne 0) { throw "$($probe.Name) layout probe failed at $scale with exit code $($process.ExitCode)" }
+                if ($process.ExitCode -ne 0) {
+                    # 探针的 stderr 在 Start-Process 下拿不到，所以它把失败原因另写一份到
+                    # RAINMETER_PROBE_FAILURE_LOG。不带上这段，套件只会报一句"exit code 1"。
+                    $detail = ''
+                    if (Test-Path -LiteralPath $probeFailureLog) { $detail = ([IO.File]::ReadAllText($probeFailureLog)).Trim() }
+                    if ($detail -eq '') { $detail = '（探针未留下失败原因）' }
+                    throw ("$($probe.Name) layout probe failed at $scale with exit code $($process.ExitCode)：$detail")
+                }
             }
             Write-Host "Tile and window scale probes passed at $([int]([double]$scale * 100))%"
         }
@@ -262,12 +277,18 @@ Write-Host 'UpdaterHost EXE and minimal legacy PowerShell launcher passed'
             @{ File = $calendarLayout; Argument = 'editor-recurrence'; Name = 'Calendar editor recurrence' },
             @{ File = $calendarLayout; Argument = 'recurrence-dialog'; Name = 'Calendar recurrence dialog' }
         )) {
+            if (Test-Path -LiteralPath $env:RAINMETER_PROBE_FAILURE_LOG) { Remove-Item -LiteralPath $env:RAINMETER_PROBE_FAILURE_LOG -Force -ErrorAction SilentlyContinue }
             $process = Start-Process -FilePath $probe.File -ArgumentList $probe.Argument -WindowStyle Hidden -PassThru
             if (-not $process.WaitForExit(20000)) {
                 try { $process.Kill() } catch {}
                 throw "$($probe.Name) high-DPI layout probe timed out"
             }
-            if ($process.ExitCode -ne 0) { throw "$($probe.Name) high-DPI layout probe failed with exit code $($process.ExitCode)" }
+            if ($process.ExitCode -ne 0) {
+                $detail = ''
+                if (Test-Path -LiteralPath $env:RAINMETER_PROBE_FAILURE_LOG) { $detail = ([IO.File]::ReadAllText($env:RAINMETER_PROBE_FAILURE_LOG)).Trim() }
+                if ($detail -eq '') { $detail = '（探针未留下失败原因）' }
+                throw ("$($probe.Name) high-DPI layout probe failed with exit code $($process.ExitCode)：$detail")
+            }
         }
         Write-Host 'Window DPI compensation probe passed at UI 75% / Windows 200% (effective 120%)'
     } finally {
@@ -275,6 +296,8 @@ Write-Host 'UpdaterHost EXE and minimal legacy PowerShell launcher passed'
         else { $env:RAINMETER_UI_SCALE_OVERRIDE = $previousScaleOverride }
         if ($null -eq $previousDpiOverride) { Remove-Item Env:RAINMETER_UI_DPI_OVERRIDE -ErrorAction SilentlyContinue }
         else { $env:RAINMETER_UI_DPI_OVERRIDE = $previousDpiOverride }
+        if ($null -eq $previousProbeFailureLog) { Remove-Item Env:RAINMETER_PROBE_FAILURE_LOG -ErrorAction SilentlyContinue }
+        else { $env:RAINMETER_PROBE_FAILURE_LOG = $previousProbeFailureLog }
     }
 } finally {
     Remove-Item -LiteralPath $build -Recurse -Force -ErrorAction SilentlyContinue
