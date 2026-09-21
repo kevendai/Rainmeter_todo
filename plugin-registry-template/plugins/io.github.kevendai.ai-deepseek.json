@@ -1,0 +1,15 @@
+{
+  "id": "io.github.kevendai.ai-deepseek",
+  "name": "DeepSeek AI",
+  "description": "官方 Provider：把 DeepSeek 聊天补全封装成 ai_provider@1 服务，供其他插件请求结构化 JSON 结果。按 token 计费，可能产生费用。",
+  "channel": "stable",
+  "official": true,
+  "version": "1.0.0",
+  "api_version": 1,
+  "min_host_version": "2.1.0",
+  "permissions": "network",
+  "download": "https://github.com/kevendai/Rainmeter_todo-plugin-registry/releases/download/ai-deepseek-v1.0.0/ai-deepseek-1.0.0.rwplugin",
+  "sha256": "c5d24ca8b3644293059c3d044a45379d67cef32b2211f48fd4c0d2b84db481a9",
+  "release_notes": "首个版本。把 DeepSeek 的聊天补全能力封装成统一的「AI 评分」服务，供 arXiv 等插件请求结构化 JSON 结果。这里只负责调用模型：不知道 arXiv，也不知道评分提示词的业务含义。按 token 计费（可能产生费用），所以默认不启用，且每次调用前主程序都会先征得你的同意。设置项与原 arXiv 插件的 DeepSeek 配置同名同默认值，旧配置会在升级时自动搬过来。公网地址走系统代理，指向局域网自建服务的地址则直连。本版本需要主程序 2.1.0 或更高。",
+  "homepage": "https://github.com/kevendai/Rainmeter_todo-plugin-registry/tree/master/official-plugins/ai-deepseek"
+}

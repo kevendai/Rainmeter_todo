@@ -1,0 +1,15 @@
+{
+  "id": "io.github.kevendai.translate-tencent",
+  "name": "腾讯云翻译",
+  "description": "官方 Provider：把腾讯云机器翻译（TMT）封装成 translation_provider@1 服务，供其他插件批量翻译文本。按字符计费（每月有免费额度），可能产生费用。",
+  "channel": "stable",
+  "official": true,
+  "version": "1.0.0",
+  "api_version": 1,
+  "min_host_version": "2.1.0",
+  "permissions": "network",
+  "download": "https://github.com/kevendai/Rainmeter_todo-plugin-registry/releases/download/translate-tencent-v1.0.0/translate-tencent-1.0.0.rwplugin",
+  "sha256": "634a1783641c14a250c279dce43bcaeca51ff5ad38bcecb0262914553250cced",
+  "release_notes": "首个版本。把腾讯云机器翻译（TMT）封装成统一的「翻译」服务，供 arXiv 等插件批量翻译标题。按字符计费（每月有免费额度），默认不启用。带本地译文缓存（含语言对，换目标语言不会串味），同一批标题不会重复付费；请求会在插件内部按厂商限制自动分批并限速。翻译失败只影响译文本身，同步照常进行。设置项与原 arXiv 插件的腾讯云配置同名，旧配置会在升级时自动搬过来。本版本需要主程序 2.1.0 或更高。",
+  "homepage": "https://github.com/kevendai/Rainmeter_todo-plugin-registry/tree/master/official-plugins/translate-tencent"
+}

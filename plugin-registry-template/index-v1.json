@@ -1,18 +1,18 @@
 {
   "version": 1,
-  "generated_at": "2026-09-16T23:05:00.000000+08:00",
+  "generated_at": "2026-09-22T00:05:00.000000+08:00",
   "plugins": [
     {
       "id": "io.github.kevendai.arxiv",
       "name": "arXiv Paper Recommendation",
       "channel": "stable",
       "official": true,
-      "version": "1.0.2",
+      "version": "2.0.0",
       "api_version": 1,
-      "min_host_version": "2.0.0",
-      "download": "https://github.com/kevendai/Rainmeter_todo-plugin-registry/releases/download/arxiv-v1.0.2/arxiv-1.0.2.rwplugin",
-      "sha256": "955666018d0532598b56ebd09a9df9cf0298e6ab1b07bc31a4ce3fbe49062b67",
-      "release_notes": "文件服务器地址改由插件自己解析，不再依赖主程序注入：插件在 plugin.json 声明 address_target = arxiv.file_server，主动向地址插件（如 SSDP 服务器 IP 同步）申请主机，只替换主机、保留协议/端口/路径，并记录被谁接管，因此插件明确知道自己已被接管；设置界面会显示实际使用的地址并提示在这里改 IP 没有意义。接管结果只用于运行时，不写回你的设置。建议配合主程序 2.0.4 使用。",
+      "min_host_version": "2.1.0",
+      "download": "https://github.com/kevendai/Rainmeter_todo-plugin-registry/releases/download/arxiv-v2.0.0/arxiv-2.0.0.rwplugin",
+      "sha256": "541bacef605b6573dbab799e1c49f82f1c5ffadaeef913c1151039482cb1a6cd",
+      "release_notes": "Provider 化改版：arXiv 插件不再自带 AI 评分、标题翻译与文件服务器客户端，也不再保存这三者的密钥；评分改用「AI 评分」Provider（如 DeepSeek AI），标题翻译改用「翻译」Provider（如腾讯云翻译），远端快照改用「论文同步」Provider（如 Paper Snapshot Sync）。三者都是可选的：只装 arXiv 插件时会明确提示「今天没有可用的论文推荐结果」，不会静默生成待办。需要调用付费 AI 时会先弹出确认框，你同意后才发起请求；同一天拒绝过就不会再打扰，但入口一直保留。原有的 DeepSeek / 腾讯云 / 文件服务器配置会被自动复制到对应 Provider，原配置保留不删除，随时可以退回 1.0.2 继续使用。本版本需要主程序 2.1.0 或更高。",
       "homepage": "https://github.com/kevendai/Rainmeter_todo-plugin-registry/tree/master/official-plugins/arxiv"
     },
     {
@@ -29,19 +29,64 @@
       "homepage": "https://github.com/kevendai/Rainmeter_todo-plugin-registry/tree/master/official-plugins/calendar-to-todo"
     },
     {
+      "id": "io.github.kevendai.paper-snapshot-sync",
+      "name": "Paper Snapshot Sync",
+      "description": "官方 Provider：把评分完成的论文推荐快照（PaperBundle）存进文件服务器并在多台机器间同步。",
+      "channel": "stable",
+      "official": true,
+      "version": "1.0.0",
+      "api_version": 1,
+      "min_host_version": "2.1.0",
+      "permissions": "network",
+      "download": "https://github.com/kevendai/Rainmeter_todo-plugin-registry/releases/download/paper-snapshot-sync-v1.0.0/paper-snapshot-sync-1.0.0.rwplugin",
+      "sha256": "2accbf9a150631c50b4b7ed2d2bced49217164d7f406ab3ec1942ab415c5df9c",
+      "release_notes": "首个版本。把评分完成的论文推荐快照（PaperBundle v1）按「日期 + 配置指纹」存到文件服务器（File Browser），并在下次同步时取回：命中就跳过付费 AI 评分直接导入，多台机器之间也能共享同一份结果。免费，不产生任何费用。文件服务器地址由本插件自己声明（paper_snapshot.file_server），可以和「SSDP 服务器 IP 同步」配合自动换成当前服务器 IP。本版本需要主程序 2.1.0 或更高。",
+      "homepage": "https://github.com/kevendai/Rainmeter_todo-plugin-registry/tree/master/official-plugins/paper-snapshot-sync"
+    },
+    {
+      "id": "io.github.kevendai.ai-deepseek",
+      "name": "DeepSeek AI",
+      "description": "官方 Provider：把 DeepSeek 聊天补全封装成 ai_provider@1 服务，供其他插件请求结构化 JSON 结果。按 token 计费，可能产生费用。",
+      "channel": "stable",
+      "official": true,
+      "version": "1.0.0",
+      "api_version": 1,
+      "min_host_version": "2.1.0",
+      "permissions": "network",
+      "download": "https://github.com/kevendai/Rainmeter_todo-plugin-registry/releases/download/ai-deepseek-v1.0.0/ai-deepseek-1.0.0.rwplugin",
+      "sha256": "c5d24ca8b3644293059c3d044a45379d67cef32b2211f48fd4c0d2b84db481a9",
+      "release_notes": "首个版本。把 DeepSeek 的聊天补全能力封装成统一的「AI 评分」服务，供 arXiv 等插件请求结构化 JSON 结果。这里只负责调用模型：不知道 arXiv，也不知道评分提示词的业务含义。按 token 计费（可能产生费用），所以默认不启用，且每次调用前主程序都会先征得你的同意。设置项与原 arXiv 插件的 DeepSeek 配置同名同默认值，旧配置会在升级时自动搬过来。公网地址走系统代理，指向局域网自建服务的地址则直连。本版本需要主程序 2.1.0 或更高。",
+      "homepage": "https://github.com/kevendai/Rainmeter_todo-plugin-registry/tree/master/official-plugins/ai-deepseek"
+    },
+    {
+      "id": "io.github.kevendai.translate-tencent",
+      "name": "腾讯云翻译",
+      "description": "官方 Provider：把腾讯云机器翻译（TMT）封装成 translation_provider@1 服务，供其他插件批量翻译文本。按字符计费（每月有免费额度），可能产生费用。",
+      "channel": "stable",
+      "official": true,
+      "version": "1.0.0",
+      "api_version": 1,
+      "min_host_version": "2.1.0",
+      "permissions": "network",
+      "download": "https://github.com/kevendai/Rainmeter_todo-plugin-registry/releases/download/translate-tencent-v1.0.0/translate-tencent-1.0.0.rwplugin",
+      "sha256": "634a1783641c14a250c279dce43bcaeca51ff5ad38bcecb0262914553250cced",
+      "release_notes": "首个版本。把腾讯云机器翻译（TMT）封装成统一的「翻译」服务，供 arXiv 等插件批量翻译标题。按字符计费（每月有免费额度），默认不启用。带本地译文缓存（含语言对，换目标语言不会串味），同一批标题不会重复付费；请求会在插件内部按厂商限制自动分批并限速。翻译失败只影响译文本身，同步照常进行。设置项与原 arXiv 插件的腾讯云配置同名，旧配置会在升级时自动搬过来。本版本需要主程序 2.1.0 或更高。",
+      "homepage": "https://github.com/kevendai/Rainmeter_todo-plugin-registry/tree/master/official-plugins/translate-tencent"
+    },
+    {
       "id": "io.github.kevendai.ssdp-server-ip",
       "name": "SSDP 服务器 IP 同步",
       "description": "私人插件，不随主程序捆绑；仅供需要 SSDP 服务器地址接管的用户手动安装。",
       "channel": "stable",
       "official": true,
-      "version": "1.0.4",
+      "version": "1.1.0",
       "api_version": 1,
       "min_host_version": "2.0.0",
       "capability": "value_provider",
       "permissions": "network",
-      "download": "https://github.com/kevendai/Rainmeter_todo-plugin-registry/releases/download/ssdp-server-ip-v1.0.4/ssdp-server-ip-1.0.4.rwplugin",
-      "sha256": "b6c8a5369170cf236cf62c8272b83f4f97256e2052eb5148eddf6ab175121ca6",
-      "release_notes": "私人插件：通过 SSDP 搜索并按 USN 锁定服务器 IP。",
+      "download": "https://github.com/kevendai/Rainmeter_todo-plugin-registry/releases/download/ssdp-server-ip-v1.1.0/ssdp-server-ip-1.1.0.rwplugin",
+      "sha256": "d15836f358be3e7cf3493b02992525379a4cea019a0040af57cb148f1c5fea5c",
+      "release_notes": "新增 paper_snapshot.file_server 地址声明：文件服务器的地址现在归「论文同步（Paper Snapshot Sync）」插件所有，本插件同时供应 arxiv.file_server 与 paper_snapshot.file_server 两个地址名，因此新旧插件都能被接管（双名并行保留一个版本周期）。对 1.x 老客户端的行为完全不变。",
       "homepage": "https://github.com/kevendai/Rainmeter_todo-plugin-registry/tree/master/official-plugins/ssdp-server-ip"
     }
   ]

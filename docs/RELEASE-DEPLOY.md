@@ -25,6 +25,13 @@
 - 论文和翻译设置分别位于 `paper-sync.secret`、`translation.secret`，均使用 Windows DPAPI CurrentUser 加密。
 - 自动更新会保留 `tasks.json`、各类 secret、`calendar-cache.json`、`calendar-state.json`、磁贴缩放 `ui-scale.txt` 与窗口缩放 `ui-window-scale.txt`。
 
+## 2.1.0 起的变化（插件 Provider 化）
+
+- 主程序不再自带 AI 评分 / 标题翻译 / 文件服务器客户端：arXiv 插件（2.0.0）改为调用三个独立的 Provider 插件 ——「DeepSeek AI」（AI 评分）、「腾讯云翻译」（标题翻译）、「Paper Snapshot Sync」（远端快照）。三者随 2.1.0 一起捆绑安装，其中两个可能产生费用的默认**不启用**。
+- 首次启动 2.1.0 时会把旧的 DeepSeek / 腾讯云 / 文件服务器配置**复制**到对应 Provider；`Skins\Todo\@Resources` 下的旧 `paper-sync.secret`、`translation.secret` **保留不删除**，所以随时可以退回旧版本继续用。
+- 之后这些凭据位于插件自己的数据目录：`%LOCALAPPDATA%\RainmeterDesktopWidgets\PluginData\<插件 id>\secret.dat`（同样是 Windows DPAPI CurrentUser 加密）。文件服务器地址改由「Paper Snapshot Sync」插件声明，可与 SSDP 地址插件配合自动替换主机。
+- AI 调用一律要你在主程序里确认，不会自动执行；arXiv 插件单独安装时只会提示「今天没有可用的论文推荐结果」，不会静默生成待办。
+
 ## 从源码打包
 
 ```powershell

@@ -3,11 +3,11 @@
   "name": "arXiv Paper Recommendation",
   "channel": "stable",
   "official": true,
-  "version": "1.0.2",
+  "version": "2.0.0",
   "api_version": 1,
-  "min_host_version": "2.0.0",
-  "download": "https://github.com/kevendai/Rainmeter_todo-plugin-registry/releases/download/arxiv-v1.0.2/arxiv-1.0.2.rwplugin",
-  "sha256": "955666018d0532598b56ebd09a9df9cf0298e6ab1b07bc31a4ce3fbe49062b67",
-  "release_notes": "文件服务器地址改由插件自己解析，不再依赖主程序注入。插件在 plugin.json 里声明 address_target = arxiv.file_server，主动向地址插件（如 SSDP 服务器 IP 同步）申请主机，只替换地址里的主机、保留协议/端口/路径，并记录「被谁接管、原本填了什么、实际用哪个地址」，插件因此明确知道自己已被接管，设置界面也会直接显示实际地址并提示在这里改 IP 没有意义。接管结果只用于运行时，不写回你的设置，禁用接管方后立即恢复。建议配合主程序 2.0.4 使用以获得完整的地址接管提示。",
+  "min_host_version": "2.1.0",
+  "download": "https://github.com/kevendai/Rainmeter_todo-plugin-registry/releases/download/arxiv-v2.0.0/arxiv-2.0.0.rwplugin",
+  "sha256": "541bacef605b6573dbab799e1c49f82f1c5ffadaeef913c1151039482cb1a6cd",
+  "release_notes": "Provider 化改版：arXiv 插件不再自带 AI 评分、标题翻译与文件服务器客户端，也不再保存这三者的密钥，改为消费三个独立 Provider。只装 arXiv 插件时会明确提示「今天没有可用的论文推荐结果」，不会静默生成待办。付费 AI 调用前必须由你在主程序里确认；同一天拒绝过就不再打扰，入口一直保留。原有 DeepSeek / 腾讯云 / 文件服务器配置会自动复制到对应 Provider，原配置保留不删除，随时可退回 1.0.2。需要主程序 2.1.0 或更高。",
   "homepage": "https://github.com/kevendai/Rainmeter_todo-plugin-registry/tree/master/official-plugins/arxiv"
 }

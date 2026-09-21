@@ -4,13 +4,13 @@
   "description": "私人插件，不随主程序捆绑；仅供需要 SSDP 服务器地址接管的用户手动安装。",
   "channel": "stable",
   "official": true,
-  "version": "1.0.4",
+  "version": "1.1.0",
   "api_version": 1,
   "min_host_version": "2.0.0",
   "capability": "value_provider",
   "permissions": "network",
-  "download": "https://github.com/kevendai/Rainmeter_todo-plugin-registry/releases/download/ssdp-server-ip-v1.0.4/ssdp-server-ip-1.0.4.rwplugin",
-  "sha256": "b6c8a5369170cf236cf62c8272b83f4f97256e2052eb5148eddf6ab175121ca6",
-  "release_notes": "私人插件：通过 SSDP 搜索并按 USN 锁定服务器 IP。",
+  "download": "https://github.com/kevendai/Rainmeter_todo-plugin-registry/releases/download/ssdp-server-ip-v1.1.0/ssdp-server-ip-1.1.0.rwplugin",
+  "sha256": "d15836f358be3e7cf3493b02992525379a4cea019a0040af57cb148f1c5fea5c",
+  "release_notes": "新增 paper_snapshot.file_server 地址声明：文件服务器的地址现在归「论文同步（Paper Snapshot Sync）」插件所有，本插件同时供应 arxiv.file_server 与 paper_snapshot.file_server 两个地址名，因此新旧插件都能被接管（双名并行保留一个版本周期）。对 1.x 老客户端的行为完全不变。",
   "homepage": "https://github.com/kevendai/Rainmeter_todo-plugin-registry/tree/master/official-plugins/ssdp-server-ip"
 }
