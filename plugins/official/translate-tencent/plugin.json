@@ -1,0 +1,19 @@
+{
+  "id": "io.github.kevendai.translate-tencent",
+  "name": "腾讯云翻译",
+  "description": "官方 Provider：把腾讯云机器翻译（TMT）封装成 translation_provider@1 服务，供其他插件批量翻译文本。按字符计费（每月有免费额度），可能产生费用。",
+  "version": "1.0.0",
+  "api_version": 1,
+  "min_host_version": "2.1.0",
+  "entry": "bin/TranslateTencentPlugin.exe",
+  "capabilities": [],
+  "provides": ["translation_provider@1"],
+  "billing": "may_charge",
+  "permissions": ["network"],
+  "settings_schema": "settings.schema.json",
+  "homepage": "https://github.com/kevendai/Rainmeter_todo-plugin-registry/tree/master/official-plugins/translate-tencent",
+  "default_enabled": false,
+  "actions": [
+    {"id":"test_connection","name":"测试连接","confirm":false,"long_running":false}
+  ]
+}

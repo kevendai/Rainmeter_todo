@@ -15,7 +15,8 @@ $definitions = @(
     @{ Folder='calendar-to-todo' },
     @{ Folder='ssdp-server-ip' },
     @{ Folder='paper-snapshot-sync'; Sources=@('Common.cs','PaperBundle.cs') },
-    @{ Folder='ai-deepseek'; Sources=@('Common.cs') }
+    @{ Folder='ai-deepseek'; Sources=@('Common.cs') },
+    @{ Folder='translate-tencent'; Sources=@('Common.cs') }
 )
 
 $buildScript = @'

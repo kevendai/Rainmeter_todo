@@ -1,0 +1,14 @@
+{
+  "type": "object",
+  "properties": {
+    "secret_id": {"type":"string","title":"Secret ID","x-order":1,"x-section":"基本"},
+    "secret_key": {"type":"password","title":"Secret Key","x-secret":true,"x-order":2,"x-section":"基本"},
+    "source_language": {"type":"string","title":"源语言","default":"auto","x-order":3,"x-section":"基本"},
+    "target_language": {"type":"string","title":"目标语言","default":"zh","x-order":4,"x-section":"基本"},
+    "use_local_cache": {"type":"boolean","title":"复用本地翻译缓存","default":true,"x-order":10,"x-section":"高级","x-advanced":true},
+    "api_endpoint": {"type":"string","title":"接口地址","default":"https://tmt.tencentcloudapi.com","x-order":11,"x-section":"高级","x-advanced":true},
+    "region": {"type":"string","title":"地域","default":"ap-guangzhou","x-order":12,"x-section":"高级","x-advanced":true},
+    "timeout_seconds": {"type":"integer","title":"请求超时秒数","minimum":10,"maximum":600,"default":60,"x-order":13,"x-section":"高级","x-advanced":true},
+    "max_texts_per_call": {"type":"integer","title":"单次调用最多条数","minimum":1,"maximum":500,"default":200,"x-order":14,"x-section":"高级","x-advanced":true}
+  }
+}
