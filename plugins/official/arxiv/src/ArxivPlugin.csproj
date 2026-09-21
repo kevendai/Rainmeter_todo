@@ -4,9 +4,9 @@
   <ItemGroup>
     <Compile Include="..\..\..\..\backend\Common.cs"><Link>Common.cs</Link></Compile>
     <Compile Include="..\..\..\..\backend\PaperBundle.cs"><Link>PaperBundle.cs</Link></Compile>
+    <Compile Include="..\..\..\..\backend\ServiceClient.cs"><Link>ServiceClient.cs</Link></Compile>
     <Compile Include="..\..\..\..\backend\TodoPaperService.cs"><Link>TodoPaperService.cs</Link></Compile>
     <Compile Include="..\..\..\..\backend\TodoPaperRssService.cs"><Link>TodoPaperRssService.cs</Link></Compile>
-    <Compile Include="..\..\..\..\backend\TodoUpdateService.cs"><Link>TodoUpdateService.cs</Link></Compile>
     <Compile Include="ArxivPluginApp.cs"/>
   </ItemGroup>
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets"/>

@@ -11,7 +11,11 @@ if ($outputRoot.TrimEnd('\') -eq $projectRoot.TrimEnd('\')) {
 }
 
 $definitions = @(
-    @{ Folder='arxiv'; Sources=@('Common.cs','PaperBundle.cs','TodoPaperService.cs','TodoPaperRssService.cs','TodoUpdateService.cs') },
+    # ServiceClient.cs（Broker 客户端）必须一起导出：arxiv 2.0.0 靠它调三个 Provider，
+    # 漏掉它导出的仓库一编译就断（csproj 里那条 Link 会被替换成同名文件）。
+    # TodoUpdateService.cs 自 2.0.0 起**不再**链进 arxiv：它现在只剩本体自己的升级/翻译凭据
+    # 辅助函数，而 arxiv 两者都不再用（翻译走 translation_provider@1）。
+    @{ Folder='arxiv'; Sources=@('Common.cs','PaperBundle.cs','ServiceClient.cs','TodoPaperService.cs','TodoPaperRssService.cs') },
     @{ Folder='calendar-to-todo' },
     @{ Folder='ssdp-server-ip' },
     @{ Folder='paper-snapshot-sync'; Sources=@('Common.cs','PaperBundle.cs') },

@@ -1,27 +1,23 @@
 {
   "type": "object",
   "properties": {
-    "enabled": {"type":"boolean","title":"启用论文推荐","default":true,"x-order":1},
-    "api_url": {"type":"string","title":"Chat Completions 地址","default":"https://api.deepseek.com/chat/completions","x-order":2},
-    "api_model": {"type":"string","title":"模型","default":"deepseek-v4-flash","x-order":3},
-    "api_key": {"type":"password","title":"API Key","x-secret":true,"x-order":4},
-    "max_concurrency": {"type":"integer","title":"最大并发","minimum":1,"maximum":32,"default":8,"x-order":5},
-    "timeout_seconds": {"type":"integer","title":"请求超时秒数","minimum":30,"maximum":600,"default":180,"x-order":6},
-    "categories": {"type":"string","title":"包含分类（逗号分隔）","default":"","x-order":7},
-    "exclude_categories": {"type":"string","title":"排除分类（逗号分隔）","default":"","x-order":8},
-    "title_threshold": {"type":"integer","title":"标题进入摘要评分阈值","minimum":0,"maximum":10,"default":7,"x-order":9},
-    "title_batch_size": {"type":"integer","title":"标题批大小","minimum":1,"maximum":50,"default":10,"x-order":10,"x-advanced":true},
-    "abstract_batch_size": {"type":"integer","title":"摘要批大小","minimum":1,"maximum":20,"default":3,"x-order":11,"x-advanced":true},
-    "import_count": {"type":"integer","title":"每天导入数量","minimum":1,"maximum":20,"default":5,"x-order":12},
-    "cache_days": {"type":"integer","title":"缓存保留天数","minimum":1,"maximum":90,"default":14,"x-order":13},
-    "title_prompt": {"type":"multiline","title":"标题评分提示词","default":"","x-order":14,"x-advanced":true},
-    "abstract_prompt": {"type":"multiline","title":"摘要评分提示词","default":"","x-order":15,"x-advanced":true},
-    "file_enabled": {"type":"boolean","title":"启用文件服务器同步","default":false,"x-order":16},
-    "file_url": {"type":"string","title":"File Browser 地址","default":"","x-address":true,"x-order":17,"x-advanced":true},
-    "file_account": {"type":"string","title":"文件服务器账号","default":"","x-order":18,"x-advanced":true},
-    "file_password": {"type":"password","title":"文件服务器密码","x-secret":true,"x-order":19,"x-advanced":true},
-    "translation_secret_id": {"type":"string","title":"Tencent Cloud SecretId","x-secret":true,"x-order":20,"x-advanced":true},
-    "translation_secret_key": {"type":"password","title":"Tencent Cloud SecretKey","x-secret":true,"x-order":21,"x-advanced":true},
-    "rss_enabled": {"type":"boolean","title":"启用本地论文 RSS","default":false,"x-order":22,"x-advanced":true}
+    "enabled": {"type":"boolean","title":"启用论文推荐","default":true,"x-section":"基本","x-order":1},
+    "categories": {"type":"string","title":"包含分类（逗号分隔）","default":"","x-section":"基本","x-order":2},
+    "exclude_categories": {"type":"string","title":"排除分类（逗号分隔）","default":"","x-section":"基本","x-order":3},
+    "import_count": {"type":"integer","title":"每天导入数量","minimum":1,"maximum":20,"default":5,"x-section":"基本","x-order":4},
+    "cache_days": {"type":"integer","title":"缓存保留天数","minimum":1,"maximum":90,"default":14,"x-section":"基本","x-order":5},
+
+    "title_prompt": {"type":"multiline","title":"标题评分提示词","default":"","x-section":"评分","x-order":10},
+    "abstract_prompt": {"type":"multiline","title":"摘要评分提示词","default":"","x-section":"评分","x-order":11},
+    "title_threshold": {"type":"integer","title":"标题进入摘要评分阈值","minimum":0,"maximum":10,"default":7,"x-section":"评分","x-order":12},
+    "title_batch_size": {"type":"integer","title":"标题批大小","minimum":1,"maximum":50,"default":10,"x-section":"评分","x-order":13},
+    "abstract_batch_size": {"type":"integer","title":"摘要批大小","minimum":1,"maximum":20,"default":3,"x-section":"评分","x-order":14},
+
+    "paper_snapshot_provider": {"type":"string","title":"论文同步","default":"","x-service":"paper_snapshot_provider@1","x-section":"Provider","x-order":20},
+    "ai_provider": {"type":"string","title":"AI 评分","default":"","x-service":"ai_provider@1","x-section":"Provider","x-order":21},
+    "translate_enabled": {"type":"boolean","title":"启用标题翻译","default":false,"x-requires":"translation_provider@1","x-section":"Provider","x-order":22},
+    "translation_provider": {"type":"string","title":"翻译","default":"","x-service":"translation_provider@1","x-section":"Provider","x-order":23},
+
+    "rss_enabled": {"type":"boolean","title":"启用本地论文 RSS","default":false,"x-section":"RSS","x-order":30}
   }
 }

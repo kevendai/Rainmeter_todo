@@ -14,7 +14,6 @@ using RainmeterBackend;
 
 internal static partial class TodoApp
 {
-    private static string translationCredentialsLoadError = "";
     private static void StartExternalUpdater()
     {
         if (!File.Exists(UpdaterExecutable)) throw new Exception("未找到独立升级器：" + UpdaterExecutable);
@@ -118,69 +117,12 @@ internal static partial class TodoApp
             .ToArray();
     }
 
-    private static string Http(string method, string url, string body, IDictionary<string,string> headers, int timeout)
-    {
-        HttpWebRequest request = (HttpWebRequest)WebRequest.Create(url); request.Method = method; request.Timeout = timeout; request.ReadWriteTimeout = timeout; request.KeepAlive = false; request.ContentType = "application/json; charset=utf-8";
-        if (headers != null) foreach (KeyValuePair<string,string> header in headers) { if (header.Key.Equals("Host",StringComparison.OrdinalIgnoreCase)) request.Host=header.Value; else request.Headers[header.Key]=header.Value; }
-        if (body != null) { byte[] bytes = Encoding.UTF8.GetBytes(body); request.ContentLength = bytes.Length; using(Stream s=request.GetRequestStream()) s.Write(bytes,0,bytes.Length); }
-        using (HttpWebResponse response=(HttpWebResponse)request.GetResponse()) using(StreamReader reader=new StreamReader(response.GetResponseStream(),Encoding.UTF8)) return reader.ReadToEnd();
-    }
-    private static Dictionary<string, object> ReadTranslationCredentials()
-    {
-        translationCredentialsLoadError = "";
-        if (!File.Exists(TranslationSecret)) return new Dictionary<string, object>();
-        try { return JsonUtil.ReadDpapiJson(TranslationSecret); }
-        catch (Exception ex) { translationCredentialsLoadError = "翻译凭据无法解密或已损坏：" + (ex.Message ?? "未知错误").Replace("\r"," ").Replace("\n"," "); return new Dictionary<string, object>(); }
-    }
-
-    private static void SaveTranslationCredentials(string secretId, string secretKey)
-    {
-        secretId = (secretId ?? "").Trim();
-        secretKey = (secretKey ?? "").Trim();
-        if (secretId == "" || secretKey == "") throw new Exception("SecretId 和 SecretKey 不能为空");
-        JsonUtil.WriteDpapiJson(TranslationSecret, new Dictionary<string, object>{{"SecretId", secretId}, {"SecretKey", secretKey}});
-    }
-
-    private static string TestTranslationCredentials(string secretId, string secretKey)
-    {
-        Dictionary<string, object> credentials = new Dictionary<string, object>{{"SecretId", (secretId ?? "").Trim()}, {"SecretKey", (secretKey ?? "").Trim()}};
-        string result = TranslateWithCredentials(credentials, "hello");
-        return result == "" ? "翻译服务可用" : result;
-    }
-
-    private static string TranslateWithCredentials(Dictionary<string, object> credentials, string text)
-    {
-        string id = S(credentials, "SecretId"), key = S(credentials, "SecretKey");
-        if (id == "" || key == "") throw new Exception("SecretId 和 SecretKey 不能为空");
-        const string service = "tmt", host = "tmt.tencentcloudapi.com", action = "TextTranslate";
-        long timestamp = (long)(DateTime.UtcNow - new DateTime(1970, 1, 1)).TotalSeconds;
-        string date = DateTimeOffset.FromUnixTimeSeconds(timestamp).UtcDateTime.ToString("yyyy-MM-dd");
-        string payload = JsonUtil.Serialize(new Dictionary<string, object>{{"SourceText", text}, {"Source", "en"}, {"Target", "zh"}, {"ProjectId", 0}});
-        string canonicalHeaders = "content-type:application/json; charset=utf-8\nhost:" + host + "\nx-tc-action:texttranslate\n";
-        string signed = "content-type;host;x-tc-action";
-        string request = "POST\n/\n\n" + canonicalHeaders + "\n" + signed + "\n" + RuntimeUtil.Sha256Hex(payload);
-        string scope = date + "/" + service + "/tc3_request";
-        string toSign = "TC3-HMAC-SHA256\n" + timestamp + "\n" + scope + "\n" + RuntimeUtil.Sha256Hex(request);
-        byte[] secretDate = RuntimeUtil.Hmac(Encoding.UTF8.GetBytes("TC3" + key), date);
-        byte[] secretService = RuntimeUtil.Hmac(secretDate, service);
-        byte[] secretSigning = RuntimeUtil.Hmac(secretService, "tc3_request");
-        string signature = BitConverter.ToString(RuntimeUtil.Hmac(secretSigning, toSign)).Replace("-", "").ToLowerInvariant();
-        Dictionary<string, string> headers = new Dictionary<string, string>{{"Authorization", "TC3-HMAC-SHA256 Credential=" + id + "/" + scope + ", SignedHeaders=" + signed + ", Signature=" + signature}, {"Host", host}, {"X-TC-Action", action}, {"X-TC-Timestamp", timestamp.ToString(CultureInfo.InvariantCulture)}, {"X-TC-Version", "2018-03-21"}, {"X-TC-Region", "ap-guangzhou"}};
-        Dictionary<string, object> root = JsonUtil.Object(JsonUtil.Deserialize(Http("POST", "https://" + host, payload, headers, 15000)));
-        Dictionary<string, object> response = JsonUtil.Object(JsonUtil.Get(root, "Response"));
-        Dictionary<string, object> error = JsonUtil.Object(JsonUtil.Get(response, "Error"));
-        string message = JsonUtil.String(error, "Message", "");
-        if (message != "") throw new Exception(message);
-        string translated = JsonUtil.String(response, "TargetText", "");
-        if (translated == "") throw new Exception("腾讯云未返回翻译结果");
-        return translated;
-    }
-
-    private static string Translate(string text)
-    {
-        if (!File.Exists(TranslationSecret)) return null;
-        try { return TranslateWithCredentials(JsonUtil.ReadDpapiJson(TranslationSecret), text); }
-        catch { return null; }
-    }
+    // 这里曾经住着 arxiv 自己的腾讯云机器翻译客户端（Http / ReadTranslationCredentials /
+    // SaveTranslationCredentials / TestTranslationCredentials / TranslateWithCredentials / Translate）。
+    // 2.1 起翻译由 translation_provider@1 提供（规格 §7.3），arxiv 侧只保留 `TranslateEnabled`
+    // 这个开关 + 一次 `translate` 调用；本文件被 arxiv 插件直接链接编译，留着就等于插件里还躺着
+    // 一份 Tencent API client，与 §9.3「arxiv 只允许持有论文业务配置 / PaperBundle / 绑定引用」
+    // 直接冲突。凭据本身按 §9.2 仍以**复制不删除**的方式留在旧 secret / 备份里，迁移由
+    // ProviderMigration 负责。
 }
 

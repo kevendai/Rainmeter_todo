@@ -1,20 +1,23 @@
 {
   "id": "io.github.kevendai.arxiv",
   "name": "arXiv Paper Recommendation",
-  "version": "1.0.2",
+  "description": "从 arXiv 抓取当日论文、按你的评分提示词打分并导入待办。AI 评分、标题翻译与远端快照分别由 AI / 翻译 / 论文快照 Provider 提供。",
+  "version": "2.0.0",
   "api_version": 1,
-  "min_host_version": "2.0.0",
+  "min_host_version": "2.1.0",
   "entry": "bin/ArxivPlugin.exe",
   "capabilities": ["todo_source"],
   "permissions": ["network"],
   "settings_schema": "settings.schema.json",
-  "address_target": "arxiv.file_server",
   "homepage": "https://github.com/kevendai/Rainmeter_todo-plugin-registry/tree/master/official-plugins/arxiv",
   "default_enabled": true,
+  "uses": [
+    {"service": "ai_provider@1", "binding_key": "ai_provider", "optional": true, "role": "评分"},
+    {"service": "translation_provider@1", "binding_key": "translation_provider", "optional": true, "role": "标题翻译"},
+    {"service": "paper_snapshot_provider@1", "binding_key": "paper_snapshot_provider", "optional": true, "role": "远端快照"}
+  ],
   "actions": [
-    {"id":"test_api","name":"测试 DeepSeek","confirm":false,"long_running":false},
-    {"id":"test_file_server","name":"测试文件服务器","confirm":false,"long_running":false},
-    {"id":"test_translation","name":"测试标题翻译","confirm":false,"long_running":false},
-    {"id":"rescore","name":"重新爬取并打分","confirm":true,"risk":"可能调用付费 API，并替换当天论文缓存。","long_running":true}
+    {"id": "sync_with_ai", "name": "使用 AI 评分", "confirm": false, "long_running": true, "imports_tasks": true},
+    {"id": "rescore", "name": "重新爬取并打分", "confirm": true, "risk": "可能调用付费 API，并替换当天论文缓存。", "long_running": true, "imports_tasks": true}
   ]
 }

@@ -178,7 +178,10 @@ internal static partial class TodoApp
                     string finalPath = Path.Combine(PaperCache, date + "_papers.json");
                     if (!TryLoadPapers(finalPath, out cached) || !IsPaperFileComplete(cached, settings))
                         Meta(state)["last_arxiv_sync_date"] = "";
-                    SyncArxiv(state, false, "");
+                    // 走与其它入口完全相同的顺序：本地缓存 → 远端快照 → （有 AI 才）询问（§九）。
+                    // 这是**后台**路径：需要付费确认时 RunPaperSyncFlow 只把状态写进 meta，绝不弹模态
+                    // （§5.2）—— 而且它跑在插件进程的 RSS 线程里，本来也没有 job 文件可写。
+                    RunPaperSyncFlow(state, false, "", false);
                     if (before != JsonUtil.Serialize(state))
                     {
                         Commit(state);
