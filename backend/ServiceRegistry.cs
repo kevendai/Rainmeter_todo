@@ -107,6 +107,38 @@ namespace RainmeterBackend
             return JsonUtil.String(own, service, "").Trim();
         }
 
+        // 设置页用：**已启用**且声明提供该 service 的候选。顺序固定为安装目录顺序（不做优先级挑选，
+        // 规格 §3 第 4 条禁的是"宿主自己挑"，用户在界面上手选当然可以）。
+        public static List<ServiceCandidate> Candidates(string service)
+        {
+            return Installed().Where(x => x.Enabled && x.Provides.Contains(service ?? "", StringComparer.OrdinalIgnoreCase)).ToList();
+        }
+
+        // 设置页用：装了这个服务、但被禁用的插件。用来把"没装"和"装了没启用"分开提示。
+        public static List<ServiceCandidate> DisabledCandidates(string service)
+        {
+            return Installed().Where(x => !x.Enabled && x.Provides.Contains(service ?? "", StringComparer.OrdinalIgnoreCase)).ToList();
+        }
+
+        // 运行时可用性（含"唯一候选自动绑定"），与插件拿到 context.services 的口径完全一致。
+        public static ServiceResolution Status(string consumerId, string service)
+        {
+            return Resolve(consumerId, new ServiceUse { Service = service, BindingKey = KeyOf(service) }, true);
+        }
+
+        // reason 枚举 → 界面文案（规格 §3）。宿主只说"为什么没有"，不说业务。
+        public static string ReasonText(string reason)
+        {
+            switch (reason ?? "")
+            {
+                case ReasonNotInstalled: return "未安装";
+                case ReasonDisabled: return "已安装但未启用";
+                case ReasonAmbiguous: return "有多个候选，请手动选择";
+                case ReasonVersionMismatch: return "版本不匹配";
+                default: return "";
+            }
+        }
+
         private static Dictionary<string, object> ReadBindings()
         {
             try

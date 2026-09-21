@@ -49,6 +49,17 @@ The response repeats the same `request_id`:
 
 ## Settings
 
-`settings.schema.json` is an object schema. The v1 UI supports `string`, `multiline`, `password`, `integer`, `boolean`, and `enum`, plus `minimum`, `maximum`, `default`, `required`, help text, `x-secret`, `x-order`, and `x-advanced`. Sensitive values are stored with Windows CurrentUser DPAPI.
+`settings.schema.json` is an object schema. The v1 UI supports `string`, `multiline`, `password`, `integer`, `boolean`, and `enum`, plus `minimum`, `maximum`, `default` and `required`. Sensitive values (`x-secret: true`, or `type: "password"`) are stored separately with Windows CurrentUser DPAPI. Display and layout are driven by `x-` extensions, which never change the meaning of a stored value:
+
+| extension | effect |
+| --- | --- |
+| `x-order` | sort key; fields are rendered in ascending order (default 999) |
+| `x-section` | group title; the host renders a separator heading per group, groups ordered by their smallest `x-order`, and fields without it fall into 基本 |
+| `x-advanced` | collect into a collapsed 高级设置 section (default collapsed) |
+| `x-address` | the field may be taken over by an address provider; rendered read-only while one is active |
+| `x-service` | this field is a **service binding**: rendered as a provider drop-down, stored in `plugin-bindings.json` instead of `config.json` |
+| `x-requires` | render the field greyed out (and keep the stored value untouched) while the named service has no usable provider |
+
+`x-service` and `x-requires` take a `name@version` service string that must also appear in the manifest's `uses` array — the manifest decides *which* services the plugin consumes, the schema only decides *where* to show them. A service row offers `（不使用）` plus every enabled installed provider; providers declaring `"billing": "may_charge"` are labelled with a cost hint. When no provider is installed the row offers an install shortcut to the plugin market, when one is installed but disabled it offers to enable it, and a provider bound to a plugin that was later uninstalled or disabled is shown as invalid and is **never** silently re-bound to another candidate.
 
 See `plugins/official` for complete .NET Framework 4.0 examples. A plugin may use any language that can produce a Windows executable and follow this protocol.

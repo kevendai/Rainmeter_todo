@@ -256,6 +256,12 @@ internal static partial class TodoApp
 
     private static void ShowSettings()
     {
+        ShowSettings(0);
+    }
+
+    // initialPage：0=已安装插件，1=插件市场（服务行上的「安装」按钮直接落到市场页）。
+    private static void ShowSettings(int initialPage)
+    {
         PluginPaths.Ensure();
         Form form=LightUi.Form("待办设置",920,720);
         Panel sidebar=new Panel{Left=0,Top=0,Width=210,Height=720,BackColor=Color.FromArgb(232,241,249)};
@@ -348,7 +354,7 @@ internal static partial class TodoApp
         SettingsNavItem[] navs={navInstalled,navMarket,navAppearance,navAbout};
         Action<int> selectPage=delegate(int index){for(int i=0;i<pages.Length;i++){pages[i].Visible=i==index;navs[i].Selected=i==index;navs[i].Invalidate();}};
         for(int i=0;i<navs.Length;i++){int index=i;navs[index].Activated+=delegate{selectPage(index);};}
-        selectPage(0);
+        selectPage(initialPage<0||initialPage>=pages.Length?0:initialPage);
         Button close=LightUi.CloseButton(form);form.Controls.Add(close);close.BringToFront();
         form.ShowDialog();
     }
@@ -421,6 +427,35 @@ internal static partial class TodoApp
     }
     private static PluginManifest SelectedPlugin(PluginListControl view){PluginRow row=view.SelectedRow;if(row==null)throw new Exception("请先选择一个插件。");return (PluginManifest)row.Tag;}
 
+    // 设置页里的一个排版单元：一行（标签 + 控件 [+ 状态 + 按钮]），或一个分组标题。
+    // 位置统一由 LayoutSettings 计算，因为「高级设置」折叠/展开时要整页重排（规格 §7.4）。
+    private sealed class SettingsBlock
+    {
+        public Control[] Controls = new Control[0];
+        public int[] Offsets = new int[0];
+        public int Height;
+        public bool Advanced, Header;
+        public SettingsBlock(Control[] controls, int[] offsets, int height) { Controls = controls; Offsets = offsets; Height = height; }
+    }
+
+    // 按可见性重排整页；返回内容总高。分组标题行永远可见（「高级设置」标题本身就是折叠开关）。
+    private static int LayoutSettings(Panel panel, List<SettingsBlock> blocks, bool showAdvanced)
+    {
+        int y = 8;
+        foreach (SettingsBlock block in blocks)
+        {
+            bool visible = block.Header || showAdvanced || !block.Advanced;
+            for (int i = 0; i < block.Controls.Length; i++)
+            {
+                block.Controls[i].Visible = visible;
+                if (visible) block.Controls[i].Top = y + block.Offsets[i];
+            }
+            if (visible) y += block.Height;
+        }
+        panel.AutoScrollMinSize = new Size(0, y + 10);
+        return y;
+    }
+
     private static void ShowPluginConfig(PluginManifest manifest)
     {
         string root=PluginPaths.VersionRoot(manifest.Id,manifest.Version);if(String.IsNullOrWhiteSpace(manifest.SettingsSchema))throw new Exception("该插件没有可配置项。");
@@ -430,27 +465,161 @@ internal static partial class TodoApp
         string data=PluginPaths.DataRoot(manifest.Id);Directory.CreateDirectory(data);string configPath=Path.Combine(data,"config.json"),secretPath=Path.Combine(data,"secret.dat");
         Dictionary<string,object> config=File.Exists(configPath)?JsonUtil.LoadObject(configPath):new Dictionary<string,object>();Dictionary<string,object> secret=File.Exists(secretPath)?JsonUtil.ReadDpapiJson(secretPath):new Dictionary<string,object>();
         string oldConfig=JsonUtil.Serialize(config),oldSecret=JsonUtil.Serialize(secret);HashSet<string> required=new HashSet<string>(JsonUtil.Array(JsonUtil.Get(schema,"required")).Select(Convert.ToString),StringComparer.OrdinalIgnoreCase);AddressProviderBinding claimedProvider=String.IsNullOrWhiteSpace(manifest.AddressTarget)?null:DynamicPluginValues.AddressProvider(manifest.AddressTarget);
-        Form f=LightUi.Form(manifest.Name+" 设置",680,Math.Min(820,190+props.Count*82));LightUi.Heading(f,manifest.Name,"敏感项使用当前 Windows 用户 DPAPI 加密。","settings.svg");
-        Panel panel=new Panel{Left=24,Top=102,Width=630,Height=f.ClientSize.Height-180,AutoScroll=true};f.Controls.Add(panel);Dictionary<string,Control> controls=new Dictionary<string,Control>();int y=8;
-        foreach(KeyValuePair<string,object> pair in props.OrderBy(x=>JsonUtil.Int(JsonUtil.Object(x.Value),"x-order",999)))
+        List<SettingsField> fields=PluginSettingsLayout.Parse(props);List<SettingsSection> sections=PluginSettingsLayout.Group(fields);
+        // 服务行状态一次算好：x-service 行的下拉框、x-requires 的置灰都读它。
+        Dictionary<string,ServiceRowState> services=new Dictionary<string,ServiceRowState>(StringComparer.OrdinalIgnoreCase);
+        foreach(SettingsField candidate in fields)
         {
-            Dictionary<string,object> p=JsonUtil.Object(pair.Value);string type=JsonUtil.String(p,"type","string"),title=JsonUtil.String(p,"title",pair.Key);bool claimedAddress=claimedProvider!=null&&JsonUtil.Bool(p,"x-address",false);bool isSecret=JsonUtil.Bool(p,"x-secret",false)||type=="password";object existing=PluginSettingValue(manifest.Id,pair.Key,isSecret?secret:config,secret,p);if(claimedAddress)existing=DynamicPluginValues.BindForTarget(Convert.ToString(existing??"",CultureInfo.InvariantCulture),manifest.AddressTarget);
-            Label label=LightUi.Label(title,8,y,590);panel.Controls.Add(label);Control control;
-            if(type=="boolean")control=new CheckBox{Left=8,Top=y+28,Width=590,Checked=existing!=null&&Convert.ToBoolean(existing,CultureInfo.InvariantCulture),Text="启用",Font=LightUi.UiFont(10F)};
-            else if(type=="enum") { ComboBox box=new ComboBox{Left=8,Top=y+28,Width=590,DropDownStyle=ComboBoxStyle.DropDownList};foreach(object option in JsonUtil.Array(JsonUtil.Get(p,"enum")))box.Items.Add(Convert.ToString(option));box.SelectedItem=Convert.ToString(existing);control=box; }
-            else control=new TextBox{Left=8,Top=y+28,Width=590,Height=type=="multiline"?86:28,Multiline=type=="multiline",ScrollBars=type=="multiline"?ScrollBars.Vertical:ScrollBars.None,Text=existing==null?"":Convert.ToString(existing,CultureInfo.InvariantCulture),UseSystemPasswordChar=isSecret};
-            if(claimedAddress){TextBox claimedBox=control as TextBox;if(claimedBox!=null){string effective=Convert.ToString(existing??"",CultureInfo.InvariantCulture);claimedBox.ReadOnly=true;claimedBox.BackColor=Color.FromArgb(232,238,244);claimedBox.Cursor=Cursors.Hand;claimedBox.Click+=delegate{MessageBox.Show("本机已安装“"+claimedProvider.PluginName+"”，它正在为这个插件提供服务器主机。\r\n\r\n现在实际使用："+(String.IsNullOrWhiteSpace(effective)?"（尚未填写过完整地址，请先填写一次，之后只替换主机）":effective)+"\r\n\r\n系统只替换地址里的主机/IP，协议、端口和路径都会保留，所以在这里改 IP 没有意义。\r\n如需手动指定地址，请先禁用“"+claimedProvider.PluginName+"”，再重新打开本设置。","地址由插件接管",MessageBoxButtons.OK,MessageBoxIcon.Information);};}}panel.Controls.Add(control);controls[pair.Key]=control;y+=type=="multiline"?136:78;
+            string service=PluginSettingsLayout.IsServiceField(candidate)?candidate.Service:candidate.Requires;
+            if(String.IsNullOrWhiteSpace(service)||services.ContainsKey(service))continue;
+            SettingsField row=fields.FirstOrDefault(x=>PluginSettingsLayout.IsServiceField(x)&&String.Equals(x.Service,service,StringComparison.OrdinalIgnoreCase));
+            services[service]=PluginSettingsLayout.Inspect(manifest,row==null?new SettingsField{Service=service}:row);
         }
-        panel.AutoScrollMinSize=new Size(0,y+10);Button cancel=LightUi.Button("取消",400,f.ClientSize.Height-60,120,DialogResult.Cancel);Button save=LightUi.PrimaryButton("保存",532,f.ClientSize.Height-60,120,DialogResult.OK);f.Controls.AddRange(new Control[]{cancel,save});f.CancelButton=cancel;
+        List<Action> refreshServices=new List<Action>();
+        Func<string,string> fixHint=delegate(string reason){if(reason==ServiceRegistry.ReasonDisabled)return "点此启用";if(reason==ServiceRegistry.ReasonNotInstalled)return "点此安装";return "点此处理";};
+        Action<string> fixService=delegate(string service)
+        {
+            ServiceRowState state;if(!services.TryGetValue(service,out state)||state==null)return;
+            try
+            {
+                if(state.NeedsEnable)
+                {
+                    Dictionary<string,object> current=PluginRuntime.Current(state.DisabledProviderId);
+                    if(current.Count==0)throw new Exception("找不到插件 "+state.DisabledProviderId+"。");
+                    current["enabled"]=true;JsonUtil.SaveAtomic(Path.Combine(PluginPaths.PluginRoot(state.DisabledProviderId),"current.json"),current);
+                    ServiceRegistry.Audit("settings-enable "+state.DisabledProviderId+" (from "+manifest.Id+" settings)");
+                }
+                else ShowSettings(1);   // 没装 ⇒ 直接去插件市场；装完回来就地刷新
+                foreach(Action refresh in refreshServices)refresh();
+            }
+            catch(Exception ex){LightUi.Error(ex.Message);}
+        };
+        Form f=LightUi.Form(manifest.Name+" 设置",680,Math.Max(360,Math.Min(820,190+fields.Count*84)));LightUi.Heading(f,manifest.Name,"敏感项使用当前 Windows 用户 DPAPI 加密。","settings.svg");
+        Panel panel=new Panel{Left=24,Top=102,Width=630,Height=200,AutoScroll=true};f.Controls.Add(panel);
+        List<SettingsBlock> blocks=new List<SettingsBlock>();Dictionary<string,Control> controls=new Dictionary<string,Control>();Dictionary<string,Func<string>> serviceValue=new Dictionary<string,Func<string>>();
+        bool advancedExpanded=false;Label advancedToggle=null;
+        Action<bool> setAdvanced=delegate(bool expanded)
+        {
+            advancedExpanded=expanded;
+            if(advancedToggle!=null)advancedToggle.Text=(expanded?"\u25BE ":"\u25B8 ")+PluginSettingsLayout.AdvancedSection;
+            int content=LayoutSettings(panel,blocks,expanded);
+            f.Height=Math.Min(820,Math.Max(360,content+200));panel.Height=f.ClientSize.Height-180;
+            LayoutSettings(panel,blocks,expanded);
+        };
+        int plainSections=sections.Count(x=>!x.Advanced);
+        foreach(SettingsSection section in sections)
+        {
+            if(section.Advanced)
+            {
+                advancedToggle=LightUi.Label("\u25B8 "+PluginSettingsLayout.AdvancedSection,8,0,590);
+                advancedToggle.Font=LightUi.UiFont(10F,FontStyle.Bold);advancedToggle.ForeColor=LightUi.Accent;advancedToggle.Cursor=Cursors.Hand;advancedToggle.Height=24;
+                advancedToggle.Click+=delegate{setAdvanced(!advancedExpanded);};
+                panel.Controls.Add(advancedToggle);blocks.Add(new SettingsBlock(new Control[]{advancedToggle},new int[]{0},36){Header=true});
+            }
+            else if(plainSections>1)
+            {
+                Label header=LightUi.Label(section.Name,8,0,590);header.Font=LightUi.UiFont(10F,FontStyle.Bold);header.ForeColor=LightUi.Text;header.Height=24;
+                panel.Controls.Add(header);blocks.Add(new SettingsBlock(new Control[]{header},new int[]{0},36));
+            }
+            foreach(SettingsField field in section.Fields)
+            {
+                bool claimedAddress=claimedProvider!=null&&field.Address;
+                object existing=PluginSettingValue(manifest.Id,field.Key,field.Secret?secret:config,secret,field.Property);
+                if(claimedAddress)existing=DynamicPluginValues.BindForTarget(Convert.ToString(existing??"",CultureInfo.InvariantCulture),manifest.AddressTarget);
+                string requiresReason="";bool requiresOk=field.Requires==""||PluginSettingsLayout.RequiresSatisfied(manifest,field.Requires,out requiresReason);
+                string title=field.Title;
+                if(!requiresOk)title=title+"（需要「"+PluginSettingsLayout.ServiceLabel(fields,field.Requires)+"」，"+fixHint(requiresReason)+"）";
+                Label label=LightUi.Label(title,8,0,590);panel.Controls.Add(label);Control control;
+                if(PluginSettingsLayout.IsServiceField(field))
+                {
+                    ComboBox box=new ComboBox{Left=8,Top=0,Width=396,DropDownStyle=ComboBoxStyle.DropDownList};
+                    Label hint=LightUi.Label("",412,5,134);hint.Cursor=Cursors.Hand;
+                    Button fix=LightUi.Button("",552,0,78,DialogResult.None);fix.Height=28;fix.Visible=false;
+                    // 一行上的三个动作都走同一个入口：要么启用已装未启用的 provider，要么去市场装。
+                    // 用户点「安装 / 启用」之后本页就地刷新，不需要关掉重开（规格 §8 的设置页行为）。
+                    fix.Click+=delegate{fixService(field.Service);};
+                    hint.Click+=delegate{if(fix.Visible)fixService(field.Service);};
+                    List<string> ids=new List<string>();bool populated=false;
+                    Action refresh=delegate
+                    {
+                        SettingsField rowField=fields.FirstOrDefault(x=>PluginSettingsLayout.IsServiceField(x)&&String.Equals(x.Service,field.Service,StringComparison.OrdinalIgnoreCase));
+                        ServiceRowState fresh=PluginSettingsLayout.Inspect(manifest,rowField==null?field:rowField);services[field.Service]=fresh;
+                        string keep=populated&&ids.Count>0&&box.SelectedIndex>=0&&box.SelectedIndex<ids.Count?ids[box.SelectedIndex]:null;
+                        // 空选择回落到刚解析出来的 provider：用户点了「安装 / 启用」之后，这一行必须显示
+                        // "现在真的会用哪个"，否则界面上还停在「不使用」，与宿主实际解析结果不一致。
+                        string wanted=String.IsNullOrEmpty(keep)?fresh.Bound:keep;
+                        ids.Clear();box.Items.Clear();ids.Add("");box.Items.Add("（不使用）");
+                        if(fresh.Bound!=""&&!fresh.Candidates.Any(x=>String.Equals(x.Id,fresh.Bound,StringComparison.OrdinalIgnoreCase)))
+                        {ids.Add(fresh.Bound);box.Items.Add("已失效："+(fresh.BoundName==""?fresh.Bound:fresh.BoundName)+"（"+(fresh.ReasonText==""?"不可用":fresh.ReasonText)+"）");}
+                        foreach(ServiceCandidate candidate in fresh.Candidates)
+                        {
+                            string text=candidate.Name==""?candidate.Id:candidate.Name;
+                            if(String.Equals(candidate.Billing,"may_charge",StringComparison.OrdinalIgnoreCase))text=text+"（可能收费）";
+                            ids.Add(candidate.Id);box.Items.Add(text);
+                        }
+                        int index=ids.FindIndex(x=>String.Equals(x,wanted==null?"":wanted,StringComparison.OrdinalIgnoreCase));box.SelectedIndex=index<0?0:index;populated=true;
+                        if(!fresh.Declared){box.Enabled=false;hint.Text="插件未声明该依赖";hint.ForeColor=LightUi.Danger;fix.Visible=false;return;}
+                        box.Enabled=true;fix.Visible=fresh.InstallNeeded||fresh.NeedsEnable;fix.Text=fresh.NeedsEnable?"启用":"安装";
+                        if(fresh.Ambiguous)hint.Text="有多个候选，请选择";
+                        else hint.Text=fresh.Available?(fresh.Optional?"已启用":"已启用（必需）"):(fresh.ReasonText==""?"请选择":fresh.ReasonText);
+                        hint.ForeColor=fresh.Available?LightUi.Done:LightUi.Danger;
+                    };
+                    refreshServices.Add(refresh);refresh();
+                    serviceValue[field.Key]=delegate{return ids.Count>0&&box.SelectedIndex>=0&&box.SelectedIndex<ids.Count&&services[field.Service].Declared?ids[box.SelectedIndex]:"";};
+                    panel.Controls.Add(box);panel.Controls.Add(hint);panel.Controls.Add(fix);
+                    blocks.Add(new SettingsBlock(new Control[]{label,box,hint,fix},new int[]{0,28,33,28},84){Advanced=field.Advanced});
+                    controls[field.Key]=box;continue;
+                }
+                if(field.Type=="boolean")control=new CheckBox{Left=8,Top=0,Width=590,Checked=existing!=null&&Convert.ToBoolean(existing,CultureInfo.InvariantCulture),Text="启用",Font=LightUi.UiFont(10F)};
+                else if(field.Type=="enum"){ComboBox enumBox=new ComboBox{Left=8,Top=0,Width=590,DropDownStyle=ComboBoxStyle.DropDownList};foreach(object option in JsonUtil.Array(JsonUtil.Get(field.Property,"enum")))enumBox.Items.Add(Convert.ToString(option));enumBox.SelectedItem=Convert.ToString(existing);control=enumBox;}
+                else control=new TextBox{Left=8,Top=0,Width=590,Height=field.Type=="multiline"?86:28,Multiline=field.Type=="multiline",ScrollBars=field.Type=="multiline"?ScrollBars.Vertical:ScrollBars.None,Text=existing==null?"":Convert.ToString(existing,CultureInfo.InvariantCulture),UseSystemPasswordChar=field.Secret};
+                if(claimedAddress){TextBox claimedBox=control as TextBox;if(claimedBox!=null){string effective=Convert.ToString(existing??"",CultureInfo.InvariantCulture);claimedBox.ReadOnly=true;claimedBox.BackColor=Color.FromArgb(232,238,244);claimedBox.Cursor=Cursors.Hand;claimedBox.Click+=delegate{MessageBox.Show("本机已安装“"+claimedProvider.PluginName+"”，它正在为这个插件提供服务器主机。\r\n\r\n现在实际使用："+(String.IsNullOrWhiteSpace(effective)?"（尚未填写过完整地址，请先填写一次，之后只替换主机）":effective)+"\r\n\r\n系统只替换地址里的主机/IP，协议、端口和路径都会保留，所以在这里改 IP 没有意义。\r\n如需手动指定地址，请先禁用“"+claimedProvider.PluginName+"”，再重新打开本设置。","地址由插件接管",MessageBoxButtons.OK,MessageBoxIcon.Information);};}}
+                if(!requiresOk)
+                {
+                    // 无可用 provider ⇒ 控件置灰，但**绝不改存储值**（规格 §11-#7/#8：卸载 provider 后开关必须保持原样）。
+                    control.Enabled=false;TextBox disabledText=control as TextBox;if(disabledText!=null){disabledText.ReadOnly=true;disabledText.BackColor=Color.FromArgb(238,238,238);}
+                    label.ForeColor=LightUi.Accent;label.Cursor=Cursors.Hand;label.Click+=delegate{fixService(field.Requires);};
+                }
+                panel.Controls.Add(control);
+                int controlHeight=field.Type=="multiline"?86:28;
+                blocks.Add(new SettingsBlock(new Control[]{label,control},new int[]{0,28},28+controlHeight+28){Advanced=field.Advanced});
+                controls[field.Key]=control;
+            }
+        }
+        if(blocks.Count==0)throw new Exception("该插件没有可配置项。");
+        int contentHeight=LayoutSettings(panel,blocks,false);
+        f.Height=Math.Min(820,Math.Max(360,contentHeight+200));panel.Height=f.ClientSize.Height-180;
+        LayoutSettings(panel,blocks,false);
+        Dictionary<string,SettingsField> fieldsByKey=new Dictionary<string,SettingsField>(StringComparer.OrdinalIgnoreCase);
+        foreach(SettingsField indexed in fields)fieldsByKey[indexed.Key]=indexed;
+        Button cancel=LightUi.Button("取消",400,f.ClientSize.Height-60,120,DialogResult.Cancel);Button save=LightUi.PrimaryButton("保存",532,f.ClientSize.Height-60,120,DialogResult.OK);f.Controls.AddRange(new Control[]{cancel,save});f.CancelButton=cancel;
         if(f.ShowDialog()!=DialogResult.OK)return;
+        List<KeyValuePair<string,string>> selections=new List<KeyValuePair<string,string>>();
         foreach(KeyValuePair<string,Control> pair in controls)
         {
-            Dictionary<string,object> p=JsonUtil.Object(props[pair.Key]);string type=JsonUtil.String(p,"type","string");if(claimedProvider!=null&&JsonUtil.Bool(p,"x-address",false))continue;bool isSecret=JsonUtil.Bool(p,"x-secret",false)||type=="password";object value;
-            if(type=="boolean")value=((CheckBox)pair.Value).Checked;else if(type=="integer"){int number;if(!Int32.TryParse(pair.Value.Text,out number))throw new Exception(JsonUtil.String(p,"title",pair.Key)+"必须是整数。");int min=JsonUtil.Int(p,"minimum",Int32.MinValue),max=JsonUtil.Int(p,"maximum",Int32.MaxValue);if(number<min||number>max)throw new Exception(JsonUtil.String(p,"title",pair.Key)+"超出允许范围。");value=number;}else value=pair.Value.Text;if(required.Contains(pair.Key)&&String.IsNullOrWhiteSpace(Convert.ToString(value,CultureInfo.InvariantCulture)))throw new Exception(JsonUtil.String(p,"title",pair.Key)+"为必填项。");
-            (isSecret?secret:config)[pair.Key]=value;
+            SettingsField field=fieldsByKey[pair.Key];Dictionary<string,object> p=field.Property;
+            if(PluginSettingsLayout.IsServiceField(field))
+            {
+                // 服务行的值属于绑定表，**不写 config**（规格 §3：绑定表由宿主独占写入）。插件没声明的依赖连绑定都不写。
+                if(!PluginSettingsLayout.DeclaresService(manifest,field.Service))continue;
+                Func<string> read;if(serviceValue.TryGetValue(pair.Key,out read))selections.Add(new KeyValuePair<string,string>(field.Service,read()));
+                continue;
+            }
+            if(claimedProvider!=null&&field.Address)continue;
+            object value;
+            if(field.Type=="boolean")value=((CheckBox)pair.Value).Checked;
+            else if(field.Type=="integer"){int number;if(!Int32.TryParse(pair.Value.Text,out number))throw new Exception(field.Title+"必须是整数。");int min=JsonUtil.Int(p,"minimum",Int32.MinValue),max=JsonUtil.Int(p,"maximum",Int32.MaxValue);if(number<min||number>max)throw new Exception(field.Title+"超出允许范围。");value=number;}
+            else value=pair.Value.Text;
+            // 置灰的 x-requires 行原样写回：卸载 provider 不得把用户的开关悄悄改成 false（规格 §11-#8）。
+            if(required.Contains(pair.Key)&&String.IsNullOrWhiteSpace(Convert.ToString(value,CultureInfo.InvariantCulture)))throw new Exception(field.Title+"为必填项。");
+            (field.Secret?secret:config)[pair.Key]=value;
         }
         JsonUtil.SaveAtomic(configPath,config);JsonUtil.WriteDpapiJson(secretPath,secret);
-        try{using(Process validation=Process.Start(new ProcessStartInfo(PluginHostPath,"PluginAction "+manifest.Id+" validate_settings"){UseShellExecute=false,CreateNoWindow=true,WindowStyle=ProcessWindowStyle.Hidden})){if(validation==null||!validation.WaitForExit(35000)||validation.ExitCode!=0)throw new Exception("插件拒绝了当前设置。");}}catch{JsonUtil.SaveAtomic(configPath,JsonUtil.Object(JsonUtil.Deserialize(oldConfig)));JsonUtil.WriteDpapiJson(secretPath,JsonUtil.Object(JsonUtil.Deserialize(oldSecret)));throw;}
+        // config 与绑定表必须一起成功或一起失败，否则会留下"设置没保存、绑定却生效"的半截状态。
+        List<KeyValuePair<string,string>> previousBindings=new List<KeyValuePair<string,string>>();
+        foreach(KeyValuePair<string,string> selection in selections)previousBindings.Add(new KeyValuePair<string,string>(selection.Key,ServiceRegistry.BoundProvider(manifest.Id,selection.Key)));
+        int boundChanges=PluginSettingsLayout.ApplyBindings(manifest.Id,selections);
+        try{using(Process validation=Process.Start(new ProcessStartInfo(PluginHostPath,"PluginAction "+manifest.Id+" validate_settings"){UseShellExecute=false,CreateNoWindow=true,WindowStyle=ProcessWindowStyle.Hidden})){if(validation==null||!validation.WaitForExit(35000)||validation.ExitCode!=0)throw new Exception("插件拒绝了当前设置。");}}catch{JsonUtil.SaveAtomic(configPath,JsonUtil.Object(JsonUtil.Deserialize(oldConfig)));JsonUtil.WriteDpapiJson(secretPath,JsonUtil.Object(JsonUtil.Deserialize(oldSecret)));if(boundChanges>0)PluginSettingsLayout.ApplyBindings(manifest.Id,previousBindings);throw;}
     }
 
     private static object PluginSettingValue(string pluginId,string key,Dictionary<string,object> direct,Dictionary<string,object> secrets,Dictionary<string,object> property)

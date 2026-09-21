@@ -30,6 +30,7 @@ try {
     $aiDeepSeekProbe = Join-Path $build 'AiDeepSeekProbe.exe'
     $paidConsentProbe = Join-Path $build 'PaidConsentProbe.exe'
     $translateTencentProbe = Join-Path $build 'TranslateTencentProbe.exe'
+    $pluginSettingsProbe = Join-Path $build 'PluginSettingsProbe.exe'
     $fakeTodoSource = Join-Path $build 'FakeTodoSource.exe'
     $dpiAssertions = Join-Path $tests 'DpiLayoutAssertions.cs'
     function Get-ProjectSources([string]$projectPath) {
@@ -84,6 +85,8 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'Paid consent probe compilation failed' }
     $translateCompileOutput = & $csc /nologo /target:exe /main:TranslateTencentProbe /optimize+ @refs "/out:$translateTencentProbe" @todoSources (Join-Path $tests 'TranslateTencentProbe.cs') 2>&1 | Out-String
     if ($LASTEXITCODE -ne 0) { throw ('Translate Tencent probe compilation failed: ' + $translateCompileOutput) }
+    $settingsCompileOutput = & $csc /nologo /target:exe /main:PluginSettingsProbe /optimize+ @refs "/out:$pluginSettingsProbe" @todoSources (Join-Path $tests 'PluginSettingsProbe.cs') 2>&1 | Out-String
+    if ($LASTEXITCODE -ne 0) { throw ('Plugin settings probe compilation failed: ' + $settingsCompileOutput) }
     $previousCommandDisable = $env:RAINMETER_COMMANDS_DISABLED
     $previousPluginRoot = $env:RAINMETER_PLUGIN_ROOT
     try {
@@ -117,6 +120,7 @@ try {
         & $paidConsentProbe;if($LASTEXITCODE -ne 0){throw "Paid consent probe failed with exit code $LASTEXITCODE"};Write-Host 'Paid consent gate, headless denial, same-day decline reset, cancel markers and tile entry rendering passed'
         $translatePlugin=Join-Path $bundledPlugins 'translate-tencent\bin\TranslateTencentPlugin.exe';& $translatePlugin TranslationProviderSelfTest;if($LASTEXITCODE -ne 0){throw "Translate Tencent plugin self-tests failed with exit code $LASTEXITCODE"};Write-Host 'Translate Tencent plugin TC3 known answers, language mapping, chunking, cache-key and error-code grading self-tests passed'
         & $translateTencentProbe;if($LASTEXITCODE -ne 0){throw "Translate Tencent probe failed with exit code $LASTEXITCODE"};Write-Host 'Translation provider TC3 signature verification, batch order, cache reuse, throttling, zero-call input rejection and vendor error grading passed'
+        & $pluginSettingsProbe;if($LASTEXITCODE -ne 0){throw "Plugin settings probe failed with exit code $LASTEXITCODE"};Write-Host 'Plugin settings section grouping, collapsed advanced items, service binding selection, x-requires greying and binding-table writes passed'
         $paidSourceId='io.github.test.todo-source';$paidJobPath=Join-Path $env:RAINMETER_PLUGIN_ROOT ('PluginJobs\'+$paidSourceId+'.json');$paidCalls=Join-Path $env:RAINMETER_PLUGIN_ROOT ('PluginData\'+$paidSourceId+'\calls.log')
         @{job_id='smoke';plugin_id=$paidSourceId;state='attention';current=0;total=0;resume_action='sync_with_ai';resume_input=@{allow_paid_ai=$true};message='远端论文同步失败，是否使用 DeepSeek AI 重新评分？'}|ConvertTo-Json -Depth 6|Set-Content -LiteralPath $paidJobPath -Encoding UTF8
         $callsBefore=@(Get-Content -LiteralPath $paidCalls -Encoding UTF8 -ErrorAction SilentlyContinue).Count
