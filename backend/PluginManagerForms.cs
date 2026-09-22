@@ -423,7 +423,28 @@ internal static partial class TodoApp
         list.SelectionChanged+=delegate{updateInstalledButtons();};
         list.RowActivated+=delegate{if(configure.Enabled)configure.PerformClick();};
         Action reload=delegate{ReloadPlugins(list,status);updateInstalledButtons();};reload();
-        System.Windows.Forms.Timer jobTimer=new System.Windows.Forms.Timer{Interval=500};jobTimer.Tick+=delegate{PluginRow selectedRow=list.SelectedRow;if(selectedRow==null)return;PluginManifest selectedManifest=selectedRow.Tag as PluginManifest;if(selectedManifest==null)return;try{if(!JsonUtil.Bool(PluginRuntime.Current(selectedManifest.Id),"enabled",false)){status.Text="插件已禁用";status.ForeColor=LightUi.Muted;return;}string path=Path.Combine(PluginPaths.Jobs,selectedManifest.Id+".json");if(File.Exists(path)){Dictionary<string,object> job=JsonUtil.LoadObject(path);string state=JsonUtil.String(job,"state",""),message=PluginNames.Humanize(JsonUtil.String(job,"message",""));int current=JsonUtil.Int(job,"current",0),total=JsonUtil.Int(job,"total",0);string stateText=state=="failed"?"失败":state=="attention"?"需要确认":state=="cancelled"?"已取消":state=="running"?"运行中":state=="completed"?"已完成":state;status.Text=stateText+(total>0?" "+current+"/"+total:"")+(message==""?"":" · "+message);}}catch{}};jobTimer.Start();form.FormClosed+=delegate{jobTimer.Stop();jobTimer.Dispose();};
+        HashSet<string> refreshedTerminalJobs=new HashSet<string>(StringComparer.Ordinal);
+        System.Windows.Forms.Timer jobTimer=new System.Windows.Forms.Timer{Interval=500};
+        jobTimer.Tick+=delegate
+        {
+            PluginRow selectedRow=list.SelectedRow;if(selectedRow==null)return;
+            PluginManifest selectedManifest=selectedRow.Tag as PluginManifest;if(selectedManifest==null)return;
+            try
+            {
+                if(!JsonUtil.Bool(PluginRuntime.Current(selectedManifest.Id),"enabled",false)){status.Text="插件已禁用";status.ForeColor=LightUi.Muted;return;}
+                string path=Path.Combine(PluginPaths.Jobs,selectedManifest.Id+".json");if(!File.Exists(path))return;
+                Dictionary<string,object> job=JsonUtil.LoadObject(path);string state=JsonUtil.String(job,"state",""),message=PluginNames.Humanize(JsonUtil.String(job,"message",""));
+                int current=JsonUtil.Int(job,"current",0),total=JsonUtil.Int(job,"total",0);
+                string stateText=state=="failed"?"失败":state=="attention"?"需要确认":state=="cancelled"?"已取消":state=="running"?"运行中":state=="completed"?"已完成":state;
+                string statusText=stateText+(total>0?" "+current+"/"+total:"")+(message==""?"":" · "+message);
+                // 任务可能在一个定时器周期内直接从旧失败变成完成。底部状态以前会更新，
+                // 但列表行仍保留打开页面时的旧文案。每个任务终态只重建一次列表，随后恢复最新状态文本。
+                if(RememberTerminalJobRefresh(refreshedTerminalJobs,selectedManifest.Id,job))reload();
+                status.Text=statusText;
+            }
+            catch{}
+        };
+        jobTimer.Start();form.FormClosed+=delegate{jobTimer.Stop();jobTimer.Dispose();};
         toggle.Click+=delegate{try{PluginManifest m=SelectedRunnablePlugin(list);Dictionary<string,object> c=PluginRuntime.Current(m.Id);c["enabled"]=!JsonUtil.Bool(c,"enabled",false);JsonUtil.SaveAtomic(Path.Combine(PluginPaths.PluginRoot(m.Id),"current.json"),c);reload();}catch(Exception ex){LightUi.Error(ex.Message);}};
         configure.Click+=delegate{try{ShowPluginConfig(SelectedRunnablePlugin(list));reload();}catch(Exception ex){LightUi.Error(ex.Message);}};
         run.Click+=delegate{try{PluginManifest m=SelectedRunnablePlugin(list);string verb=m.Capabilities.Contains("value_provider")?"Values":m.Capabilities.Contains("todo_source")?"Sync":"";if(verb=="")throw new Exception("此插件由日历按需调用。 ");StartPluginCommand(verb,m.Id);status.Text="已启动 "+m.Name;}catch(Exception ex){LightUi.Error(ex.Message);}};
@@ -574,6 +595,13 @@ internal static partial class TodoApp
             return JsonUtil.String(job,"state","")=="attention"||PluginRuntime.PaidDeclinedToday(id);
         }
         catch{return false;}
+    }
+    private static bool RememberTerminalJobRefresh(HashSet<string> refreshed,string id,Dictionary<string,object> job)
+    {
+        string state=JsonUtil.String(job,"state","");
+        if(state!="completed"&&state!="failed"&&state!="cancelled"&&state!="attention")return false;
+        string fingerprint=id+"|"+JsonUtil.String(job,"job_id","")+"|"+state+"|"+JsonUtil.String(job,"updated_at","")+"|"+JsonUtil.String(job,"message","");
+        return refreshed.Add(fingerprint);
     }
     private static string PluginJobStatus(string id)
     {

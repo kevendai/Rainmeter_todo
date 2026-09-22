@@ -312,6 +312,23 @@ internal static class PluginSettingsProbe
         string enabled=Convert.ToString(method.Invoke(null,new object[]{ProviderOff,disabled,true}));
         Expect(enabled.Contains("Provider A")&&!enabled.Contains(ProviderA),"错误冒号后显示插件名而不是复杂 ID");
         Equal("日程转待办",PluginNames.Display("io.github.kevendai.calendar-to-todo","Calendar to Todo"),"内置插件统一中文名");
+
+        PluginManifest address=PluginManifest.Load(PluginPaths.VersionRoot(AddressProviderId,"1.0.0"));
+        string addressJob=Path.Combine(PluginPaths.Jobs,AddressProviderId+".json");
+        File.WriteAllText(addressJob,"{\"state\":\"failed\",\"message\":\"旧发现失败\",\"job_id\":\"old\",\"updated_at\":\"1\"}",RuntimeUtil.Utf8NoBom);
+        Expect(Convert.ToString(method.Invoke(null,new object[]{AddressProviderId,address,true})).Contains("旧发现失败"),"运行前列表显示旧失败");
+        Dictionary<string,object> completedJob=new Dictionary<string,object>{{"state","completed"},{"message","已找到服务器"},{"job_id","new"},{"updated_at","2"},{"current",1},{"total",1}};
+        JsonUtil.SaveAtomic(addressJob,completedJob);
+        Equal("IP 203.0.113.7",Convert.ToString(method.Invoke(null,new object[]{AddressProviderId,address,true})),"完成后重建列表会显示最新 IP，不保留旧失败");
+
+        MethodInfo remember=typeof(TodoApp).GetMethod("RememberTerminalJobRefresh",BindingFlags.Static|BindingFlags.NonPublic);
+        HashSet<string> refreshed=new HashSet<string>(StringComparer.Ordinal);
+        Dictionary<string,object> running=new Dictionary<string,object>{{"state","running"},{"job_id","new"}};
+        Expect(!(bool)remember.Invoke(null,new object[]{refreshed,AddressProviderId,running}),"运行中不重建插件列表");
+        Expect((bool)remember.Invoke(null,new object[]{refreshed,AddressProviderId,completedJob}),"任务首次进入完成态时重建列表");
+        Expect(!(bool)remember.Invoke(null,new object[]{refreshed,AddressProviderId,completedJob}),"同一完成态不会循环重建列表");
+        completedJob["job_id"]="newer";completedJob["updated_at"]="3";
+        Expect((bool)remember.Invoke(null,new object[]{refreshed,AddressProviderId,completedJob}),"下一次任务完成仍会重建列表");
     }
 
     // ---------- 4) 真对话框（含保存路径与置灰行） ----------
