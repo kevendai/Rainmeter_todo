@@ -395,6 +395,88 @@ namespace RainmeterBackend
         }
     }
 
+    internal static class UiTheme
+    {
+        public const string Classic = "classic";
+        public const string Mica = "mica";
+        public const string Acrylic = "acrylic";
+
+        private static string ConfigPathFor(string fileName)
+        {
+            string baseDir = AppDomain.CurrentDomain.BaseDirectory.TrimEnd(Path.DirectorySeparatorChar);
+            string local = Path.Combine(baseDir, fileName);
+            if (File.Exists(local) || !String.Equals(new DirectoryInfo(baseDir).Name, "@Resources", StringComparison.OrdinalIgnoreCase)) return local;
+            DirectoryInfo skin = Directory.GetParent(baseDir);
+            DirectoryInfo skins = skin == null ? null : skin.Parent;
+            if (skin != null && skins != null && String.Equals(skin.Name, "Calendar", StringComparison.OrdinalIgnoreCase)) return Path.Combine(skins.FullName, "Todo", "@Resources", fileName);
+            return local;
+        }
+
+        private static string ConfigPath { get { return ConfigPathFor("ui-theme.txt"); } }
+
+        public static string Current
+        {
+            get
+            {
+                string overrideValue = Environment.GetEnvironmentVariable("RAINMETER_UI_THEME_OVERRIDE");
+                if (!String.IsNullOrWhiteSpace(overrideValue)) return Normalize(overrideValue);
+                try { if (File.Exists(ConfigPath)) return Normalize(File.ReadAllText(ConfigPath, Encoding.UTF8)); }
+                catch { }
+                return Classic;
+            }
+        }
+
+        public static string Normalize(string mode)
+        {
+            string value = String.IsNullOrWhiteSpace(mode) ? Classic : mode.Trim().ToLowerInvariant();
+            return value == Mica || value == Acrylic ? value : Classic;
+        }
+
+        public static string DisplayName(string mode)
+        {
+            string value = Normalize(mode);
+            return value == Mica ? "云母" : value == Acrylic ? "亚克力" : "经典";
+        }
+
+        public static void Save(string mode)
+        {
+            string normalized = Normalize(mode);
+            string directory = Path.GetDirectoryName(ConfigPath);
+            if (!String.IsNullOrEmpty(directory)) Directory.CreateDirectory(directory);
+            File.WriteAllText(ConfigPath, normalized, new UTF8Encoding(false));
+        }
+
+        public static bool WriteRainmeterTheme(string resourceDirectory)
+        {
+            if (String.IsNullOrWhiteSpace(resourceDirectory)) throw new ArgumentException("主题资源目录不能为空");
+            return RuntimeUtil.WriteUtf16IfChanged(Path.Combine(resourceDirectory, "Theme.inc"), RainmeterVariables(Current));
+        }
+
+        internal static string RainmeterVariables(string mode)
+        {
+            string value = Normalize(mode);
+            List<string> lines = new List<string>();
+            lines.Add("; This file is generated from ui-theme.txt. Change the style in 外观与备份.");
+            lines.Add("[Variables]");
+            lines.Add("ThemeMode=" + value);
+            if (value == Mica)
+                AddPalette(lines, "28,33,43,255", "92,99,112,255", "62,92,214,255", "32,122,82,255", "196,54,63,255", "207,214,225,230", "102,110,124,255", "62,92,214,255", "242,245,250,252", "255,255,255,235", "240,248,244,238", "255,255,255,185", "207,214,225,190", "0");
+            else if (value == Acrylic)
+                AddPalette(lines, "25,34,47,255", "83,101,123,255", "25,108,212,255", "20,118,66,255", "198,52,60,255", "255,255,255,172", "75,91,113,255", "32,112,214,245", "226,239,250,205", "250,253,255,185", "232,247,240,190", "255,255,255,205", "255,255,255,145", "1");
+            else
+                AddPalette(lines, "21,32,48,255", "92,108,130,255", "25,108,212,255", "20,118,66,255", "198,52,60,255", "198,216,232,210", "75,91,113,255", "32,112,214,255", "239,248,255,248", "247,251,255,242", "239,249,244,238", "255,255,255,180", "202,218,232,170", "0");
+            return String.Join("\r\n", lines) + "\r\n";
+        }
+
+        private static void AddPalette(List<string> lines, string text, string muted, string accent, string done, string danger, string border, string subtle, string accentFill, string panel, string card, string doneCard, string highlight, string divider, string blur)
+        {
+            lines.Add("TextColor=" + text); lines.Add("MutedColor=" + muted); lines.Add("AccentColor=" + accent);
+            lines.Add("DoneColor=" + done); lines.Add("OngoingColor=" + done); lines.Add("DangerColor=" + danger); lines.Add("ConflictColor=" + danger);
+            lines.Add("BorderColor=" + border); lines.Add("SubtleColor=" + subtle); lines.Add("AccentFill=" + accentFill);
+            lines.Add("PanelColor=" + panel); lines.Add("CardColor=" + card); lines.Add("DoneCardColor=" + doneCard);
+            lines.Add("PanelHighlightColor=" + highlight); lines.Add("DividerColor=" + divider); lines.Add("ThemeBlur=" + blur);
+        }
+    }
     internal static class JsonUtil
     {
         private static JavaScriptSerializer NewSerializer()
@@ -773,6 +855,7 @@ namespace RainmeterBackend
 
         [DllImport("user32.dll")] private static extern bool ReleaseCapture();
         [DllImport("user32.dll")] private static extern IntPtr SendMessage(IntPtr handle, int message, IntPtr wParam, IntPtr lParam);
+        [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern IntPtr SendMessage(IntPtr handle, int message, IntPtr wParam, string lParam);
 
         public static void EnableDoubleBuffer(Control control)
         {
@@ -785,6 +868,11 @@ namespace RainmeterBackend
             catch { }
         }
 
+        public static void SetCue(TextBox control, string text)
+        {
+            if (control == null) return;
+            SendMessage(control.Handle, 0x1501, new IntPtr(1), text ?? "");
+        }
         public static void SetRedraw(Control control, bool enabled)
         {
             if (control == null || !control.IsHandleCreated) return;

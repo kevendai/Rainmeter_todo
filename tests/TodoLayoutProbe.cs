@@ -168,7 +168,9 @@ internal static class TodoLayoutProbe
     {
         string tilePath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "ui-scale.txt");
         string windowPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "ui-window-scale.txt");
+        string themePath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "ui-theme.txt");
         string previousOverride = Environment.GetEnvironmentVariable("RAINMETER_UI_SCALE_OVERRIDE");
+        string previousThemeOverride = Environment.GetEnvironmentVariable("RAINMETER_UI_THEME_OVERRIDE");
         try
         {
             Environment.SetEnvironmentVariable("RAINMETER_UI_SCALE_OVERRIDE", null);
@@ -180,12 +182,20 @@ internal static class TodoLayoutProbe
                 throw new Exception("Independent window scale was not persisted");
             if (Math.Abs(RainmeterBackend.UiScale.TileCurrent - 0.80F) > 0.001F || Math.Abs(RainmeterBackend.UiScale.Current - 1.10F) > 0.001F)
                 throw new Exception("Tile and window scales are not independent");
+            Environment.SetEnvironmentVariable("RAINMETER_UI_THEME_OVERRIDE", null);
+            RainmeterBackend.UiTheme.Save(RainmeterBackend.UiTheme.Acrylic);
+            if (RainmeterBackend.UiTheme.Current != RainmeterBackend.UiTheme.Acrylic || RainmeterBackend.UiTheme.RainmeterVariables(RainmeterBackend.UiTheme.Acrylic).IndexOf("ThemeBlur=1", StringComparison.Ordinal) < 0)
+                throw new Exception("Acrylic tile theme was not persisted or rendered");
+            if (RainmeterBackend.UiTheme.RainmeterVariables(RainmeterBackend.UiTheme.Classic).IndexOf("PanelColor=239,248,255,248", StringComparison.Ordinal) < 0)
+                throw new Exception("Classic tile theme no longer preserves the original palette");
         }
         finally
         {
             Environment.SetEnvironmentVariable("RAINMETER_UI_SCALE_OVERRIDE", previousOverride);
+            Environment.SetEnvironmentVariable("RAINMETER_UI_THEME_OVERRIDE", previousThemeOverride);
             if (File.Exists(tilePath)) File.Delete(tilePath);
             if (File.Exists(windowPath)) File.Delete(windowPath);
+            if (File.Exists(themePath)) File.Delete(themePath);
         }
     }
 
@@ -201,9 +211,9 @@ internal static class TodoLayoutProbe
                 DpiLayoutAssertions.AssertPixelFonts(form);
                 DpiLayoutAssertions.AssertSingleLineLabelsNotClipped(form);
                 List<Control> controls = Descendants(form).ToList();
-                if (!controls.Any(control => control.Text == "桌面磁贴缩放") || !controls.Any(control => control.Text == "管理与编辑窗口缩放"))
+                if (!controls.Any(control => control.Text == "桌面磁贴缩放") || !controls.Any(control => control.Text == "管理与编辑窗口缩放") || !controls.Any(control => control.Text == "磁贴视觉风格"))
                     throw new Exception("Independent tile/window scale controls are missing");
-                if (controls.OfType<ComboBox>().Count() < 2) throw new Exception("Scale selectors are missing");
+                if (controls.OfType<ComboBox>().Count() < 3) throw new Exception("Scale or theme selectors are missing");
                 Button apply = controls.OfType<Button>().First(button => button.Text == "应用缩放");
                 if (apply.Right > form.ClientSize.Width || apply.Bottom > form.ClientSize.Height) throw new Exception("Scale apply button is clipped");
                 timer.Stop();

@@ -57,6 +57,11 @@ internal static partial class TodoApp
         get { return Path.Combine(ResourceDir, "ui-window-scale.txt"); }
     }
 
+    private static string UiThemePath
+    {
+        get { return Path.Combine(ResourceDir, "ui-theme.txt"); }
+    }
+
     private static string ExportUserBackupInteractive()
     {
         BackupPasswordResult request = ShowBackupPasswordDialog(true);
@@ -104,6 +109,7 @@ internal static partial class TodoApp
         if (File.Exists(CalDavSecret)) components["caldav"] = ReadSecretForBackup(CalDavSecret, "CalDAV 凭据");
         components["ui_scale"] = ReadBackupUiScale();
         components["window_scale"] = ReadBackupWindowUiScale();
+        components["ui_theme"] = ReadBackupUiTheme();
         components["plugins"] = BuildPluginBackup();
 
         Dictionary<string, object> calendarState = LoadOptionalObject(CalendarStatePath, NewBackupCalendarState());
@@ -180,6 +186,8 @@ internal static partial class TodoApp
         if (uiScale != null) NormalizeBackupUiScale(Convert.ToString(uiScale, CultureInfo.InvariantCulture));
         object windowScale = JsonUtil.Get(components, "window_scale");
         if (windowScale != null) NormalizeBackupUiScale(Convert.ToString(windowScale, CultureInfo.InvariantCulture));
+        object uiTheme = JsonUtil.Get(components, "ui_theme");
+        if (uiTheme != null) NormalizeBackupUiTheme(Convert.ToString(uiTheme, CultureInfo.InvariantCulture));
         ValidateArrayLimit(JsonUtil.Get(components, "calendar_rules"), "日历规则");
         ValidateArrayLimit(JsonUtil.Get(components, "plugins"), "插件配置");
         foreach(object raw in JsonUtil.Array(JsonUtil.Get(components,"plugins")))
@@ -232,7 +240,7 @@ internal static partial class TodoApp
     private static void ApplyBackupPayload(Dictionary<string, object> payload, bool importConfiguration, bool importData)
     {
         Dictionary<string, object> components = JsonUtil.Object(JsonUtil.Get(payload, "components"));
-        List<string> paths = new List<string>{ PaperSyncSecret, TranslationSecret, CalDavSecret, UiScalePath, WindowUiScalePath, StatePath, CalendarStatePath };
+        List<string> paths = new List<string>{ PaperSyncSecret, TranslationSecret, CalDavSecret, UiScalePath, WindowUiScalePath, UiThemePath, StatePath, CalendarStatePath };
         foreach(object raw in JsonUtil.Array(JsonUtil.Get(components,"plugins"))){string id=JsonUtil.String(JsonUtil.Object(raw),"id","");string data=PluginPaths.DataRoot(id);paths.Add(Path.Combine(data,"config.json"));paths.Add(Path.Combine(data,"secret.dat"));paths.Add(Path.Combine(PluginPaths.PluginRoot(id),"current.json"));}
         string rollback = Path.Combine(ResourceDir, ".import-rollback-" + Guid.NewGuid().ToString("N"));
         Dictionary<string, string> saved = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
@@ -260,6 +268,8 @@ internal static partial class TodoApp
                 if (scale != null) WriteBackupUiScale(Convert.ToString(scale, CultureInfo.InvariantCulture));
                 object windowScale = JsonUtil.Get(components, "window_scale");
                 if (windowScale != null) WriteBackupWindowUiScale(Convert.ToString(windowScale, CultureInfo.InvariantCulture));
+                object uiTheme = JsonUtil.Get(components, "ui_theme");
+                if (uiTheme != null) WriteBackupUiTheme(Convert.ToString(uiTheme, CultureInfo.InvariantCulture));
                 object rules = JsonUtil.Get(components, "calendar_rules");
                 if (rules != null)
                 {
@@ -311,6 +321,25 @@ internal static partial class TodoApp
         if (value != null) JsonUtil.WriteDpapiJson(path, JsonUtil.Object(value));
     }
 
+    private static string ReadBackupUiTheme()
+    {
+        if (!File.Exists(UiThemePath)) return UiTheme.Classic;
+        return NormalizeBackupUiTheme(File.ReadAllText(UiThemePath, Encoding.UTF8));
+    }
+
+    private static void WriteBackupUiTheme(string value)
+    {
+        string normalized = NormalizeBackupUiTheme(value), temporary = UiThemePath + ".tmp";
+        File.WriteAllText(temporary, normalized, new UTF8Encoding(false));
+        if (File.Exists(UiThemePath)) File.Replace(temporary, UiThemePath, null); else File.Move(temporary, UiThemePath);
+    }
+
+    private static string NormalizeBackupUiTheme(string value)
+    {
+        string normalized = UiTheme.Normalize(value);
+        if (!String.Equals(normalized, (value ?? "").Trim().ToLowerInvariant(), StringComparison.Ordinal)) throw new Exception("备份中的磁贴视觉风格无效。");
+        return normalized;
+    }
     private static string ReadBackupUiScale()
     {
         return ReadBackupScale(UiScalePath, "auto");
@@ -628,6 +657,7 @@ internal static partial class TodoApp
             JsonUtil.WriteDpapiJson(CalDavSecret, caldav);
             WriteBackupUiScale("0.90");
             WriteBackupWindowUiScale("1.10");
+            WriteBackupUiTheme(UiTheme.Acrylic);
             Dictionary<string, object> todoState = NewState();
             todoState["tasks"] = new List<object>{new Dictionary<string, object>{{"id", "task-1"},{"title", "portable task"}}};
             JsonUtil.SaveAtomic(StatePath, todoState);
@@ -649,13 +679,14 @@ internal static partial class TodoApp
             File.Delete(CalDavSecret);
             File.Delete(UiScalePath);
             File.Delete(WindowUiScalePath);
+            File.Delete(UiThemePath);
             File.Delete(StatePath);
             File.Delete(CalendarStatePath);
             ApplyBackupPayload(reopened, true, true);
             if (JsonUtil.String(JsonUtil.ReadDpapiJson(PaperSyncSecret), "Version", "") != "2") return 66;
             if (JsonUtil.String(JsonUtil.ReadDpapiJson(TranslationSecret), "SecretKey", "") != "key") return 67;
             if (JsonUtil.String(JsonUtil.ReadDpapiJson(CalDavSecret), "Password", "") != "pass") return 68;
-            if (ReadBackupUiScale() != "0.90" || ReadBackupWindowUiScale() != "1.10") return 74;
+            if (ReadBackupUiScale() != "0.90" || ReadBackupWindowUiScale() != "1.10" || ReadBackupUiTheme() != UiTheme.Acrylic) return 74;
             if (JsonUtil.Array(JsonUtil.Get(JsonUtil.LoadObject(StatePath), "tasks")).Count != 1) return 69;
             if (JsonUtil.Array(JsonUtil.Get(JsonUtil.LoadObject(CalendarStatePath), "local_events")).Count != 1) return 70;
 

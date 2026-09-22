@@ -20,6 +20,7 @@ internal static partial class CalendarApp
     private static bool Render(Dictionary<string,object> cache, Dictionary<string,object> state)
     {
         RainmeterRenderScale = UiScale.TileCurrent;
+        UiTheme.WriteRainmeterTheme(AppDomain.CurrentDomain.BaseDirectory);
         DateTimeOffset now = DateTimeOffset.Now;
         DateTimeOffset start = new DateTimeOffset(now.Year, now.Month, now.Day, 0, 0, 0, now.Offset), end = start.AddDays(1);
         HashSet<string> hidden = new HashSet<string>(Conversions(state).Where(c => JsonUtil.Bool(c, "hide_event", true)).Select(c => S(c, "occurrence_key")));
@@ -47,7 +48,7 @@ internal static partial class CalendarApp
                 Meter(lines, "EventTime" + row, "Meter=String", "MeterStyle=StyleText", "X=30", "Y=" + (y + 11), "W=74", "H=22", "FontSize=9", "FontWeight=600", "FontColor=" + color, "Text=" + time, action);
                 Meter(lines, "EventTitle" + row, "Meter=String", "MeterStyle=StyleText", "X=114", "Y=" + (y + 9), "W=374", "H=22", "FontColor=" + color, "Text=" + title, action);
                 if (S(e, "location") != "") Meter(lines, "EventLocation" + row, "Meter=String", "MeterStyle=StyleText", "X=114", "Y=" + (y + 30), "W=374", "H=18", "FontSize=9", "FontColor=#MutedColor#", "Text=" + RuntimeUtil.CleanRainmeter(S(e, "location")), action);
-                if (row < events.Count) Meter(lines, "EventDivider" + row, "Meter=Shape", "X=114", "Y=" + (y + rowHeight - 1), "Shape=Rectangle 0,0,374,1 | Fill Color 202,218,232,170 | StrokeWidth 0");
+                if (row < events.Count) Meter(lines, "EventDivider" + row, "Meter=Shape", "X=114", "Y=" + (y + rowHeight - 1), "Shape=Rectangle 0,0,374,1 | Fill Color #DividerColor# | StrokeWidth 0");
                 y += rowHeight;
             }
         }
@@ -59,7 +60,7 @@ internal static partial class CalendarApp
         List<string> output = new List<string>();
         Meter(output, "StyleText", "Meter=String", "FontFace=#FontFace#", "FontSize=11", "FontColor=#TextColor#", "AntiAlias=1", "ClipString=1", "DynamicVariables=1");
         Meter(output, "Panel", "Meter=Shape", "X=0", "Y=0", "Shape=Rectangle 1,1,518," + (y - 1) + ",18 | Fill Color #PanelColor# | Stroke Color #BorderColor# | StrokeWidth 1");
-        Meter(output, "PanelHighlight", "Meter=Shape", "X=18", "Y=1", "Shape=Rectangle 0,0,482,1 | Fill Color 255,255,255,180 | StrokeWidth 0");
+        Meter(output, "PanelHighlight", "Meter=Shape", "X=18", "Y=1", "Shape=Rectangle 0,0,482,1 | Fill Color #PanelHighlightColor# | StrokeWidth 0");
         output.AddRange(lines);
         AppendCalendarChrome(output);
         return RuntimeUtil.WriteUtf16IfChanged(IncludePath, String.Join("\r\n", output) + "\r\n");

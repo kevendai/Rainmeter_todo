@@ -19,6 +19,7 @@ internal static partial class TodoApp
     private static bool Render(Dictionary<string, object> state)
     {
         RainmeterRenderScale = UiScale.TileCurrent;
+        UiTheme.WriteRainmeterTheme(ResourceDir);
         DateTimeOffset now = DateTimeOffset.Now;
         List<Dictionary<string, object>> tasks = Tasks(state);
         List<Dictionary<string, object>> pending = tasks.Where(t => !B(t, "completed") && (!RuntimeUtil.Date(t, "available_from").HasValue || now >= RuntimeUtil.Date(t, "available_from").Value))
@@ -67,7 +68,7 @@ internal static partial class TodoApp
                 if (!String.IsNullOrEmpty(time)) Meter(lines, "PendingTime" + row, "Meter=String", "MeterStyle=StyleText", "X=60", "Y=" + (y + 30), "W=352", "H=18", "FontSize=9", "FontColor=" + (overdue ? "#DangerColor#" : "#MutedColor#"), "Text=" + time, Action("Open", S(task, "id")));
                 Meter(lines, "PendingEdit" + row, "Meter=String", "X=443", "Y=" + (y + (rowHeight / 2)), "Padding=10,10,10,10", "FontFace=" + LightUi.IconFontName, "FontSize=10", "FontColor=#SubtleColor#", "StringAlign=CenterCenter", "AntiAlias=1", "Text=\xE70F", "MouseOverAction=[!SetOption PendingEdit" + row + " FontColor \"#AccentColor#\"][!UpdateMeter PendingEdit" + row + "][!Redraw]", "MouseLeaveAction=[!SetOption PendingEdit" + row + " FontColor \"#SubtleColor#\"][!UpdateMeter PendingEdit" + row + "][!Redraw]", Action("Edit", S(task, "id")), "ToolTipText=修改");
                 Meter(lines, "PendingDelete" + row, "Meter=String", "X=479", "Y=" + (y + (rowHeight / 2)), "Padding=10,10,10,10", "FontFace=" + LightUi.IconFontName, "FontSize=10", "FontColor=#SubtleColor#", "StringAlign=CenterCenter", "AntiAlias=1", "Text=\xE74D", "MouseOverAction=[!SetOption PendingDelete" + row + " FontColor \"#DangerColor#\"][!UpdateMeter PendingDelete" + row + "][!Redraw]", "MouseLeaveAction=[!SetOption PendingDelete" + row + " FontColor \"#SubtleColor#\"][!UpdateMeter PendingDelete" + row + "][!Redraw]", Action("Delete", S(task, "id")), "ToolTipText=删除");
-                if (row < pending.Count) Meter(lines, "PendingDivider" + row, "Meter=Shape", "X=60", "Y=" + (y + rowHeight - 1), "Shape=Rectangle 0,0,428,1 | Fill Color 202,218,232,170 | StrokeWidth 0");
+                if (row < pending.Count) Meter(lines, "PendingDivider" + row, "Meter=Shape", "X=60", "Y=" + (y + rowHeight - 1), "Shape=Rectangle 0,0,428,1 | Fill Color #DividerColor# | StrokeWidth 0");
                 y += rowHeight;
             }
         }
@@ -102,7 +103,7 @@ internal static partial class TodoApp
         List<string> output = new List<string>();
         Meter(output, "StyleText", "Meter=String", "FontFace=#FontFace#", "FontSize=11", "FontColor=#TextColor#", "AntiAlias=1", "ClipString=1", "DynamicVariables=1");
         Meter(output, "Panel", "Meter=Shape", "X=0", "Y=0", "Shape=Rectangle 1,1,518," + (y - 1) + ",18 | Fill Color #PanelColor# | Stroke Color #BorderColor# | StrokeWidth 1");
-        Meter(output, "PanelHighlight", "Meter=Shape", "X=18", "Y=1", "Shape=Rectangle 0,0,482,1 | Fill Color 255,255,255,180 | StrokeWidth 0");
+        Meter(output, "PanelHighlight", "Meter=Shape", "X=18", "Y=1", "Shape=Rectangle 0,0,482,1 | Fill Color #PanelHighlightColor# | StrokeWidth 0");
         output.AddRange(lines);
         AppendChrome(output);
         return RuntimeUtil.WriteUtf16IfChanged(IncludePath, String.Join("\r\n", output) + "\r\n");

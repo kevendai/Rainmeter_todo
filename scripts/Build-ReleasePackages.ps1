@@ -34,6 +34,7 @@ function Copy-Tree {
         'PluginValues.inc',
         'ui-scale.txt',
         'ui-window-scale.txt',
+        'ui-theme.txt',
         'tasks.json',
         'calendar-cache.json',
         'calendar-state.json',
@@ -63,6 +64,7 @@ function Remove-ReleaseSecrets {
         'caldav.secret',
         'ui-scale.txt',
         'ui-window-scale.txt',
+        'ui-theme.txt',
         'tasks.json',
         'calendar-cache.json',
         'calendar-state.json',
@@ -189,7 +191,7 @@ function New-RmskinPackage {
     $rmskinIni = @"
 [rmskin]
 Name=$DisplayName
-Author=Codex
+Author=Rainmeter Desktop Widgets
 Version=$Version
 LoadType=Skin
 Load=Todo\Todo.ini|Calendar\Calendar.ini
@@ -259,7 +261,7 @@ function New-Package {
         paper_features = $true
         paper_features_runtime_switch = $true
         plugin_api = 1
-        excludes = @('translation.secret','paper-sync.secret','caldav.secret','ui-scale.txt','ui-window-scale.txt','tasks.json','calendar-cache.json','calendar-state.json','PaperCache','PluginData','PluginLogs','PluginJobs')
+        excludes = @('translation.secret','paper-sync.secret','caldav.secret','ui-scale.txt','ui-window-scale.txt','ui-theme.txt','tasks.json','calendar-cache.json','calendar-state.json','PaperCache','PluginData','PluginLogs','PluginJobs')
     } | ConvertTo-Json -Depth 4
     Set-Content -LiteralPath (Join-Path $packageRoot 'manifest.json') -Value $manifest -Encoding UTF8
 

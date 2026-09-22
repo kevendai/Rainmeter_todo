@@ -75,7 +75,7 @@ internal static partial class TodoApp
 
     private sealed class PluginRow
     {
-        public string Title = "", Subtitle = "", Badge = "";
+        public string Title = "", Subtitle = "", Badge = "", Description = "", Category = "", Version = "", Glyph = "";
         public Color BadgeFore, BadgeBack;
         public bool Dimmed;
         public object Tag;
@@ -231,6 +231,94 @@ internal static partial class TodoApp
         private void RaiseSelectionChanged() { if (SelectionChanged != null) SelectionChanged(this, EventArgs.Empty); }
     }
 
+    // 插件市场使用独立的双列应用卡片，已安装页继续保留原有紧凑列表。
+    private sealed class PluginMarketControl : Control
+    {
+        private const int CardHeight = 140, CardGap = 10, OuterPad = 1;
+        public readonly List<PluginRow> AllRows = new List<PluginRow>();
+        public readonly List<PluginRow> Rows = new List<PluginRow>();
+        public int SelectedIndex = -1;
+        public string EmptyText = "暂无匹配插件";
+        public event EventHandler SelectionChanged;
+        public event EventHandler RowActivated;
+        private int hoverIndex = -1, scrollOffset = 0;
+        private string query = "", category = "全部";
+        private static readonly Font CardTitleFont = new Font("Microsoft YaHei UI", 10.5F, FontStyle.Bold);
+        private static readonly Font CardTextFont = new Font("Microsoft YaHei UI", 8.5F);
+        private static readonly Font CardMetaFont = new Font("Microsoft YaHei UI", 8F);
+        private static readonly Font CardIconFont = new Font(LightUi.IconFontName, 17F);
+
+        public PluginMarketControl()
+        {
+            SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer | ControlStyles.UserPaint | ControlStyles.ResizeRedraw | ControlStyles.SupportsTransparentBackColor | ControlStyles.Selectable, true);
+            BackColor = Color.Transparent; TabStop = true;
+        }
+
+        public PluginRow SelectedRow { get { return SelectedIndex >= 0 && SelectedIndex < Rows.Count ? Rows[SelectedIndex] : null; } }
+        private float ViewScale { get { float s = UiScale.For(this); return s > 0.01F ? s : 1F; } }
+        private int DesignWidth { get { return (int)Math.Ceiling(Width / ViewScale); } }
+        private int DesignHeight { get { return (int)Math.Ceiling(Height / ViewScale); } }
+        private int Columns { get { return DesignWidth >= 520 ? 2 : 1; } }
+        private int RowCount { get { return Rows.Count == 0 ? 0 : (Rows.Count + Columns - 1) / Columns; } }
+        private int ContentHeight { get { return RowCount == 0 ? 0 : RowCount * (CardHeight + CardGap) + CardGap; } }
+        private int MaxScroll { get { return Math.Max(0, ContentHeight - DesignHeight); } }
+        private bool Scrollable { get { return ContentHeight > DesignHeight; } }
+
+        public void SetRows(IEnumerable<PluginRow> rows) { AllRows.Clear(); AllRows.AddRange(rows); ApplyFilter(query, category); }
+        public void ApplyFilter(string searchText, string selectedCategory)
+        {
+            PluginRow previous = SelectedRow; query = (searchText ?? "").Trim(); category = String.IsNullOrWhiteSpace(selectedCategory) ? "全部" : selectedCategory; Rows.Clear();
+            foreach (PluginRow row in AllRows)
+            {
+                bool categoryMatch = category == "全部" || String.Equals(row.Category, category, StringComparison.OrdinalIgnoreCase);
+                string haystack = row.Title + " " + row.Description + " " + row.Subtitle + " " + row.Category;
+                if (categoryMatch && (query == "" || haystack.IndexOf(query, StringComparison.OrdinalIgnoreCase) >= 0)) Rows.Add(row);
+            }
+            SelectedIndex = previous == null ? -1 : Rows.IndexOf(previous); hoverIndex = -1; scrollOffset = 0; Invalidate(); RaiseSelectionChanged();
+        }
+
+        private Rectangle CardBounds(int index)
+        {
+            int columns = Columns, usable = DesignWidth - (Scrollable ? 10 : 0), cardWidth = (usable - CardGap * (columns - 1) - OuterPad * 2) / columns;
+            int column = index % columns, row = index / columns;
+            return new Rectangle(OuterPad + column * (cardWidth + CardGap), CardGap + row * (CardHeight + CardGap) - scrollOffset, cardWidth, CardHeight);
+        }
+        private int RowAt(int designX, int designY) { for (int i = 0; i < Rows.Count; i++) if (CardBounds(i).Contains(designX, designY)) return i; return -1; }
+        private void EnsureVisible(int index) { Rectangle bounds = CardBounds(index); if (bounds.Top < CardGap) scrollOffset = Math.Max(0, scrollOffset + bounds.Top - CardGap); else if (bounds.Bottom > DesignHeight - CardGap) scrollOffset = Math.Min(MaxScroll, scrollOffset + bounds.Bottom - DesignHeight + CardGap); }
+
+        protected override void OnPaint(PaintEventArgs e)
+        {
+            Graphics g = e.Graphics; g.SmoothingMode = SmoothingMode.AntiAlias; float scale = ViewScale; if (Math.Abs(scale - 1F) > 0.001F) g.ScaleTransform(scale, scale);
+            if (Rows.Count == 0) { TextRenderer.DrawText(g, EmptyText, PluginRowSubFont, new Rectangle(0, 0, DesignWidth, Math.Min(DesignHeight, 120)), LightUi.Muted, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter); return; }
+            for (int i = 0; i < Rows.Count; i++)
+            {
+                Rectangle bounds = CardBounds(i); if (bounds.Bottom < 0 || bounds.Top > DesignHeight) continue; PluginRow row = Rows[i]; bool selected = i == SelectedIndex, hover = i == hoverIndex;
+                Color fill = selected ? PluginSelectedBack : hover ? PluginHoverBack : Color.FromArgb(250, 252, 255), edge = selected ? LightUi.Accent : LightUi.Border;
+                using (GraphicsPath path = LightUi.RoundedPath(bounds, 12)) { using (SolidBrush brush = new SolidBrush(fill)) g.FillPath(brush, path); using (Pen pen = new Pen(edge, selected ? 1.8F : 1F)) g.DrawPath(pen, path); }
+                Rectangle icon = new Rectangle(bounds.Left + 14, bounds.Top + 14, 42, 42);
+                using (GraphicsPath iconPath = LightUi.RoundedPath(icon, 11)) using (SolidBrush iconBrush = new SolidBrush(selected ? Color.FromArgb(220, 237, 255) : Color.FromArgb(232, 244, 255))) g.FillPath(iconBrush, iconPath);
+                TextRenderer.DrawText(g, row.Glyph, CardIconFont, icon, LightUi.Accent, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
+                TextRenderer.DrawText(g, row.Title, CardTitleFont, new Rectangle(bounds.Left + 66, bounds.Top + 12, bounds.Width - 80, 24), row.Dimmed ? LightUi.Muted : LightUi.Text, TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis);
+                TextRenderer.DrawText(g, "v" + row.Version + "  ·  " + row.Category, CardMetaFont, new Rectangle(bounds.Left + 66, bounds.Top + 37, bounds.Width - 80, 18), LightUi.Muted, TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis);
+                TextRenderer.DrawText(g, row.Description, CardTextFont, new Rectangle(bounds.Left + 14, bounds.Top + 66, bounds.Width - 28, 38), LightUi.Muted, TextFormatFlags.Left | TextFormatFlags.Top | TextFormatFlags.WordBreak | TextFormatFlags.EndEllipsis);
+                if (row.Badge != "")
+                {
+                    Size size = TextRenderer.MeasureText(g, row.Badge, PluginBadgeFont, new Size(Int32.MaxValue, Int32.MaxValue), TextFormatFlags.NoPadding); int chipWidth = Math.Min(bounds.Width - 28, size.Width + 18); Rectangle chip = new Rectangle(bounds.Right - chipWidth - 14, bounds.Bottom - 28, chipWidth, 20);
+                    using (GraphicsPath chipPath = LightUi.RoundedPath(chip, 10)) using (SolidBrush chipBrush = new SolidBrush(row.BadgeBack)) g.FillPath(chipBrush, chipPath);
+                    TextRenderer.DrawText(g, row.Badge, PluginBadgeFont, chip, row.BadgeFore, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding | TextFormatFlags.EndEllipsis);
+                }
+            }
+            if (Scrollable) { int trackHeight = DesignHeight - 8, thumbHeight = Math.Max(32, (int)((double)DesignHeight / ContentHeight * trackHeight)); int thumbTop = 4 + (MaxScroll == 0 ? 0 : (int)((double)scrollOffset / MaxScroll * (trackHeight - thumbHeight))); using (GraphicsPath thumbPath = LightUi.RoundedPath(new Rectangle(DesignWidth - 6, thumbTop, 4, thumbHeight), 2)) using (SolidBrush thumbBrush = new SolidBrush(Color.FromArgb(140, 140, 155, 175))) g.FillPath(thumbBrush, thumbPath); }
+        }
+        protected override void OnMouseMove(MouseEventArgs e) { base.OnMouseMove(e); int index = RowAt((int)(e.X / ViewScale), (int)(e.Y / ViewScale)); if (index != hoverIndex) { hoverIndex = index; Invalidate(); } Cursor = index >= 0 ? Cursors.Hand : Cursors.Default; }
+        protected override void OnMouseLeave(EventArgs e) { base.OnMouseLeave(e); if (hoverIndex != -1) { hoverIndex = -1; Invalidate(); } }
+        protected override void OnMouseDown(MouseEventArgs e) { base.OnMouseDown(e); Focus(); int index = RowAt((int)(e.X / ViewScale), (int)(e.Y / ViewScale)); if (index != SelectedIndex) { SelectedIndex = index; Invalidate(); RaiseSelectionChanged(); } }
+        protected override void OnMouseDoubleClick(MouseEventArgs e) { base.OnMouseDoubleClick(e); if (RowAt((int)(e.X / ViewScale), (int)(e.Y / ViewScale)) >= 0 && RowActivated != null) RowActivated(this, EventArgs.Empty); }
+        protected override void OnMouseWheel(MouseEventArgs e) { base.OnMouseWheel(e); if (!Scrollable) return; scrollOffset = Math.Max(0, Math.Min(MaxScroll, scrollOffset - Math.Sign(e.Delta) * (CardHeight + CardGap))); Invalidate(); }
+        protected override bool IsInputKey(Keys keyData) { if (keyData == Keys.Up || keyData == Keys.Down || keyData == Keys.Left || keyData == Keys.Right) return true; return base.IsInputKey(keyData); }
+        protected override void OnKeyDown(KeyEventArgs e) { base.OnKeyDown(e); if (Rows.Count == 0) return; int next = SelectedIndex < 0 ? 0 : SelectedIndex; if (e.KeyCode == Keys.Right) next++; else if (e.KeyCode == Keys.Left) next--; else if (e.KeyCode == Keys.Down) next += Columns; else if (e.KeyCode == Keys.Up) next -= Columns; else return; next = Math.Max(0, Math.Min(Rows.Count - 1, next)); if (next != SelectedIndex) { SelectedIndex = next; EnsureVisible(next); Invalidate(); RaiseSelectionChanged(); } }
+        private void RaiseSelectionChanged() { if (SelectionChanged != null) SelectionChanged(this, EventArgs.Empty); }
+    }
     // 侧边栏导航项：图标 + 文本，选中高亮 + Accent 竖条，支持鼠标与键盘（Enter/Space）。
     private sealed class SettingsNavItem : Control
     {
@@ -348,19 +436,23 @@ internal static partial class TodoApp
         local.Click+=delegate{try{InstallLocalPlugin(form);reload();}catch(Exception ex){LightUi.Error(ex.Message);}};
 
         Panel marketPage=newPage("插件市场");
-        PluginListControl marketList=new PluginListControl{Left=28,Top=92,Width=654,Height=400,EmptyText="本地市场暂无可用插件。点击「刷新市场」从远端更新。"};
-        Label marketStatus=LightUi.Label("正在读取本地市场",28,552,654);
-        Button refresh=LightUi.PrimaryButton("刷新市场",28,506,120,DialogResult.None);
-        Button installMarket=LightUi.Button("安装 / 更新",156,506,120,DialogResult.None);
-        marketPage.Controls.Add(marketList);marketPage.Controls.Add(marketStatus);
-        marketPage.Controls.AddRange(new Control[]{refresh,installMarket});
+        TextBox marketSearch=new TextBox{Left=28,Top=88,Width=386,Height=32,AutoSize=false,BorderStyle=BorderStyle.FixedSingle,Font=PluginNavFont,BackColor=Color.White,ForeColor=LightUi.Text};
+        Label searchHint=LightUi.Label("搜索插件",40,96,180);searchHint.BackColor=Color.White;searchHint.ForeColor=LightUi.Muted;searchHint.Cursor=Cursors.IBeam;
+        ComboBox marketCategory=new ComboBox{Left=428,Top=88,Width=146,DropDownStyle=ComboBoxStyle.DropDownList,Font=PluginNavFont};marketCategory.Items.AddRange(new object[]{"全部","内容","服务","工具","其他"});marketCategory.SelectedIndex=0;
+        Button refresh=LightUi.PrimaryButton("刷新市场",586,86,96,DialogResult.None);refresh.Height=34;
+        PluginMarketControl marketList=new PluginMarketControl{Left=28,Top=130,Width=654,Height=354,EmptyText="本地市场暂无匹配插件。点击「刷新市场」可从远端更新。"};
+        Label marketStatus=LightUi.Label("正在读取本地市场",28,542,654);
+        Button installMarket=LightUi.PrimaryButton("安装 / 更新",28,496,120,DialogResult.None);
+        LightUi.SetCue(marketSearch,"搜索插件");
+        marketPage.Controls.AddRange(new Control[]{marketSearch,marketCategory,refresh,marketList,marketStatus,installMarket});
         installMarket.Enabled=false;
+        Action applyMarketFilter=delegate{marketList.ApplyFilter(marketSearch.Text,Convert.ToString(marketCategory.SelectedItem));searchHint.Visible=marketSearch.TextLength==0&&!marketSearch.Focused;};
+        marketSearch.TextChanged+=delegate{applyMarketFilter();};marketSearch.Enter+=delegate{searchHint.Visible=false;};marketSearch.Leave+=delegate{searchHint.Visible=marketSearch.TextLength==0;};searchHint.Click+=delegate{marketSearch.Focus();};marketCategory.SelectedIndexChanged+=delegate{applyMarketFilter();};
         marketList.SelectionChanged+=delegate{string required;installMarket.Enabled=marketList.SelectedRow!=null&&MarketCompatible(marketList.SelectedRow.Tag as Dictionary<string,object>,out required);};
         marketList.RowActivated+=delegate{if(installMarket.Enabled)installMarket.PerformClick();};
         refresh.Click+=delegate{try{LoadMarket(marketList,marketStatus,true);}catch(Exception ex){marketStatus.Text="市场不可用："+ex.Message;marketStatus.ForeColor=LightUi.Danger;}};
         installMarket.Click+=delegate{try{PluginRow selectedMarket=marketList.SelectedRow;if(selectedMarket==null)throw new Exception("请先选择一个市场插件。");InstallMarketPlugin(selectedMarket);reload();LoadMarket(marketList,marketStatus,false);}catch(Exception ex){LightUi.Error(ex.Message);}};
-        try{LoadMarket(marketList,marketStatus,false);}catch(Exception ex){marketStatus.Text="本地市场不可用："+ex.Message;marketStatus.ForeColor=LightUi.Danger;}
-        Panel appearancePage=newPage("外观与备份");
+        try{LoadMarket(marketList,marketStatus,false);}catch(Exception ex){marketStatus.Text="本地市场不可用："+ex.Message;marketStatus.ForeColor=LightUi.Danger;}        Panel appearancePage=newPage("外观与备份");
         Panel scaleCard=SettingsCard(appearancePage,28,92,654,106);
         string[] labels={"自动","75%","80%","90%","100%","110%","125%"},values={"auto","0.75","0.80","0.90","1.00","1.10","1.25"};
         Label scaleLabel=LightUi.Label("桌面磁贴缩放",16,14,220);scaleCard.Controls.Add(scaleLabel);
@@ -370,9 +462,16 @@ internal static partial class TodoApp
         Button apply=LightUi.PrimaryButton("应用缩放",488,38,130,DialogResult.None);scaleCard.Controls.Add(apply);
         apply.Click+=delegate{try{UiScale.SaveMode(values[scale.SelectedIndex]);UiScale.SaveWindowMode(values[windowScale.SelectedIndex]);RenderUiScaleSkins();MessageBox.Show("磁贴缩放已应用；窗口缩放将在下次打开窗口时生效。","缩放设置");}catch(Exception ex){LightUi.Error(ex.Message);}};
 
-        Panel backupCard=SettingsCard(appearancePage,28,214,654,150);
-        Label backupTitle=new Label{Text="加密用户配置备份",Left=16,Top=14,Width=400,Height=22,ForeColor=LightUi.Text,BackColor=Color.Transparent,Font=PluginNavFont};backupCard.Controls.Add(backupTitle);
+        Panel themeCard=SettingsCard(appearancePage,28,214,654,94);
+        Label themeLabel=LightUi.Label("磁贴视觉风格",16,14,180);themeCard.Controls.Add(themeLabel);
+        string[] themeLabels={"经典（保留原版）","云母","亚克力"},themeValues={UiTheme.Classic,UiTheme.Mica,UiTheme.Acrylic};
+        ComboBox theme=new ComboBox{Left=16,Top=40,Width=220,DropDownStyle=ComboBoxStyle.DropDownList,Font=PluginNavFont};theme.Items.AddRange(themeLabels);int themeSelected=Array.FindIndex(themeValues,x=>String.Equals(x,UiTheme.Current,StringComparison.OrdinalIgnoreCase));theme.SelectedIndex=themeSelected<0?0:themeSelected;themeCard.Controls.Add(theme);
+        Label themeHint=LightUi.Label("云母偏稳重，亚克力更通透；布局与操作保持不变。",252,17,254);themeHint.Height=44;themeCard.Controls.Add(themeHint);
+        Button applyTheme=LightUi.PrimaryButton("应用风格",520,38,98,DialogResult.None);themeCard.Controls.Add(applyTheme);
+        applyTheme.Click+=delegate{try{UiTheme.Save(themeValues[theme.SelectedIndex]);RenderUiScaleSkins();MessageBox.Show("已应用"+UiTheme.DisplayName(themeValues[theme.SelectedIndex])+"风格。","外观设置");}catch(Exception ex){LightUi.Error(ex.Message);}};
 
+        Panel backupCard=SettingsCard(appearancePage,28,324,654,150);
+        Label backupTitle=new Label{Text="加密用户配置备份",Left=16,Top=14,Width=400,Height=22,ForeColor=LightUi.Text,BackColor=Color.Transparent,Font=PluginNavFont};backupCard.Controls.Add(backupTitle);
         Button export=LightUi.PrimaryButton("导出用户配置",16,84,150,DialogResult.None),import=LightUi.Button("导入用户配置",178,84,150,DialogResult.None);
         backupCard.Controls.AddRange(new Control[]{export,import});
         export.Click+=delegate{try{string path=ExportUserBackupInteractive();if(path!="")MessageBox.Show("备份已保存：\r\n"+path,"导出完成",MessageBoxButtons.OK,MessageBoxIcon.Information);}catch(Exception ex){LightUi.Error(ex.Message);}};
@@ -727,7 +826,7 @@ internal static partial class TodoApp
         EnableTls12();string temporary=Path.Combine(Path.GetTempPath(),"rw-market-"+Guid.NewGuid().ToString("N")+".rwplugin");try{using(WebClient web=new WebClient()){web.Headers[HttpRequestHeader.UserAgent]="RainmeterDesktopWidgets/"+AppVersion;web.DownloadFile(uri,temporary);}RunPluginInstaller(temporary,sha);}finally{try{File.Delete(temporary);}catch{}}
     }
 
-    private static void LoadMarket(PluginListControl view,Label status,bool refreshRemote)
+    private static void LoadMarket(PluginMarketControl view,Label status,bool refreshRemote)
     {
         string bundledPath=Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"plugin-registry-v1.json");
         Exception refreshError=null;
@@ -747,23 +846,42 @@ internal static partial class TodoApp
         }
         string sourcePath,sourceLabel;
         string json=PluginMarketCache.LoadLocal(PluginPaths.RegistryCache,bundledPath,out sourcePath,out sourceLabel);
-        Dictionary<string,object> index=JsonUtil.Object(JsonUtil.Deserialize(json));view.Rows.Clear();
+        Dictionary<string,object> index=JsonUtil.Object(JsonUtil.Deserialize(json));List<PluginRow> marketRows=new List<PluginRow>();
         foreach(object raw in JsonUtil.Array(JsonUtil.Get(index,"plugins")))
         {
             Dictionary<string,object> p=JsonUtil.Object(raw);if(!JsonUtil.Bool(p,"official",false))continue;
             string id=JsonUtil.String(p,"id","");if(id=="io.github.kevendai.network-ip")continue;string required;bool compatible=MarketCompatible(p,out required),installedPlugin=Directory.Exists(PluginPaths.PluginRoot(id));
             PluginRow row=new PluginRow();row.Title=PluginNames.Display(id,JsonUtil.String(p,"name",id));row.Tag=p;
             string permissions=JsonUtil.String(p,"permissions",""),description=JsonUtil.String(p,"description","");
-            row.Subtitle="v"+JsonUtil.String(p,"version","")+(description==""?"":"  ·  "+description)+"  ·  "+JsonUtil.String(p,"capability","")+(permissions==""?"":"  ·  权限 "+permissions);
+            row.Version=JsonUtil.String(p,"version","");row.Description=MarketDescription(id,description);row.Category=MarketCategory(id,JsonUtil.String(p,"capability",""));row.Glyph=MarketGlyph(row.Category);row.Subtitle=JsonUtil.String(p,"capability","")+(permissions==""?"":"  ·  权限 "+permissions);
             if(!compatible){row.Badge="需要主程序 "+required;row.BadgeFore=LightUi.Muted;row.BadgeBack=PluginBadgeBackOff;row.Dimmed=true;}
             else if(installedPlugin){row.Badge="已安装";row.BadgeFore=PluginDoneGreen;row.BadgeBack=PluginBadgeBackOn;}
             else{row.Badge="可安装";row.BadgeFore=LightUi.Accent;row.BadgeBack=Color.FromArgb(232,244,255);}
-            view.Rows.Add(row);
+            marketRows.Add(row);
         }
-        view.AfterReload();
+        view.SetRows(marketRows);
         DateTime cacheTime=File.Exists(sourcePath)?File.GetLastWriteTime(sourcePath):DateTime.Now;
         status.ForeColor=refreshError==null?LightUi.Muted:LightUi.Danger;
         status.Text=(refreshError==null?(refreshRemote?"已从远端更新；":""):"远端刷新失败，")+sourceLabel+"索引时间 "+cacheTime.ToString("yyyy-MM-dd HH:mm")+(refreshError==null?"":"；"+refreshError.Message);
     }
+    private static string MarketDescription(string id,string fallback)
+    {
+        if(id=="io.github.kevendai.arxiv")return "按关键词抓取并筛选 arXiv 论文，生成每日推荐。";
+        if(id=="io.github.kevendai.calendar-to-todo")return "把日程按规则转换为待办，保留来源与时间信息。";
+        if(id=="io.github.kevendai.paper-snapshot-sync")return "把论文推荐快照同步到文件服务器，支持多台设备共享。";
+        if(id=="io.github.kevendai.ai-deepseek")return "提供 DeepSeek AI 评分服务，供论文等插件生成结构化结果。";
+        if(id=="io.github.kevendai.translate-tencent")return "提供腾讯云机器翻译服务，支持其他插件批量翻译文本。";
+        if(id=="io.github.kevendai.ssdp-server-ip")return "自动发现服务器 IP，同时保留用户手动设置的端口。";
+        return String.IsNullOrWhiteSpace(fallback)?"提供扩展功能与桌面联动。":fallback;
+    }
+    private static string MarketCategory(string id,string capability)
+    {
+        string value=(id+" "+capability).ToLowerInvariant();
+        if(value.Contains("arxiv")||value.Contains("calendar")||value.Contains("todo_source"))return "内容";
+        if(value.Contains("ai")||value.Contains("translate")||value.Contains("snapshot")||value.Contains("service"))return "服务";
+        if(value.Contains("ssdp")||value.Contains("network")||value.Contains("value_provider"))return "工具";
+        return "其他";
+    }
+    private static string MarketGlyph(string category){return category=="内容"?"\xE8A5":category=="服务"?"\xE950":category=="工具"?"\xE713":"\xE719";}
     private static bool MarketCompatible(Dictionary<string,object> record,out string required){required=record==null?"":JsonUtil.String(record,"min_host_version","");Version host,min;return Version.TryParse(AppVersion,out host)&&Version.TryParse(required,out min)&&host.CompareTo(min)>=0;}
 }

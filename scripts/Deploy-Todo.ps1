@@ -25,7 +25,7 @@ $preservedHashes = @{}
 try {
     New-Item -ItemType Directory -Path $stage -Force | Out-Null
     Copy-Item -Path (Join-Path $source '*') -Destination $stage -Recurse -Force
-    foreach ($name in @('tasks.json','ui-scale.txt','ui-window-scale.txt','caldav.secret','translation.secret','paper-sync.secret')) {
+    foreach ($name in @('tasks.json','ui-scale.txt','ui-window-scale.txt','ui-theme.txt','caldav.secret','translation.secret','paper-sync.secret')) {
         $current = Join-Path $target ('@Resources\' + $name)
         if (Test-Path -LiteralPath $current) { $preservedHashes[$name] = (Get-FileHash -LiteralPath $current -Algorithm SHA256).Hash; $destination = Join-Path $stage ('@Resources\' + $name); New-Item -ItemType Directory -Path (Split-Path $destination -Parent) -Force | Out-Null; Copy-Item -LiteralPath $current -Destination $destination -Force }
     }

@@ -336,7 +336,7 @@ namespace RainmeterUpdater
             }
         }
 
-        private static readonly string[] Preserve = { "tasks.json", "Generated.inc", "PluginValues.inc", "ui-scale.txt", "ui-window-scale.txt", "calendar-cache.json", "calendar-state.json", "caldav.secret", "translation.secret", "paper-sync.secret" };
+        private static readonly string[] Preserve = { "tasks.json", "Generated.inc", "PluginValues.inc", "ui-scale.txt", "ui-window-scale.txt", "ui-theme.txt", "calendar-cache.json", "calendar-state.json", "caldav.secret", "translation.secret", "paper-sync.secret" };
         private static IEnumerable<string> PreservedNames() { return Preserve; }
 
         private sealed class Package { public bool RequiresPluginHost; public List<string> PluginIds = new List<string>(); }

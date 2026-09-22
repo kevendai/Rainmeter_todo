@@ -1,0 +1,19 @@
+; Generated default. The host rewrites this file when the visual style changes.
+[Variables]
+ThemeMode=classic
+TextColor=21,32,48,255
+MutedColor=92,108,130,255
+AccentColor=25,108,212,255
+DoneColor=20,118,66,255
+OngoingColor=20,118,66,255
+DangerColor=198,52,60,255
+ConflictColor=198,52,60,255
+BorderColor=198,216,232,210
+SubtleColor=75,91,113,255
+AccentFill=32,112,214,255
+PanelColor=239,248,255,248
+CardColor=247,251,255,242
+DoneCardColor=239,249,244,238
+PanelHighlightColor=255,255,255,180
+DividerColor=202,218,232,170
+ThemeBlur=0

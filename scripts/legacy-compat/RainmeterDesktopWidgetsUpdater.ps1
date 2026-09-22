@@ -66,6 +66,7 @@ $PreservedResourceNames = @(
     'UiScale.inc',
     'ui-scale.txt',
     'ui-window-scale.txt',
+    'ui-theme.txt',
     'calendar-cache.json',
     'calendar-state.json',
     'caldav.secret',
