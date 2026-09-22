@@ -257,6 +257,10 @@ internal static class TodoLayoutProbe
                 Button local = Descendants(form).OfType<Button>().First(button => button.Text == "从本地安装");
                 DpiLayoutAssertions.AssertFitsAt200Percent(local, true, "Local plugin install button");
                 if (local.Parent == null || local.Bottom > local.Parent.ClientSize.Height) throw new Exception("Local install button is clipped");
+                Label installedTitle = local.Parent.Controls.OfType<Label>().First(label => label.Text == "已安装插件");
+                if (local.Bounds.IntersectsWith(installedTitle.Bounds)) throw new Exception("Local install button overlaps page title");
+                Label installedSubtitle = local.Parent.Controls.OfType<Label>().First(label => label.Text == "管理扩展、运行状态和插件数据。");
+                if (installedTitle.Bounds.IntersectsWith(installedSubtitle.Bounds)) throw new Exception("Page title overlaps subtitle");
                 timer.Stop();
                 form.Close();
             }

@@ -352,18 +352,21 @@ internal static partial class CalendarApp
         }
 
         WebBrowser browser = new WebBrowser { Left = left, Top = top, Width = size, Height = size, ScrollBarsEnabled = false, IsWebBrowserContextMenuEnabled = false, AllowWebBrowserDrop = false, WebBrowserShortcutsEnabled = false };
-        browser.DocumentText = "<html><head><meta http-equiv='X-UA-Compatible' content='IE=edge'></head><body style='margin:0;overflow:hidden;background:#eef5fc;'><img src='file:///" + path.Replace("\\", "/") + "' style='width:100%;height:100%;display:block;'/></body></html>";
+        browser.DocumentText = "<html><head><meta http-equiv='X-UA-Compatible' content='IE=edge'></head><body style='margin:0;overflow:hidden;background:" + (UiTheme.Current == UiTheme.Classic ? "#eef5fc" : "#2d2e36") + ";'><img src='file:///" + path.Replace("\\", "/") + "' style='width:100%;height:100%;display:block;'/></body></html>";
         host.Controls.Add(browser);
     }
 
     private static Panel RoundedPanel(int x, int y, int width, int height, Color fill, Color border, int radius)
     {
-        Panel panel = new Panel { Left = x, Top = y, Width = width, Height = height, BackColor = fill };
+        bool dark = UiTheme.Current != UiTheme.Classic;
+        Color cardFill = dark && fill.GetBrightness() > 0.7F ? (fill.GetBrightness() > 0.96F ? LightUi.Panel : LightUi.Surface) : fill;
+        Color cardBorder = dark && border.GetBrightness() > 0.7F ? LightUi.Border : border;
+        Panel panel = new Panel { Left = x, Top = y, Width = width, Height = height, BackColor = cardFill };
         LightUi.Round(panel, radius);
         panel.Paint += delegate(object sender, PaintEventArgs e) {
             e.Graphics.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
             float scaledRadius = radius * UiScale.For(panel);
-            using (Pen pen = new Pen(border, 1F))
+            using (Pen pen = new Pen(cardBorder, 1F))
                 DrawRound(e.Graphics, pen, 0, 0, panel.Width - 1, panel.Height - 1, scaledRadius);
         };
         return panel;
@@ -589,9 +592,9 @@ internal static partial class CalendarApp
         AddHeaderSvgIcon(headerIcon, "calendar.svg", "calendar", 7, 7, 28);
         Label title = new Label { Text = "日程管理", Left = 90, Top = 24, Width = 220, Height = 38, BackColor = Color.Transparent, ForeColor = LightUi.Text, Font = LightUi.UiFont( 18F, System.Drawing.FontStyle.Bold) };
         Label subtitle = new Label { Text = "查看、编辑和同步你的本地日历与 CalDAV 日历。", Left = 92, Top = 70, Width = 520, Height = 22, BackColor = Color.Transparent, ForeColor = LightUi.Muted, Font = LightUi.UiFont( 9.5F) };
-        Panel searchBox = RoundedPanel(760, 30, 300, 42, Color.FromArgb(252,254,255), Color.FromArgb(220,230,241), 13);
+        Panel searchBox = RoundedPanel(760, 30, 300, 42, LightUi.Panel, LightUi.Border, 13);
         Label searchIcon = new Label { Text = "\xE721", Left = 14, Top = 10, Width = 22, Height = 22, BackColor = Color.Transparent, ForeColor = LightUi.Muted, Font = LightUi.IconFont(10F), TextAlign = ContentAlignment.MiddleCenter };
-        TextBox search = new TextBox { Left = 44, Top = 10, Width = 238, Height = 22, BorderStyle = BorderStyle.None, BackColor = Color.FromArgb(252,254,255), ForeColor = LightUi.Text, Font = LightUi.UiFont( 10F) };
+        TextBox search = new TextBox { Left = 44, Top = 10, Width = 238, Height = 22, BorderStyle = BorderStyle.None, BackColor = LightUi.Panel, ForeColor = LightUi.Text, Font = LightUi.UiFont( 10F) };
         searchBox.Controls.Add(searchIcon); searchBox.Controls.Add(search);
         Button close = LightUi.CloseButton(f);
         f.Controls.AddRange(new Control[] { headerIcon, title, subtitle, searchBox, close });
@@ -633,13 +636,13 @@ internal static partial class CalendarApp
         settings.TextAlign = sync.TextAlign = add.TextAlign = ContentAlignment.MiddleCenter;
         Action<Button> paintFooterButton = delegate(Button b) {
             b.UseVisualStyleBackColor = false;
-            b.BackColor = Color.FromArgb(235,245,253);
+            b.BackColor = LightUi.Surface;
             b.ForeColor = LightUi.Accent;
-            b.FlatAppearance.MouseOverBackColor = Color.FromArgb(221,237,255);
-            b.FlatAppearance.MouseDownBackColor = Color.FromArgb(205,224,241);
-            b.FlatAppearance.BorderColor = Color.FromArgb(205,224,241);
-            b.MouseEnter += delegate { if(b.Enabled)b.BackColor=Color.FromArgb(221,237,255); };
-            b.MouseLeave += delegate { b.BackColor=Color.FromArgb(235,245,253); };
+            b.FlatAppearance.MouseOverBackColor = LightUi.Selected;
+            b.FlatAppearance.MouseDownBackColor = LightUi.Selected;
+            b.FlatAppearance.BorderColor = LightUi.Border;
+            b.MouseEnter += delegate { if(b.Enabled)b.BackColor=LightUi.Selected; };
+            b.MouseLeave += delegate { b.BackColor=LightUi.Surface; };
         };
         paintFooterButton(settings); paintFooterButton(sync);
         footer.Controls.AddRange(new Control[] { settings, sync, add }); f.Controls.Add(footer);
@@ -647,11 +650,11 @@ internal static partial class CalendarApp
             Button[] tabs = new[]{todayTab,weekTab,allTimeTab};
             for(int i=0;i<tabs.Length;i++){
                 bool active = i == timeMode;
-                tabs[i].BackColor = active ? Color.FromArgb(252,254,255) : Color.FromArgb(235,245,253);
+                tabs[i].BackColor = active ? LightUi.Panel : LightUi.Surface;
                 tabs[i].ForeColor = active ? LightUi.Accent : LightUi.Muted;
                 tabs[i].UseVisualStyleBackColor = false;
-                tabs[i].FlatAppearance.MouseOverBackColor = active ? Color.FromArgb(252,254,255) : Color.FromArgb(226,239,250);
-                tabs[i].FlatAppearance.MouseDownBackColor = active ? Color.FromArgb(252,254,255) : Color.FromArgb(214,231,247);
+                tabs[i].FlatAppearance.MouseOverBackColor = active ? LightUi.Panel : LightUi.Selected;
+                tabs[i].FlatAppearance.MouseDownBackColor = active ? LightUi.Panel : LightUi.Selected;
             }
         };
         foreach(Button tab in new[]{todayTab,weekTab,allTimeTab}){tab.MouseEnter+=delegate{paintTimeTabs();};tab.MouseLeave+=delegate{paintTimeTabs();};}
@@ -670,12 +673,12 @@ internal static partial class CalendarApp
                 .Select(e=>S(e,"source")).Distinct().OrderBy(s=>s=="caldav"?0:1).ToList();
         };
         Action<Button,bool> paintFilter = delegate(Button b,bool active) {
-            Color back = active ? LightUi.AccentFill : Color.FromArgb(235,245,253);
+            Color back = active ? LightUi.AccentFill : LightUi.Surface;
             b.Tag = active;
             b.BackColor = back;
             b.ForeColor = active ? Color.White : LightUi.Text;
             b.FlatAppearance.MouseOverBackColor = back;
-            b.FlatAppearance.MouseDownBackColor = active ? Color.FromArgb(38,118,222) : Color.FromArgb(218,236,251);
+            b.FlatAppearance.MouseDownBackColor = active ? LightUi.AccentFill : LightUi.Selected;
             b.Text=(active?"✓  ":"   ")+Regex.Replace(b.Text,@"^[✓ ]+\s*","");
         };
         Action<Button> keepFilterHover = delegate(Button b) {

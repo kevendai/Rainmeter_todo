@@ -793,17 +793,19 @@ namespace RainmeterBackend
 
     internal static class LightUi
     {
-        public static readonly Color Back = Color.FromArgb(230, 242, 252);
-        public static readonly Color Panel = Color.FromArgb(246, 251, 255);
-        public static readonly Color Surface = Color.FromArgb(238, 247, 254);
-        public static readonly Color Border = Color.FromArgb(198, 216, 232);
-        public static readonly Color Text = Color.FromArgb(21, 32, 48);
-        public static readonly Color Muted = Color.FromArgb(92, 108, 130);
-        public static readonly Color Accent = Color.FromArgb(25, 108, 212);
-        public static readonly Color AccentFill = Color.FromArgb(32, 112, 214);
-        public static readonly Color Danger = Color.FromArgb(198, 52, 60);
-        public static readonly Color Done = Color.FromArgb(20, 118, 66);
-        public static readonly Color Selected = Color.FromArgb(220, 238, 255);
+        private static bool Dark { get { return UiTheme.Current != UiTheme.Classic; } }
+        private static bool Acrylic { get { return UiTheme.Current == UiTheme.Acrylic; } }
+        public static Color Back { get { return Dark ? (Acrylic ? Color.FromArgb(24, 29, 42) : Color.FromArgb(31, 32, 38)) : Color.FromArgb(230, 242, 252); } }
+        public static Color Panel { get { return Dark ? (Acrylic ? Color.FromArgb(45, 53, 72) : Color.FromArgb(45, 46, 54)) : Color.FromArgb(246, 251, 255); } }
+        public static Color Surface { get { return Dark ? (Acrylic ? Color.FromArgb(37, 45, 63) : Color.FromArgb(38, 39, 46)) : Color.FromArgb(238, 247, 254); } }
+        public static Color Border { get { return Dark ? Color.FromArgb(79, 83, 96) : Color.FromArgb(198, 216, 232); } }
+        public static Color Text { get { return Dark ? Color.FromArgb(244, 244, 247) : Color.FromArgb(21, 32, 48); } }
+        public static Color Muted { get { return Dark ? Color.FromArgb(177, 181, 193) : Color.FromArgb(92, 108, 130); } }
+        public static Color Accent { get { return Dark ? Color.FromArgb(220, 76, 178) : Color.FromArgb(25, 108, 212); } }
+        public static Color AccentFill { get { return Dark ? Color.FromArgb(143, 55, 130) : Color.FromArgb(32, 112, 214); } }
+        public static Color Danger { get { return Dark ? Color.FromArgb(255, 126, 135) : Color.FromArgb(198, 52, 60); } }
+        public static Color Done { get { return Dark ? Color.FromArgb(106, 211, 151) : Color.FromArgb(20, 118, 66); } }
+        public static Color Selected { get { return Dark ? Color.FromArgb(76, 58, 86) : Color.FromArgb(220, 238, 255); } }
         public static readonly string IconFontName = HasFont("Segoe Fluent Icons") ? "Segoe Fluent Icons" : "Segoe MDL2 Assets";
 
         private static bool HasFont(string name)
@@ -872,6 +874,37 @@ namespace RainmeterBackend
         {
             if (control == null) return;
             SendMessage(control.Handle, 0x1501, new IntPtr(1), text ?? "");
+        }
+        private static void ApplyWindowPalette(Control root)
+        {
+            if (!Dark) return;
+            foreach (Control control in root.Controls)
+            {
+                if (control.BackColor.A > 0 && control.BackColor.GetBrightness() > 0.86F)
+                {
+                    if (control is TextBox || control is ComboBox || control is ListView || control is Button)
+                        control.BackColor = Panel;
+                    else if (control is Panel || control is FlowLayoutPanel || control is TabPage)
+                        control.BackColor = Surface;
+                }
+                if (control.ForeColor.GetBrightness() < 0.39F && control.ForeColor.R < 150 && control.ForeColor.G < 150)
+                    control.ForeColor = Text;
+                ComboBox combo = control as ComboBox;
+                if (combo != null)
+                {
+                    combo.FlatStyle = FlatStyle.Flat;
+                    combo.DrawMode = DrawMode.OwnerDrawFixed;
+                    combo.DrawItem += delegate(object sender, DrawItemEventArgs e) {
+                        Color fill = (e.State & DrawItemState.Selected) != 0 ? Selected : Panel;
+                        using (SolidBrush brush = new SolidBrush(fill)) e.Graphics.FillRectangle(brush, e.Bounds);
+                        if (e.Index >= 0 && e.Index < combo.Items.Count)
+                            TextRenderer.DrawText(e.Graphics, Convert.ToString(combo.Items[e.Index]), combo.Font, e.Bounds, Text,
+                                TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis);
+                        if ((e.State & DrawItemState.Focus) != 0) e.DrawFocusRectangle();
+                    };
+                }
+                ApplyWindowPalette(control);
+            }
         }
         public static void SetRedraw(Control control, bool enabled)
         {
@@ -944,7 +977,7 @@ namespace RainmeterBackend
             form.AutoScaleMode = AutoScaleMode.None;
             form.Padding = new Padding(1);
             form.Opacity = 0D;
-            form.Shown += delegate { UiScale.ApplyTo(form); };
+            form.Shown += delegate { ApplyWindowPalette(form); UiScale.ApplyTo(form); };
             form.Shown += delegate {
                 form.BeginInvoke(new Action(delegate {
                     if (form.IsDisposed) return;
@@ -961,8 +994,8 @@ namespace RainmeterBackend
                 Rectangle bounds = new Rectangle(0, 0, form.Width - 1, form.Height - 1);
                 int radius = Math.Max(1, (int)Math.Round(18F * UiScale.For(form)));
                 using (GraphicsPath path = RoundedPath(bounds, radius))
-                using (LinearGradientBrush brush = new LinearGradientBrush(bounds, Color.FromArgb(247, 252, 255), Color.FromArgb(226, 242, 253), LinearGradientMode.ForwardDiagonal))
-                using (Pen pen = new Pen(Color.FromArgb(235, 246, 255), 1F))
+                using (LinearGradientBrush brush = new LinearGradientBrush(bounds, Back, Acrylic ? Color.FromArgb(38, 46, 65) : Back, LinearGradientMode.ForwardDiagonal))
+                using (Pen pen = new Pen(Border, 1F))
                 {
                     e.Graphics.FillPath(brush, path);
                     e.Graphics.DrawPath(pen, path);
@@ -973,14 +1006,14 @@ namespace RainmeterBackend
 
         private static Control SvgIcon(string iconFile, int x, int y, int size)
         {
-            Panel box = new Panel { Left = x, Top = y, Width = size, Height = size, BackColor = Color.FromArgb(238, 245, 252) };
+            Panel box = new Panel { Left = x, Top = y, Width = size, Height = size, BackColor = Surface };
             Round(box, 10);
             string path = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "icons", iconFile ?? "");
             if (File.Exists(path))
             {
                 WebBrowser browser = new WebBrowser { Left = 7, Top = 7, Width = size - 14, Height = size - 14, ScrollBarsEnabled = false, IsWebBrowserContextMenuEnabled = false, AllowWebBrowserDrop = false, WebBrowserShortcutsEnabled = false };
                 browser.TabStop = false;
-                browser.DocumentText = "<html><head><meta http-equiv='X-UA-Compatible' content='IE=edge'></head><body style='margin:0;overflow:hidden;background:#eef5fc;'><img src='file:///" + path.Replace("\\", "/") + "' style='width:100%;height:100%;display:block;'/></body></html>";
+                browser.DocumentText = "<html><head><meta http-equiv='X-UA-Compatible' content='IE=edge'></head><body style='margin:0;overflow:hidden;background:transparent;'><img src='file:///" + path.Replace("\\", "/") + "' style='width:100%;height:100%;display:block;'/></body></html>";
                 box.Controls.Add(browser);
             }
             else
@@ -1007,7 +1040,7 @@ namespace RainmeterBackend
                 icon = new Label { Text = glyph, Left = 24, Top = 22, Width = 34, Height = 34, ForeColor = Color.White, BackColor = AccentFill, Font = iconFont, TextAlign = ContentAlignment.MiddleCenter };
                 Round(icon, 9);
             }
-            Label heading = new Label { Text = title, Left = 68, Top = 22, Width = form.ClientSize.Width - 140, Height = 32, ForeColor = Text, BackColor = Color.Transparent, Font = UiFont(15F, FontStyle.Bold) };
+            Label heading = new Label { Text = title, Left = 68, Top = 22, Width = form.ClientSize.Width - 140, Height = 38, ForeColor = Text, BackColor = Color.Transparent, Font = UiFont(16F, FontStyle.Bold) };
             Label sub = new Label { Text = subtitle, Left = 25, Top = 62, Width = form.ClientSize.Width - 50, Height = 22, ForeColor = Muted, BackColor = Color.Transparent, Font = UiFont(9F) };
             icon.MouseDown += delegate(object sender, MouseEventArgs e) { if (e.Button == MouseButtons.Left) BeginDrag(form); };
             heading.MouseDown += delegate(object sender, MouseEventArgs e) { if (e.Button == MouseButtons.Left) BeginDrag(form); };
@@ -1040,10 +1073,18 @@ namespace RainmeterBackend
         {
             Button button = new Button { Text = text, Left = x, Top = y, Width = width, Height = 38, DialogResult = result, FlatStyle = FlatStyle.Flat, BackColor = Panel, ForeColor = Text, Cursor = Cursors.Hand, Font = UiFont(9F) };
             button.FlatAppearance.BorderColor = Panel; button.FlatAppearance.BorderSize = 0;
-            button.FlatAppearance.MouseDownBackColor = Color.FromArgb(218, 236, 251);
-            button.FlatAppearance.MouseOverBackColor = Color.FromArgb(235, 246, 255);
-            button.MouseEnter += delegate { if (button.Enabled) button.BackColor = Color.FromArgb(235, 246, 255); };
+            button.FlatAppearance.MouseDownBackColor = Selected;
+            button.FlatAppearance.MouseOverBackColor = Surface;
+            button.MouseEnter += delegate { if (button.Enabled) button.BackColor = Surface; };
             button.MouseLeave += delegate { button.BackColor = Panel; };
+            button.Paint += delegate(object sender, PaintEventArgs e) {
+                if (button.Enabled || !Dark) return;
+                e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
+                using (GraphicsPath path = RoundedPath(new Rectangle(0, 0, button.Width - 1, button.Height - 1), Math.Max(1, (int)Math.Round(9F * UiScale.For(button)))))
+                using (SolidBrush brush = new SolidBrush(Surface)) e.Graphics.FillPath(brush, path);
+                TextRenderer.DrawText(e.Graphics, button.Text, button.Font, button.ClientRectangle, Muted,
+                    TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis);
+            };
             Round(button, 9);
             return button;
         }
@@ -1053,9 +1094,9 @@ namespace RainmeterBackend
             Button button = Button(text, x, y, width, result);
             button.BackColor = AccentFill; button.ForeColor = Color.White;
             button.FlatAppearance.BorderColor = AccentFill;
-            button.FlatAppearance.MouseOverBackColor = Color.FromArgb(38, 118, 222);
-            button.FlatAppearance.MouseDownBackColor = Color.FromArgb(25, 94, 185);
-            button.MouseEnter += delegate { if (button.Enabled) button.BackColor = Color.FromArgb(38, 118, 222); };
+            button.FlatAppearance.MouseOverBackColor = Dark ? Color.FromArgb(169, 70, 154) : Color.FromArgb(38, 118, 222);
+            button.FlatAppearance.MouseDownBackColor = Dark ? Color.FromArgb(117, 45, 106) : Color.FromArgb(25, 94, 185);
+            button.MouseEnter += delegate { if (button.Enabled) button.BackColor = Dark ? Color.FromArgb(169, 70, 154) : Color.FromArgb(38, 118, 222); };
             button.MouseLeave += delegate { button.BackColor = AccentFill; };
             return button;
         }
@@ -1081,14 +1122,14 @@ namespace RainmeterBackend
         {
             Button button = Button(text, x, y, width, result);
             button.ForeColor = Danger;
-            button.BackColor = Color.FromArgb(255, 246, 246);
+            button.BackColor = Dark ? Color.FromArgb(69, 44, 51) : Color.FromArgb(255, 246, 246);
             button.FlatAppearance.BorderColor = button.BackColor;
             return button;
         }
 
         public static void StyleList(ListView list)
         {
-            list.BackColor = Color.FromArgb(247, 251, 255); list.ForeColor = Text; list.BorderStyle = BorderStyle.FixedSingle;
+            list.BackColor = Panel; list.ForeColor = Text; list.BorderStyle = BorderStyle.FixedSingle;
             list.Font = UiFont(9F); list.FullRowSelect = true; list.HideSelection = false;
             list.HeaderStyle = ColumnHeaderStyle.Nonclickable; list.GridLines = true;
             Round(list, 10);

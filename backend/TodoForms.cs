@@ -291,10 +291,10 @@ internal static partial class TodoApp
         f.Controls.Add(onlyOpen);
         Button allTab = LightUi.Button("全部  0", 32, 118, 96, DialogResult.None), overdueTab = LightUi.Button("逾期  0", 138, 118, 96, DialogResult.None), futureTab = LightUi.Button("未开始  0", 244, 118, 104, DialogResult.None), pendingTab = LightUi.Button("待办  0", 358, 118, 96, DialogResult.None), doneTab = LightUi.Button("已办  0", 464, 118, 96, DialogResult.None);
         f.Controls.AddRange(new Control[]{allTab,overdueTab,futureTab,pendingTab,doneTab});
-        Panel table = new Panel { Left = 32, Top = 180, Width = 1056, Height = 470, BackColor = Color.FromArgb(247, 251, 255), AutoScroll = true };
+        Panel table = new Panel { Left = 32, Top = 180, Width = 1056, Height = 470, BackColor = LightUi.Surface, AutoScroll = true };
         LightUi.EnableDoubleBuffer(table);
         LightUi.Round(table, 12); f.Controls.Add(table);
-        Panel footer = new Panel { Left = 32, Top = 682, Width = 1056, Height = 54, BackColor = Color.FromArgb(245, 251, 255) };
+        Panel footer = new Panel { Left = 32, Top = 682, Width = 1056, Height = 54, BackColor = LightUi.Panel };
         LightUi.EnableDoubleBuffer(footer);
         LightUi.Round(footer, 12); f.Controls.Add(footer);
         Label selectionHint = LightUi.Label("已选择 0 项", 18, 16, 240); footer.Controls.Add(selectionHint);
@@ -309,7 +309,7 @@ internal static partial class TodoApp
         };
         Action paintRows = delegate {
             foreach (KeyValuePair<string, Panel> pair in rowPanels)
-                pair.Value.BackColor = pair.Key == selectedId ? LightUi.Selected : Color.FromArgb(247, 251, 255);
+                pair.Value.BackColor = pair.Key == selectedId ? LightUi.Selected : LightUi.Panel;
         };
         MouseEventHandler selectRow = delegate(object sender, MouseEventArgs e) {
             if (e.Button != MouseButtons.Left) return;
@@ -341,10 +341,10 @@ internal static partial class TodoApp
             AddCellLabel(table, "开始时间", 640, 14, 132, LightUi.Muted, FontStyle.Bold);
             AddCellLabel(table, "截止时间", 788, 14, 132, LightUi.Muted, FontStyle.Bold);
             AddCellLabel(table, "操作", 936, 14, 86, LightUi.Muted, FontStyle.Bold);
-            int y = 42;
+            int y = 48;
             foreach (Dictionary<string, object> t in all.Where(t => TaskMatchesFilter(t, filter, now)).Where(t => !onlyOpen.Checked || !B(t, "completed")).Where(t => query == "" || S(t, "title").IndexOf(query, StringComparison.OrdinalIgnoreCase) >= 0 || String.Join("、", Labels(t)).IndexOf(query, StringComparison.OrdinalIgnoreCase) >= 0).OrderBy(t => B(t,"completed") ? 3 : (RuntimeUtil.Date(t,"due_at").HasValue && now > RuntimeUtil.Date(t,"due_at").Value ? 0 : RuntimeUtil.Date(t,"available_from").HasValue && now < RuntimeUtil.Date(t,"available_from").Value ? 1 : 2)).ThenByDescending(t => RuntimeUtil.Date(t,"created_at") ?? DateTimeOffset.MinValue)) {
                 string id = S(t, "id");
-                Panel row = new Panel { Left = 12, Top = y, Width = 1016, Height = 42, BackColor = Color.FromArgb(247, 251, 255), Tag = id, Cursor = Cursors.Hand };
+                Panel row = new Panel { Left = 12, Top = y, Width = 1016, Height = 48, BackColor = LightUi.Panel, Tag = id, Cursor = Cursors.Hand };
                 LightUi.EnableDoubleBuffer(row);
                 LightUi.Round(row, 8);
                 row.MouseDown += selectRow;
@@ -369,7 +369,7 @@ internal static partial class TodoApp
                     if (mutate(delegate(Dictionary<string, object> current, ref bool shouldRefresh) { if (Tasks(current).RemoveAll(item => S(item, "id") == id) == 0) return; Meta(current)["status"] = "已删除"; Commit(current); shouldRefresh = true; })) reload(true);
                 };
                 row.Controls.Add(openBtn); row.Controls.Add(editBtn); row.Controls.Add(deleteBtn);
-                table.Controls.Add(row); rowPanels[id] = row; y += 42;
+                table.Controls.Add(row); rowPanels[id] = row; y += 56;
             }
             table.ResumeLayout();
             int maxScrollY = Math.Max(0, table.DisplayRectangle.Height - table.ClientSize.Height);

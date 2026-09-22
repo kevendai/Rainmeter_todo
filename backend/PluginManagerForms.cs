@@ -248,7 +248,7 @@ internal static partial class TodoApp
     // 插件市场使用独立的双列应用卡片，已安装页继续保留原有紧凑列表。
     private sealed class PluginMarketControl : Control
     {
-        private const int CardHeight = 140, CardGap = 10, OuterPad = 1;
+        private const int CardHeight = 148, CardGap = 10, OuterPad = 1;
         public readonly List<PluginRow> AllRows = new List<PluginRow>();
         public readonly List<PluginRow> Rows = new List<PluginRow>();
         public int SelectedIndex = -1;
@@ -316,7 +316,7 @@ internal static partial class TodoApp
                 TextRenderer.DrawText(g, row.Glyph, CardIconFont, icon, SettingsAccent, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
                 TextRenderer.DrawText(g, row.Title, CardTitleFont, new Rectangle(bounds.Left + 66, bounds.Top + 12, bounds.Width - 80, 24), row.Dimmed ? SettingsMuted : SettingsText, TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis);
                 TextRenderer.DrawText(g, "v" + row.Version + "  ·  " + row.Category, CardMetaFont, new Rectangle(bounds.Left + 66, bounds.Top + 37, bounds.Width - 80, 18), SettingsMuted, TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis);
-                TextRenderer.DrawText(g, row.Description, CardTextFont, new Rectangle(bounds.Left + 14, bounds.Top + 66, bounds.Width - 28, 38), SettingsMuted, TextFormatFlags.Left | TextFormatFlags.Top | TextFormatFlags.WordBreak | TextFormatFlags.EndEllipsis);
+                TextRenderer.DrawText(g, row.Description, CardTextFont, new Rectangle(bounds.Left + 14, bounds.Top + 64, bounds.Width - 28, 36), SettingsMuted, TextFormatFlags.Left | TextFormatFlags.Top | TextFormatFlags.WordBreak | TextFormatFlags.EndEllipsis);
                 Rectangle install = InstallBounds(bounds);
                 using (GraphicsPath installPath = LightUi.RoundedPath(install, 7)) using (SolidBrush installBrush = new SolidBrush(SettingsAccent)) g.FillPath(installBrush, installPath);
                 TextRenderer.DrawText(g, "安装 / 更新", PluginBadgeFont, install, Color.White, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
@@ -436,9 +436,9 @@ internal static partial class TodoApp
         {
             Panel page=new Panel{Left=0,Top=0,Width=884,Height=744,BackColor=SettingsBack,Visible=false};
             page.MouseDown+=delegate(object sender,MouseEventArgs e){if(e.Button==MouseButtons.Left)LightUi.BeginDrag(form);};
-            Label pageTitle=new Label{Text=title,Left=32,Top=24,Width=720,Height=46,ForeColor=SettingsText,BackColor=Color.Transparent,Font=new Font("Microsoft YaHei UI",22F,FontStyle.Bold)};
+            Label pageTitle=new Label{Text=title,Left=32,Top=24,Width=620,Height=46,ForeColor=SettingsText,BackColor=Color.Transparent,Font=new Font("Microsoft YaHei UI",22F,FontStyle.Bold)};
             pageTitle.MouseDown+=delegate(object sender,MouseEventArgs e){if(e.Button==MouseButtons.Left)LightUi.BeginDrag(form);};
-            Label pageSubtitle=new Label{Text=title=="已安装插件"?"管理扩展、运行状态和插件数据。":title=="插件市场"?"从本地索引浏览；刷新时才连接远端。":title=="外观"?"分别调整磁贴、窗口与材质风格。":title=="数据与维护"?"备份个人配置并维护主程序。":"版本、组件与项目信息。",Left=34,Top=72,Width=720,Height=24,ForeColor=SettingsMuted,BackColor=Color.Transparent,Font=PluginRowSubFont};
+            Label pageSubtitle=new Label{Text=title=="已安装插件"?"管理扩展、运行状态和插件数据。":title=="插件市场"?"从本地索引浏览；刷新时才连接远端。":title=="外观"?"分别调整磁贴、窗口与材质风格。":title=="数据与维护"?"备份个人配置并维护主程序。":"版本、组件与项目信息。",Left=34,Top=86,Width=610,Height=24,ForeColor=SettingsMuted,BackColor=Color.Transparent,Font=PluginRowSubFont};
             page.Controls.AddRange(new Control[]{pageTitle,pageSubtitle});content.Controls.Add(page);
             return page;
         };
@@ -453,7 +453,7 @@ internal static partial class TodoApp
         Button run=LightUi.Button("立即运行",148,242,118,DialogResult.None);
         Button actions=LightUi.Button("更多操作",20,290,246,DialogResult.None);
         Button uninstall=LightUi.DangerButton("卸载插件程序",20,338,246,DialogResult.None);
-        Button local=LightUi.Button("从本地安装",676,66,176,DialogResult.None);
+        Button local=LightUi.Button("从本地安装",700,34,152,DialogResult.None);
         foreach(Button b in new Button[]{toggle,configure,run,actions,uninstall}){b.BackColor=SettingsCardHover;b.ForeColor=SettingsText;}
         pluginDetail.Controls.AddRange(new Control[]{detailEyebrow,detailTitle,status,toggle,configure,run,actions,uninstall});
         installedPage.Controls.AddRange(new Control[]{list,local});
@@ -469,7 +469,7 @@ internal static partial class TodoApp
             PluginManifest selectedManifest=selectedRow.Tag as PluginManifest;if(selectedManifest==null)return;
             try
             {
-                if(!JsonUtil.Bool(PluginRuntime.Current(selectedManifest.Id),"enabled",false)){status.Text="插件已禁用";status.ForeColor=LightUi.Muted;return;}
+                if(!JsonUtil.Bool(PluginRuntime.Current(selectedManifest.Id),"enabled",false)){status.Text="插件已禁用";status.ForeColor=SettingsMuted;return;}
                 string path=Path.Combine(PluginPaths.Jobs,selectedManifest.Id+".json");if(!File.Exists(path))return;
                 Dictionary<string,object> job=JsonUtil.LoadObject(path);string state=JsonUtil.String(job,"state",""),message=PluginNames.Humanize(JsonUtil.String(job,"message",""));
                 int current=JsonUtil.Int(job,"current",0),total=JsonUtil.Int(job,"total",0);
@@ -495,24 +495,28 @@ internal static partial class TodoApp
         local.Click+=delegate{try{InstallLocalPlugin(form);reload();}catch(Exception ex){LightUi.Error(ex.Message);}};
 
         Panel marketPage=newPage("插件市场");
-        TextBox marketSearch=new TextBox{Left=32,Top=116,Width=420,Height=36,AutoSize=false,BorderStyle=BorderStyle.FixedSingle,Font=PluginNavFont,BackColor=SettingsCardBack,ForeColor=SettingsText};
+        TextBox marketSearch=new TextBox{Left=32,Top=116,Width=300,Height=36,AutoSize=false,BorderStyle=BorderStyle.FixedSingle,Font=PluginNavFont,BackColor=SettingsCardBack,ForeColor=SettingsText};
         Label searchHint=LightUi.Label("搜索名称、说明或类别",46,124,220);searchHint.BackColor=SettingsCardBack;searchHint.ForeColor=SettingsMuted;searchHint.Cursor=Cursors.IBeam;
-        ComboBox marketCategory=new ComboBox{Left=466,Top=116,Width=150,DropDownStyle=ComboBoxStyle.DropDownList,Font=PluginNavFont,BackColor=SettingsCardBack,ForeColor=SettingsText};marketCategory.Items.AddRange(new object[]{"全部","内容","服务","工具","其他"});marketCategory.SelectedIndex=0;
+        string selectedMarketCategory="全部";
+        string[] categories={"全部","内容","服务","工具","其他"};
+        List<Button> categoryButtons=new List<Button>();
+        for(int i=0;i<categories.Length;i++){string category=categories[i];Button chip=LightUi.Button(category,344+i*68,116,64,DialogResult.None);chip.Height=36;chip.BackColor=category=="全部"?SettingsAccent:SettingsCardBack;chip.ForeColor=category=="全部"?Color.White:SettingsText;categoryButtons.Add(chip);}
         Button refresh=LightUi.PrimaryButton("刷新远端市场",694,114,158,DialogResult.None);refresh.Height=38;
-        PluginMarketControl marketList=new PluginMarketControl{Left=32,Top=170,Width=820,Height=472,EmptyText="本地市场暂无匹配插件。点击「刷新远端市场」可更新索引。"};
+        PluginMarketControl marketList=new PluginMarketControl{Left=32,Top=170,Width=820,Height=478,EmptyText="本地市场暂无匹配插件。点击「刷新远端市场」可更新索引。"};
         Label marketStatus=new Label{Text="正在读取本地市场",Left=34,Top=656,Width=630,Height=24,ForeColor=SettingsMuted,BackColor=Color.Transparent,Font=PluginRowSubFont};
         Button installMarket=LightUi.PrimaryButton("安装或更新所选插件",674,650,178,DialogResult.None);
         LightUi.SetCue(marketSearch,"搜索插件");
-        marketPage.Controls.AddRange(new Control[]{marketSearch,marketCategory,refresh,marketList,marketStatus,installMarket});
+        marketPage.Controls.AddRange(new Control[]{marketSearch,refresh,marketList,marketStatus,installMarket});foreach(Button chip in categoryButtons)marketPage.Controls.Add(chip);
         installMarket.Enabled=false;
-        Action applyMarketFilter=delegate{marketList.ApplyFilter(marketSearch.Text,Convert.ToString(marketCategory.SelectedItem));searchHint.Visible=marketSearch.TextLength==0&&!marketSearch.Focused;};
-        marketSearch.TextChanged+=delegate{applyMarketFilter();};marketSearch.Enter+=delegate{searchHint.Visible=false;};marketSearch.Leave+=delegate{searchHint.Visible=marketSearch.TextLength==0;};searchHint.Click+=delegate{marketSearch.Focus();};marketCategory.SelectedIndexChanged+=delegate{applyMarketFilter();};
+        Action applyMarketFilter=delegate{marketList.ApplyFilter(marketSearch.Text,selectedMarketCategory);searchHint.Visible=marketSearch.TextLength==0&&!marketSearch.Focused;};
+        marketSearch.TextChanged+=delegate{applyMarketFilter();};marketSearch.Enter+=delegate{searchHint.Visible=false;};marketSearch.Leave+=delegate{searchHint.Visible=marketSearch.TextLength==0;};searchHint.Click+=delegate{marketSearch.Focus();};
+        Action paintCategories=delegate{for(int j=0;j<categoryButtons.Count;j++){categoryButtons[j].BackColor=categories[j]==selectedMarketCategory?SettingsAccent:SettingsCardBack;categoryButtons[j].ForeColor=categories[j]==selectedMarketCategory?Color.White:SettingsText;}};
+        for(int i=0;i<categoryButtons.Count;i++){int index=i;categoryButtons[index].Click+=delegate{selectedMarketCategory=categories[index];paintCategories();applyMarketFilter();};categoryButtons[index].MouseEnter+=delegate{paintCategories();};categoryButtons[index].MouseLeave+=delegate{paintCategories();};}
         marketList.SelectionChanged+=delegate{string required;installMarket.Enabled=marketList.SelectedRow!=null&&MarketCompatible(marketList.SelectedRow.Tag as Dictionary<string,object>,out required);};
         marketList.RowActivated+=delegate{if(installMarket.Enabled)installMarket.PerformClick();};
         marketList.InstallRequested+=delegate{if(installMarket.Enabled)installMarket.PerformClick();};
         refresh.Click+=delegate{try{LoadMarket(marketList,marketStatus,true);}catch(Exception ex){marketStatus.Text="市场不可用："+ex.Message;marketStatus.ForeColor=LightUi.Danger;}};
         installMarket.Click+=delegate{try{PluginRow selectedMarket=marketList.SelectedRow;if(selectedMarket==null)throw new Exception("请先选择一个市场插件。");InstallMarketPlugin(selectedMarket);reload();LoadMarket(marketList,marketStatus,false);}catch(Exception ex){LightUi.Error(ex.Message);}};
-        globalSearch.KeyDown+=delegate(object sender,KeyEventArgs e){if(e.KeyCode==Keys.Enter){marketSearch.Text=globalSearch.Text;marketSearch.Focus();e.SuppressKeyPress=true;}};
         try{LoadMarket(marketList,marketStatus,false);}catch(Exception ex){marketStatus.Text="本地市场不可用："+ex.Message;marketStatus.ForeColor=LightUi.Danger;}
         Panel appearancePage=newPage("外观");
         Panel scaleCard=SettingsCard(appearancePage,32,120,820,116);
@@ -557,6 +561,7 @@ internal static partial class TodoApp
         Panel[] pages={installedPage,marketPage,appearancePage,maintenancePage,aboutPage};
         SettingsNavItem[] navs={navInstalled,navMarket,navAppearance,navMaintenance,navAbout};
         Action<int> selectPage=delegate(int index){for(int i=0;i<pages.Length;i++){pages[i].Visible=i==index;navs[i].Selected=i==index;navs[i].Invalidate();}};
+        globalSearch.KeyDown+=delegate(object sender,KeyEventArgs e){if(e.KeyCode==Keys.Enter){selectPage(1);marketSearch.Text=globalSearch.Text;marketSearch.Focus();e.SuppressKeyPress=true;}};
         for(int i=0;i<navs.Length;i++){int index=i;navs[index].Activated+=delegate{selectPage(index);};}
         selectPage(initialPage<0||initialPage>=pages.Length?0:initialPage);
         Button close=LightUi.CloseButton(form);form.Controls.Add(close);close.BringToFront();
