@@ -476,10 +476,10 @@ internal static partial class CalendarApp
         title.BringToFront();
         closeTop.BringToFront();
 
-        Panel tabRail = RoundedPanel(42, 138, 272, 44, Color.FromArgb(235, 245, 253), Color.FromArgb(235, 245, 253), 11);
-        Button tabAccount = LightUi.Button("同步账号", 0, 0, 136, DialogResult.None);
-        Button tabRules = LightUi.Button("自动转入", 136, 0, 136, DialogResult.None);
-        tabAccount.Height = tabRules.Height = 44;
+        Panel tabRail = RoundedPanel(42, 138, 280, 48, LightUi.Surface, LightUi.Border, 11);
+        Button tabAccount = LightUi.Button("同步账号", 4, 4, 132, DialogResult.None);
+        Button tabRules = LightUi.Button("自动转入", 144, 4, 132, DialogResult.None);
+        tabAccount.Height = tabRules.Height = 40;
         tabAccount.Font = tabRules.Font = LightUi.UiFont( 10F, System.Drawing.FontStyle.Bold);
         tabRail.Controls.AddRange(new Control[] { tabAccount, tabRules });
         f.Controls.Add(tabRail);
@@ -524,14 +524,16 @@ internal static partial class CalendarApp
         clearAccount.Height = testAccount.Height = saveAccount.Height = 38;
         clearAccount.Font = testAccount.Font = saveAccount.Font = LightUi.UiFont( 9F, System.Drawing.FontStyle.Bold);
         f.Controls.AddRange(new Control[] { saveStatus, clearAccount, testAccount, saveAccount });
+        bool accountSelected = true;
         showAccount = delegate(bool account) {
+            accountSelected = account;
             accountPage.Visible = account; accountPage.Enabled = account;
             rulePage.Visible = !account; rulePage.Enabled = !account;
             saveStatus.Visible = clearAccount.Visible = testAccount.Visible = saveAccount.Visible = account;
             clearAccount.Enabled = testAccount.Enabled = saveAccount.Enabled = account;
-            tabAccount.BackColor = account ? Color.FromArgb(248, 252, 255) : Color.FromArgb(235, 245, 253);
+            tabAccount.BackColor = account ? LightUi.Panel : LightUi.Surface;
             tabAccount.ForeColor = account ? LightUi.Accent : LightUi.Text;
-            tabRules.BackColor = account ? Color.FromArgb(235, 245, 253) : Color.FromArgb(248, 252, 255);
+            tabRules.BackColor = account ? LightUi.Surface : LightUi.Panel;
             tabRules.ForeColor = account ? LightUi.Text : LightUi.Accent;
             if(account)accountPage.BringToFront();else rulePage.BringToFront();
             tabRail.BringToFront(); closeTop.BringToFront();
@@ -554,6 +556,8 @@ internal static partial class CalendarApp
             }
             catch (Exception ex) { testAccount.Enabled = true; LightUi.Error("连接失败：" + ex.Message); saveStatus.Text = "连接失败"; saveStatus.ForeColor = LightUi.Danger; }
         };
+        tabAccount.MouseLeave += delegate { showAccount(accountSelected); };
+        tabRules.MouseLeave += delegate { showAccount(accountSelected); };
         saveAccount.Click += delegate {
             try { SaveCredentials(calendarProvider==null?server.Text:storedCalendarServer, username.Text, password.Text, cache); saveStatus.Text = "已保存"; saveStatus.ForeColor = LightUi.Done; }
             catch (Exception ex) { LightUi.Error(ex.Message); }
