@@ -67,11 +67,25 @@ internal static partial class TodoApp
     private static readonly Font PluginBadgeFont = new Font("Microsoft YaHei UI", 8.5F);
     private static readonly Font PluginVersionFont = new Font("Microsoft YaHei UI", 8F);
     private static readonly Color PluginDoneGreen = LightUi.Done;
-    private static readonly Color PluginSelectedBack = LightUi.Selected;
-    private static readonly Color PluginHoverBack = Color.FromArgb(235, 246, 255);
-    private static readonly Color PluginRowBack = Color.FromArgb(247, 251, 255);
-    private static readonly Color PluginBadgeBackOff = Color.FromArgb(236, 241, 246);
-    private static readonly Color PluginBadgeBackOn = Color.FromArgb(229, 245, 236);
+    private static Color PluginSelectedBack { get { return SettingsSelected; } }
+    private static Color PluginHoverBack { get { return SettingsCardHover; } }
+    private static Color PluginRowBack { get { return SettingsCardBack; } }
+    private static Color PluginBadgeBackOff { get { return SettingsDark ? Color.FromArgb(58, 60, 69) : Color.FromArgb(236, 241, 246); } }
+    private static Color PluginBadgeBackOn { get { return SettingsDark ? Color.FromArgb(38, 78, 59) : Color.FromArgb(229, 245, 236); } }
+
+    // 设置中心拥有独立的 Fluent 视觉层。经典模式保持原来的明亮配色；
+    // 云母与亚克力使用不同的深色材质色阶，而不是只给旧界面换一个背景色。
+    private static bool SettingsDark { get { return !String.Equals(UiTheme.Current, UiTheme.Classic, StringComparison.OrdinalIgnoreCase); } }
+    private static bool SettingsAcrylic { get { return String.Equals(UiTheme.Current, UiTheme.Acrylic, StringComparison.OrdinalIgnoreCase); } }
+    private static Color SettingsBack { get { return SettingsDark ? (SettingsAcrylic ? Color.FromArgb(24, 29, 42) : Color.FromArgb(31, 32, 38)) : Color.FromArgb(244, 247, 251); } }
+    private static Color SettingsSidebar { get { return SettingsDark ? (SettingsAcrylic ? Color.FromArgb(28, 34, 49) : Color.FromArgb(25, 26, 31)) : Color.FromArgb(235, 240, 247); } }
+    private static Color SettingsCardBack { get { return SettingsDark ? (SettingsAcrylic ? Color.FromArgb(45, 53, 72) : Color.FromArgb(45, 46, 54)) : Color.White; } }
+    private static Color SettingsCardHover { get { return SettingsDark ? (SettingsAcrylic ? Color.FromArgb(55, 65, 87) : Color.FromArgb(54, 55, 64)) : Color.FromArgb(249, 251, 254); } }
+    private static Color SettingsBorder { get { return SettingsDark ? Color.FromArgb(64, 255, 255, 255) : Color.FromArgb(218, 224, 233); } }
+    private static Color SettingsText { get { return SettingsDark ? Color.FromArgb(244, 244, 247) : Color.FromArgb(25, 29, 36); } }
+    private static Color SettingsMuted { get { return SettingsDark ? Color.FromArgb(176, 180, 192) : Color.FromArgb(100, 108, 121); } }
+    private static Color SettingsAccent { get { return SettingsDark ? Color.FromArgb(220, 76, 178) : Color.FromArgb(116, 69, 205); } }
+    private static Color SettingsSelected { get { return SettingsDark ? Color.FromArgb(52, 255, 255, 255) : Color.FromArgb(226, 219, 246); } }
 
     private sealed class PluginRow
     {
@@ -136,7 +150,7 @@ internal static partial class TodoApp
             if (Math.Abs(scale - 1F) > 0.001F) g.ScaleTransform(scale, scale);
             if (Rows.Count == 0)
             {
-                TextRenderer.DrawText(g, EmptyText, PluginRowSubFont, new Rectangle(0, 0, designWidth, Math.Min(designHeight, 120)), LightUi.Muted, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter);
+                TextRenderer.DrawText(g, EmptyText, PluginRowSubFont, new Rectangle(0, 0, designWidth, Math.Min(designHeight, 120)), SettingsMuted, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter);
                 return;
             }
             int rowWidth = designWidth - 2 - (Scrollable ? 10 : 0), y = RowGap - scrollOffset;
@@ -147,7 +161,7 @@ internal static partial class TodoApp
                 {
                     PluginRow row = Rows[i]; bool selected = i == SelectedIndex, hover = i == hoverIndex;
                     Color fill = selected ? PluginSelectedBack : hover ? PluginHoverBack : PluginRowBack;
-                    Color edge = selected ? LightUi.Accent : LightUi.Border;
+                    Color edge = selected ? SettingsAccent : SettingsBorder;
                     using (GraphicsPath path = LightUi.RoundedPath(bounds, 10))
                     {
                         using (SolidBrush brush = new SolidBrush(fill)) g.FillPath(brush, path);
@@ -155,11 +169,11 @@ internal static partial class TodoApp
                     }
                     if (selected) using (GraphicsPath barPath = LightUi.RoundedPath(new Rectangle(bounds.Left + 6, bounds.Top + 14, 4, RowHeight - 28), 2))
                     {
-                        using (SolidBrush bar = new SolidBrush(LightUi.Accent)) g.FillPath(bar, barPath);
+                        using (SolidBrush bar = new SolidBrush(SettingsAccent)) g.FillPath(bar, barPath);
                     }
-                    Color titleColor = row.Dimmed ? LightUi.Muted : LightUi.Text;
+                    Color titleColor = row.Dimmed ? SettingsMuted : SettingsText;
                     TextRenderer.DrawText(g, row.Title, PluginRowTitleFont, new Rectangle(bounds.Left + 16, bounds.Top + 8, bounds.Width - 180, 22), titleColor, TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis);
-                    TextRenderer.DrawText(g, row.Subtitle, PluginRowSubFont, new Rectangle(bounds.Left + 16, bounds.Top + 31, bounds.Width - 180, 18), LightUi.Muted, TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis);
+                    TextRenderer.DrawText(g, row.Subtitle, PluginRowSubFont, new Rectangle(bounds.Left + 16, bounds.Top + 31, bounds.Width - 180, 18), SettingsMuted, TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis);
                     if (row.Badge != "")
                     {
                         Size size = TextRenderer.MeasureText(g, row.Badge, PluginBadgeFont, new Size(Int32.MaxValue, Int32.MaxValue), TextFormatFlags.NoPadding);
@@ -241,6 +255,7 @@ internal static partial class TodoApp
         public string EmptyText = "暂无匹配插件";
         public event EventHandler SelectionChanged;
         public event EventHandler RowActivated;
+        public event EventHandler InstallRequested;
         private int hoverIndex = -1, scrollOffset = 0;
         private string query = "", category = "全部";
         private static readonly Font CardTitleFont = new Font("Microsoft YaHei UI", 10.5F, FontStyle.Bold);
@@ -283,24 +298,28 @@ internal static partial class TodoApp
             int column = index % columns, row = index / columns;
             return new Rectangle(OuterPad + column * (cardWidth + CardGap), CardGap + row * (CardHeight + CardGap) - scrollOffset, cardWidth, CardHeight);
         }
+        private Rectangle InstallBounds(Rectangle card) { return new Rectangle(card.Left + 14, card.Bottom - 34, 92, 24); }
         private int RowAt(int designX, int designY) { for (int i = 0; i < Rows.Count; i++) if (CardBounds(i).Contains(designX, designY)) return i; return -1; }
         private void EnsureVisible(int index) { Rectangle bounds = CardBounds(index); if (bounds.Top < CardGap) scrollOffset = Math.Max(0, scrollOffset + bounds.Top - CardGap); else if (bounds.Bottom > DesignHeight - CardGap) scrollOffset = Math.Min(MaxScroll, scrollOffset + bounds.Bottom - DesignHeight + CardGap); }
 
         protected override void OnPaint(PaintEventArgs e)
         {
             Graphics g = e.Graphics; g.SmoothingMode = SmoothingMode.AntiAlias; float scale = ViewScale; if (Math.Abs(scale - 1F) > 0.001F) g.ScaleTransform(scale, scale);
-            if (Rows.Count == 0) { TextRenderer.DrawText(g, EmptyText, PluginRowSubFont, new Rectangle(0, 0, DesignWidth, Math.Min(DesignHeight, 120)), LightUi.Muted, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter); return; }
+            if (Rows.Count == 0) { TextRenderer.DrawText(g, EmptyText, PluginRowSubFont, new Rectangle(0, 0, DesignWidth, Math.Min(DesignHeight, 120)), SettingsMuted, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter); return; }
             for (int i = 0; i < Rows.Count; i++)
             {
                 Rectangle bounds = CardBounds(i); if (bounds.Bottom < 0 || bounds.Top > DesignHeight) continue; PluginRow row = Rows[i]; bool selected = i == SelectedIndex, hover = i == hoverIndex;
-                Color fill = selected ? PluginSelectedBack : hover ? PluginHoverBack : Color.FromArgb(250, 252, 255), edge = selected ? LightUi.Accent : LightUi.Border;
+                Color fill = selected ? PluginSelectedBack : hover ? PluginHoverBack : SettingsCardBack, edge = selected ? SettingsAccent : SettingsBorder;
                 using (GraphicsPath path = LightUi.RoundedPath(bounds, 12)) { using (SolidBrush brush = new SolidBrush(fill)) g.FillPath(brush, path); using (Pen pen = new Pen(edge, selected ? 1.8F : 1F)) g.DrawPath(pen, path); }
                 Rectangle icon = new Rectangle(bounds.Left + 14, bounds.Top + 14, 42, 42);
-                using (GraphicsPath iconPath = LightUi.RoundedPath(icon, 11)) using (SolidBrush iconBrush = new SolidBrush(selected ? Color.FromArgb(220, 237, 255) : Color.FromArgb(232, 244, 255))) g.FillPath(iconBrush, iconPath);
-                TextRenderer.DrawText(g, row.Glyph, CardIconFont, icon, LightUi.Accent, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
-                TextRenderer.DrawText(g, row.Title, CardTitleFont, new Rectangle(bounds.Left + 66, bounds.Top + 12, bounds.Width - 80, 24), row.Dimmed ? LightUi.Muted : LightUi.Text, TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis);
-                TextRenderer.DrawText(g, "v" + row.Version + "  ·  " + row.Category, CardMetaFont, new Rectangle(bounds.Left + 66, bounds.Top + 37, bounds.Width - 80, 18), LightUi.Muted, TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis);
-                TextRenderer.DrawText(g, row.Description, CardTextFont, new Rectangle(bounds.Left + 14, bounds.Top + 66, bounds.Width - 28, 38), LightUi.Muted, TextFormatFlags.Left | TextFormatFlags.Top | TextFormatFlags.WordBreak | TextFormatFlags.EndEllipsis);
+                using (GraphicsPath iconPath = LightUi.RoundedPath(icon, 11)) using (SolidBrush iconBrush = new SolidBrush(SettingsDark ? Color.FromArgb(56, 58, 68) : selected ? Color.FromArgb(220, 237, 255) : Color.FromArgb(232, 244, 255))) g.FillPath(iconBrush, iconPath);
+                TextRenderer.DrawText(g, row.Glyph, CardIconFont, icon, SettingsAccent, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
+                TextRenderer.DrawText(g, row.Title, CardTitleFont, new Rectangle(bounds.Left + 66, bounds.Top + 12, bounds.Width - 80, 24), row.Dimmed ? SettingsMuted : SettingsText, TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis);
+                TextRenderer.DrawText(g, "v" + row.Version + "  ·  " + row.Category, CardMetaFont, new Rectangle(bounds.Left + 66, bounds.Top + 37, bounds.Width - 80, 18), SettingsMuted, TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis);
+                TextRenderer.DrawText(g, row.Description, CardTextFont, new Rectangle(bounds.Left + 14, bounds.Top + 66, bounds.Width - 28, 38), SettingsMuted, TextFormatFlags.Left | TextFormatFlags.Top | TextFormatFlags.WordBreak | TextFormatFlags.EndEllipsis);
+                Rectangle install = InstallBounds(bounds);
+                using (GraphicsPath installPath = LightUi.RoundedPath(install, 7)) using (SolidBrush installBrush = new SolidBrush(SettingsAccent)) g.FillPath(installBrush, installPath);
+                TextRenderer.DrawText(g, "安装 / 更新", PluginBadgeFont, install, Color.White, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
                 if (row.Badge != "")
                 {
                     Size size = TextRenderer.MeasureText(g, row.Badge, PluginBadgeFont, new Size(Int32.MaxValue, Int32.MaxValue), TextFormatFlags.NoPadding); int chipWidth = Math.Min(bounds.Width - 28, size.Width + 18); Rectangle chip = new Rectangle(bounds.Right - chipWidth - 14, bounds.Bottom - 28, chipWidth, 20);
@@ -312,7 +331,7 @@ internal static partial class TodoApp
         }
         protected override void OnMouseMove(MouseEventArgs e) { base.OnMouseMove(e); int index = RowAt((int)(e.X / ViewScale), (int)(e.Y / ViewScale)); if (index != hoverIndex) { hoverIndex = index; Invalidate(); } Cursor = index >= 0 ? Cursors.Hand : Cursors.Default; }
         protected override void OnMouseLeave(EventArgs e) { base.OnMouseLeave(e); if (hoverIndex != -1) { hoverIndex = -1; Invalidate(); } }
-        protected override void OnMouseDown(MouseEventArgs e) { base.OnMouseDown(e); Focus(); int index = RowAt((int)(e.X / ViewScale), (int)(e.Y / ViewScale)); if (index != SelectedIndex) { SelectedIndex = index; Invalidate(); RaiseSelectionChanged(); } }
+        protected override void OnMouseDown(MouseEventArgs e) { base.OnMouseDown(e); Focus(); int x=(int)(e.X/ViewScale),y=(int)(e.Y/ViewScale),index=RowAt(x,y); if(index<0)return; if(index!=SelectedIndex){SelectedIndex=index;Invalidate();RaiseSelectionChanged();} if(InstallBounds(CardBounds(index)).Contains(x,y)&&InstallRequested!=null)InstallRequested(this,EventArgs.Empty); }
         protected override void OnMouseDoubleClick(MouseEventArgs e) { base.OnMouseDoubleClick(e); if (RowAt((int)(e.X / ViewScale), (int)(e.Y / ViewScale)) >= 0 && RowActivated != null) RowActivated(this, EventArgs.Empty); }
         protected override void OnMouseWheel(MouseEventArgs e) { base.OnMouseWheel(e); if (!Scrollable) return; scrollOffset = Math.Max(0, Math.Min(MaxScroll, scrollOffset - Math.Sign(e.Delta) * (CardHeight + CardGap))); Invalidate(); }
         protected override bool IsInputKey(Keys keyData) { if (keyData == Keys.Up || keyData == Keys.Down || keyData == Keys.Left || keyData == Keys.Right) return true; return base.IsInputKey(keyData); }
@@ -329,7 +348,7 @@ internal static partial class TodoApp
         public SettingsNavItem()
         {
             SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer | ControlStyles.UserPaint | ControlStyles.ResizeRedraw | ControlStyles.SupportsTransparentBackColor | ControlStyles.Selectable, true);
-            BackColor = Color.Transparent; Height = 40; Cursor = Cursors.Hand; TabStop = true;
+            BackColor = Color.Transparent; Height = 44; Cursor = Cursors.Hand; TabStop = true;
         }
         protected override void OnPaint(PaintEventArgs e)
         {
@@ -338,15 +357,15 @@ internal static partial class TodoApp
             int w = (int)Math.Ceiling(Width / scale), h = (int)Math.Ceiling(Height / scale);
             if (Math.Abs(scale - 1F) > 0.001F) g.ScaleTransform(scale, scale);
             Rectangle bounds = new Rectangle(0, 0, w - 1, h - 1);
-            if (Selected || hover) using (GraphicsPath path = LightUi.RoundedPath(bounds, 10))
+            if (Selected || hover) using (GraphicsPath path = LightUi.RoundedPath(bounds, 7))
             {
-                using (SolidBrush brush = new SolidBrush(Selected ? PluginSelectedBack : PluginHoverBack)) g.FillPath(brush, path);
+                using (SolidBrush brush = new SolidBrush(Selected ? SettingsSelected : SettingsCardHover)) g.FillPath(brush, path);
             }
             if (Selected) using (GraphicsPath barPath = LightUi.RoundedPath(new Rectangle(4, 10, 4, h - 20), 2))
             {
-                using (SolidBrush bar = new SolidBrush(LightUi.Accent)) g.FillPath(bar, barPath);
+                using (SolidBrush bar = new SolidBrush(SettingsAccent)) g.FillPath(bar, barPath);
             }
-            Color fore = Selected ? LightUi.Accent : hover ? LightUi.Text : LightUi.Muted;
+            Color fore = Selected ? SettingsText : hover ? SettingsText : SettingsMuted;
             if (Glyph != "") TextRenderer.DrawText(g, Glyph, PluginNavGlyphFont, new Rectangle(10, 0, 32, h), fore, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
             TextRenderer.DrawText(g, Title, PluginNavFont, new Rectangle(48, 0, w - 56, h), fore, TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis);
         }
@@ -359,20 +378,20 @@ internal static partial class TodoApp
 
     private static SettingsNavItem NewNavItem(string glyph, string title, int top)
     {
-        return new SettingsNavItem { Glyph = glyph, Title = title, Text = title, Left = 12, Top = top, Width = 186, Height = 40 };
+        return new SettingsNavItem { Glyph = glyph, Title = title, Text = title, Left = 14, Top = top, Width = 208, Height = 44 };
     }
 
     // 设置页内容卡片：圆角浅色底 + 细描边，承载一组相关设置项。
     private static Panel SettingsCard(Control parent, int x, int y, int width, int height)
     {
-        Panel card = new Panel { Left = x, Top = y, Width = width, Height = height, BackColor = PluginRowBack };
-        LightUi.Round(card, 10);
+        Panel card = new Panel { Left = x, Top = y, Width = width, Height = height, BackColor = SettingsCardBack };
+        LightUi.Round(card, 8);
         card.Paint += delegate(object sender, PaintEventArgs e)
         {
             e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
-            int radius = Math.Max(1, (int)Math.Round(10F * UiScale.For(card)));
+            int radius = Math.Max(1, (int)Math.Round(8F * UiScale.For(card)));
             using (GraphicsPath path = LightUi.RoundedPath(new Rectangle(0, 0, card.Width - 1, card.Height - 1), radius))
-            using (Pen pen = new Pen(LightUi.Border, 1F)) e.Graphics.DrawPath(pen, path);
+            using (Pen pen = new Pen(SettingsBorder, 1F)) e.Graphics.DrawPath(pen, path);
         };
         parent.Controls.Add(card); return card;
     }
@@ -386,40 +405,59 @@ internal static partial class TodoApp
     private static void ShowSettings(int initialPage)
     {
         PluginPaths.Ensure();
-        Form form=LightUi.Form("待办设置",920,720);
-        Panel sidebar=new Panel{Left=0,Top=0,Width=210,Height=720,BackColor=Color.FromArgb(232,241,249)};
-        sidebar.Paint+=delegate(object sender,PaintEventArgs e){using(Pen pen=new Pen(LightUi.Border,1F))e.Graphics.DrawLine(pen,sidebar.Width-1,0,sidebar.Width-1,sidebar.Height);};
+        Form form=LightUi.Form("待办设置",1120,800);
+        form.BackColor=SettingsBack;form.ForeColor=SettingsText;
+        form.Paint+=delegate(object sender,PaintEventArgs e)
+        {
+            Rectangle bounds=new Rectangle(0,0,form.ClientSize.Width,form.ClientSize.Height);
+            Color end=SettingsAcrylic?Color.FromArgb(37,45,65):SettingsBack;
+            using(LinearGradientBrush brush=new LinearGradientBrush(bounds,SettingsBack,end,LinearGradientMode.ForwardDiagonal))e.Graphics.FillRectangle(brush,bounds);
+        };
+        Panel topBar=new Panel{Left=0,Top=0,Width=1120,Height=56,BackColor=SettingsSidebar};
+        topBar.Paint+=delegate(object sender,PaintEventArgs e){using(Pen pen=new Pen(SettingsBorder,1F))e.Graphics.DrawLine(pen,0,topBar.Height-1,topBar.Width,topBar.Height-1);};
+        topBar.MouseDown+=delegate(object sender,MouseEventArgs e){if(e.Button==MouseButtons.Left)LightUi.BeginDrag(form);};
+        Label product=new Label{Text="RAINMETER DESKTOP",Left=20,Top=0,Width=240,Height=56,ForeColor=SettingsText,BackColor=Color.Transparent,Font=new Font("Microsoft YaHei UI",10F,FontStyle.Bold),TextAlign=ContentAlignment.MiddleLeft};
+        TextBox globalSearch=new TextBox{Left=376,Top=12,Width=368,Height=34,AutoSize=false,BorderStyle=BorderStyle.FixedSingle,BackColor=SettingsCardBack,ForeColor=SettingsText,Font=PluginNavFont};
+        LightUi.SetCue(globalSearch,"搜索设置或插件");
+        topBar.Controls.AddRange(new Control[]{product,globalSearch});form.Controls.Add(topBar);
+        Panel sidebar=new Panel{Left=0,Top=56,Width=236,Height=744,BackColor=SettingsSidebar};
+        sidebar.Paint+=delegate(object sender,PaintEventArgs e){using(Pen pen=new Pen(SettingsBorder,1F))e.Graphics.DrawLine(pen,sidebar.Width-1,0,sidebar.Width-1,sidebar.Height);};
         sidebar.MouseDown+=delegate(object sender,MouseEventArgs e){if(e.Button==MouseButtons.Left)LightUi.BeginDrag(form);};
         form.Controls.Add(sidebar);
-        Label caption=new Label{Text="待办设置",Left=20,Top=22,Width=170,Height=28,ForeColor=LightUi.Text,BackColor=Color.Transparent,Font=PluginCaptionFont};
+        Label caption=new Label{Text="设置中心",Left=20,Top=22,Width=190,Height=34,ForeColor=SettingsText,BackColor=Color.Transparent,Font=new Font("Microsoft YaHei UI",18F,FontStyle.Bold)};
         caption.MouseDown+=delegate(object sender,MouseEventArgs e){if(e.Button==MouseButtons.Left)LightUi.BeginDrag(form);};
         sidebar.Controls.Add(caption);
-        Label version=new Label{Text="Rainmeter Desktop Widgets "+AppVersion+"\r\nPlugin API v1",Left=20,Top=648,Width=176,Height=40,ForeColor=LightUi.Muted,BackColor=Color.Transparent,Font=PluginVersionFont};
+        Label version=new Label{Text="Rainmeter Desktop Widgets\r\n"+AppVersion+" · Plugin API v1",Left=20,Top=678,Width=200,Height=42,ForeColor=SettingsMuted,BackColor=Color.Transparent,Font=PluginVersionFont};
         sidebar.Controls.Add(version);
-        Panel content=new Panel{Left=210,Top=0,Width=710,Height=720,BackColor=Color.Transparent};
+        Panel content=new Panel{Left=236,Top=56,Width=884,Height=744,BackColor=SettingsBack};
         content.MouseDown+=delegate(object sender,MouseEventArgs e){if(e.Button==MouseButtons.Left)LightUi.BeginDrag(form);};
         form.Controls.Add(content);
         Func<string,Panel> newPage=delegate(string title)
         {
-            Panel page=new Panel{Left=0,Top=0,Width=710,Height=720,BackColor=Color.Transparent,Visible=false};
+            Panel page=new Panel{Left=0,Top=0,Width=884,Height=744,BackColor=SettingsBack,Visible=false};
             page.MouseDown+=delegate(object sender,MouseEventArgs e){if(e.Button==MouseButtons.Left)LightUi.BeginDrag(form);};
-            Label pageTitle=new Label{Text=title,Left=28,Top=26,Width=620,Height=30,ForeColor=LightUi.Text,BackColor=Color.Transparent,Font=PluginPageTitleFont};
+            Label pageTitle=new Label{Text=title,Left=32,Top=24,Width=720,Height=46,ForeColor=SettingsText,BackColor=Color.Transparent,Font=new Font("Microsoft YaHei UI",22F,FontStyle.Bold)};
             pageTitle.MouseDown+=delegate(object sender,MouseEventArgs e){if(e.Button==MouseButtons.Left)LightUi.BeginDrag(form);};
-            page.Controls.Add(pageTitle);content.Controls.Add(page);
+            Label pageSubtitle=new Label{Text=title=="已安装插件"?"管理扩展、运行状态和插件数据。":title=="插件市场"?"从本地索引浏览；刷新时才连接远端。":title=="外观"?"分别调整磁贴、窗口与材质风格。":title=="数据与维护"?"备份个人配置并维护主程序。":"版本、组件与项目信息。",Left=34,Top=72,Width=720,Height=24,ForeColor=SettingsMuted,BackColor=Color.Transparent,Font=PluginRowSubFont};
+            page.Controls.AddRange(new Control[]{pageTitle,pageSubtitle});content.Controls.Add(page);
             return page;
         };
         Panel installedPage=newPage("已安装插件");
-        PluginListControl list=new PluginListControl{Left=28,Top=92,Width=654,Height=400,EmptyText="还没有安装任何插件。切换到「插件市场」浏览官方插件，或「从本地安装」。"};
-        Label status=LightUi.Label("",28,552,654);
-        Button toggle=LightUi.PrimaryButton("启用 / 禁用",28,506,120,DialogResult.None);
-        Button configure=LightUi.Button("配置",156,506,88,DialogResult.None);
-        Button run=LightUi.Button("立即运行",252,506,100,DialogResult.None);
-        Button actions=LightUi.Button("插件操作",360,506,100,DialogResult.None);
-        Button uninstall=LightUi.DangerButton("卸载程序",468,506,100,DialogResult.None);
-        Button local=LightUi.Button("从本地安装",576,506,118,DialogResult.None);
-        installedPage.Controls.Add(list);installedPage.Controls.Add(status);
-        installedPage.Controls.AddRange(new Control[]{toggle,configure,run,actions,uninstall,local});
-        Action updateInstalledButtons=delegate{PluginRow chosen=list.SelectedRow;PluginManifest manifest=chosen==null?null:chosen.Tag as PluginManifest;bool has=manifest!=null;bool runnable=has&&!manifest.HostTooOld;toggle.Enabled=configure.Enabled=run.Enabled=runnable;actions.Enabled=uninstall.Enabled=has;};
+        PluginListControl list=new PluginListControl{Left=32,Top=122,Width=514,Height=556,EmptyText="还没有安装插件。可从插件市场或本地程序包添加。"};
+        Panel pluginDetail=SettingsCard(installedPage,566,122,286,556);
+        Label detailEyebrow=new Label{Text="插件详情",Left=20,Top=18,Width=220,Height=20,ForeColor=SettingsAccent,BackColor=Color.Transparent,Font=PluginBadgeFont};
+        Label detailTitle=new Label{Text="选择一个插件",Left=20,Top=44,Width=246,Height=58,ForeColor=SettingsText,BackColor=Color.Transparent,Font=PluginCaptionFont};
+        Label status=new Label{Text="从左侧选择插件后，可在这里管理。",Left=20,Top=108,Width=246,Height=66,ForeColor=SettingsMuted,BackColor=Color.Transparent,Font=PluginRowSubFont};
+        Button toggle=LightUi.PrimaryButton("启用或禁用",20,194,246,DialogResult.None);
+        Button configure=LightUi.Button("打开配置",20,242,118,DialogResult.None);
+        Button run=LightUi.Button("立即运行",148,242,118,DialogResult.None);
+        Button actions=LightUi.Button("更多操作",20,290,246,DialogResult.None);
+        Button uninstall=LightUi.DangerButton("卸载插件程序",20,338,246,DialogResult.None);
+        Button local=LightUi.Button("从本地安装",676,66,176,DialogResult.None);
+        foreach(Button b in new Button[]{toggle,configure,run,actions,uninstall}){b.BackColor=SettingsCardHover;b.ForeColor=SettingsText;}
+        pluginDetail.Controls.AddRange(new Control[]{detailEyebrow,detailTitle,status,toggle,configure,run,actions,uninstall});
+        installedPage.Controls.AddRange(new Control[]{list,local});
+        Action updateInstalledButtons=delegate{PluginRow chosen=list.SelectedRow;PluginManifest manifest=chosen==null?null:chosen.Tag as PluginManifest;bool has=manifest!=null;bool runnable=has&&!manifest.HostTooOld;toggle.Enabled=configure.Enabled=run.Enabled=runnable;actions.Enabled=uninstall.Enabled=has;detailTitle.Text=chosen==null?"选择一个插件":chosen.Title;status.Text=chosen==null?"从左侧选择插件后，可在这里管理。":chosen.Subtitle;};
         list.SelectionChanged+=delegate{updateInstalledButtons();};
         list.RowActivated+=delegate{if(configure.Enabled)configure.PerformClick();};
         Action reload=delegate{ReloadPlugins(list,status);updateInstalledButtons();};reload();
@@ -457,13 +495,13 @@ internal static partial class TodoApp
         local.Click+=delegate{try{InstallLocalPlugin(form);reload();}catch(Exception ex){LightUi.Error(ex.Message);}};
 
         Panel marketPage=newPage("插件市场");
-        TextBox marketSearch=new TextBox{Left=28,Top=88,Width=386,Height=32,AutoSize=false,BorderStyle=BorderStyle.FixedSingle,Font=PluginNavFont,BackColor=Color.White,ForeColor=LightUi.Text};
-        Label searchHint=LightUi.Label("搜索插件",40,96,180);searchHint.BackColor=Color.White;searchHint.ForeColor=LightUi.Muted;searchHint.Cursor=Cursors.IBeam;
-        ComboBox marketCategory=new ComboBox{Left=428,Top=88,Width=146,DropDownStyle=ComboBoxStyle.DropDownList,Font=PluginNavFont};marketCategory.Items.AddRange(new object[]{"全部","内容","服务","工具","其他"});marketCategory.SelectedIndex=0;
-        Button refresh=LightUi.PrimaryButton("刷新市场",586,86,96,DialogResult.None);refresh.Height=34;
-        PluginMarketControl marketList=new PluginMarketControl{Left=28,Top=130,Width=654,Height=354,EmptyText="本地市场暂无匹配插件。点击「刷新市场」可从远端更新。"};
-        Label marketStatus=LightUi.Label("正在读取本地市场",28,542,654);
-        Button installMarket=LightUi.PrimaryButton("安装 / 更新",28,496,120,DialogResult.None);
+        TextBox marketSearch=new TextBox{Left=32,Top=116,Width=420,Height=36,AutoSize=false,BorderStyle=BorderStyle.FixedSingle,Font=PluginNavFont,BackColor=SettingsCardBack,ForeColor=SettingsText};
+        Label searchHint=LightUi.Label("搜索名称、说明或类别",46,124,220);searchHint.BackColor=SettingsCardBack;searchHint.ForeColor=SettingsMuted;searchHint.Cursor=Cursors.IBeam;
+        ComboBox marketCategory=new ComboBox{Left=466,Top=116,Width=150,DropDownStyle=ComboBoxStyle.DropDownList,Font=PluginNavFont,BackColor=SettingsCardBack,ForeColor=SettingsText};marketCategory.Items.AddRange(new object[]{"全部","内容","服务","工具","其他"});marketCategory.SelectedIndex=0;
+        Button refresh=LightUi.PrimaryButton("刷新远端市场",694,114,158,DialogResult.None);refresh.Height=38;
+        PluginMarketControl marketList=new PluginMarketControl{Left=32,Top=170,Width=820,Height=472,EmptyText="本地市场暂无匹配插件。点击「刷新远端市场」可更新索引。"};
+        Label marketStatus=new Label{Text="正在读取本地市场",Left=34,Top=656,Width=630,Height=24,ForeColor=SettingsMuted,BackColor=Color.Transparent,Font=PluginRowSubFont};
+        Button installMarket=LightUi.PrimaryButton("安装或更新所选插件",674,650,178,DialogResult.None);
         LightUi.SetCue(marketSearch,"搜索插件");
         marketPage.Controls.AddRange(new Control[]{marketSearch,marketCategory,refresh,marketList,marketStatus,installMarket});
         installMarket.Enabled=false;
@@ -471,43 +509,53 @@ internal static partial class TodoApp
         marketSearch.TextChanged+=delegate{applyMarketFilter();};marketSearch.Enter+=delegate{searchHint.Visible=false;};marketSearch.Leave+=delegate{searchHint.Visible=marketSearch.TextLength==0;};searchHint.Click+=delegate{marketSearch.Focus();};marketCategory.SelectedIndexChanged+=delegate{applyMarketFilter();};
         marketList.SelectionChanged+=delegate{string required;installMarket.Enabled=marketList.SelectedRow!=null&&MarketCompatible(marketList.SelectedRow.Tag as Dictionary<string,object>,out required);};
         marketList.RowActivated+=delegate{if(installMarket.Enabled)installMarket.PerformClick();};
+        marketList.InstallRequested+=delegate{if(installMarket.Enabled)installMarket.PerformClick();};
         refresh.Click+=delegate{try{LoadMarket(marketList,marketStatus,true);}catch(Exception ex){marketStatus.Text="市场不可用："+ex.Message;marketStatus.ForeColor=LightUi.Danger;}};
         installMarket.Click+=delegate{try{PluginRow selectedMarket=marketList.SelectedRow;if(selectedMarket==null)throw new Exception("请先选择一个市场插件。");InstallMarketPlugin(selectedMarket);reload();LoadMarket(marketList,marketStatus,false);}catch(Exception ex){LightUi.Error(ex.Message);}};
-        try{LoadMarket(marketList,marketStatus,false);}catch(Exception ex){marketStatus.Text="本地市场不可用："+ex.Message;marketStatus.ForeColor=LightUi.Danger;}        Panel appearancePage=newPage("外观与备份");
-        Panel scaleCard=SettingsCard(appearancePage,28,92,654,106);
+        globalSearch.KeyDown+=delegate(object sender,KeyEventArgs e){if(e.KeyCode==Keys.Enter){marketSearch.Text=globalSearch.Text;marketSearch.Focus();e.SuppressKeyPress=true;}};
+        try{LoadMarket(marketList,marketStatus,false);}catch(Exception ex){marketStatus.Text="本地市场不可用："+ex.Message;marketStatus.ForeColor=LightUi.Danger;}
+        Panel appearancePage=newPage("外观");
+        Panel scaleCard=SettingsCard(appearancePage,32,120,820,116);
         string[] labels={"自动","75%","80%","90%","100%","110%","125%"},values={"auto","0.75","0.80","0.90","1.00","1.10","1.25"};
-        Label scaleLabel=LightUi.Label("桌面磁贴缩放",16,14,220);scaleCard.Controls.Add(scaleLabel);
-        ComboBox scale=new ComboBox{Left=16,Top=40,Width=220,DropDownStyle=ComboBoxStyle.DropDownList,Font=PluginNavFont};scale.Items.AddRange(labels);int selected=Array.FindIndex(values,x=>String.Equals(x,UiScale.Mode,StringComparison.OrdinalIgnoreCase));scale.SelectedIndex=selected<0?0:selected;scaleCard.Controls.Add(scale);
-        Label windowScaleLabel=LightUi.Label("管理与编辑窗口缩放",252,14,220);scaleCard.Controls.Add(windowScaleLabel);
-        ComboBox windowScale=new ComboBox{Left=252,Top=40,Width=220,DropDownStyle=ComboBoxStyle.DropDownList,Font=PluginNavFont};windowScale.Items.AddRange(labels);int windowSelected=Array.FindIndex(values,x=>String.Equals(x,UiScale.WindowMode,StringComparison.OrdinalIgnoreCase));windowScale.SelectedIndex=windowSelected<0?0:windowSelected;scaleCard.Controls.Add(windowScale);
-        Button apply=LightUi.PrimaryButton("应用缩放",488,38,130,DialogResult.None);scaleCard.Controls.Add(apply);
+        Label scaleLabel=new Label{Text="桌面磁贴缩放",Left=22,Top=18,Width=210,Height=22,ForeColor=SettingsText,BackColor=Color.Transparent,Font=PluginNavFont};scaleCard.Controls.Add(scaleLabel);
+        ComboBox scale=new ComboBox{Left=22,Top=52,Width=210,DropDownStyle=ComboBoxStyle.DropDownList,Font=PluginNavFont};scale.Items.AddRange(labels);int selected=Array.FindIndex(values,x=>String.Equals(x,UiScale.Mode,StringComparison.OrdinalIgnoreCase));scale.SelectedIndex=selected<0?0:selected;scaleCard.Controls.Add(scale);
+        Label windowScaleLabel=new Label{Text="管理与编辑窗口缩放",Left=260,Top=18,Width=230,Height=22,ForeColor=SettingsText,BackColor=Color.Transparent,Font=PluginNavFont};scaleCard.Controls.Add(windowScaleLabel);
+        ComboBox windowScale=new ComboBox{Left=260,Top=52,Width=230,DropDownStyle=ComboBoxStyle.DropDownList,Font=PluginNavFont};windowScale.Items.AddRange(labels);int windowSelected=Array.FindIndex(values,x=>String.Equals(x,UiScale.WindowMode,StringComparison.OrdinalIgnoreCase));windowScale.SelectedIndex=windowSelected<0?0:windowSelected;scaleCard.Controls.Add(windowScale);
+        Button apply=LightUi.PrimaryButton("应用缩放",658,48,136,DialogResult.None);scaleCard.Controls.Add(apply);
         apply.Click+=delegate{try{UiScale.SaveMode(values[scale.SelectedIndex]);UiScale.SaveWindowMode(values[windowScale.SelectedIndex]);RenderUiScaleSkins();MessageBox.Show("磁贴缩放已应用；窗口缩放将在下次打开窗口时生效。","缩放设置");}catch(Exception ex){LightUi.Error(ex.Message);}};
 
-        Panel themeCard=SettingsCard(appearancePage,28,214,654,94);
-        Label themeLabel=LightUi.Label("磁贴视觉风格",16,14,180);themeCard.Controls.Add(themeLabel);
+        Panel themeCard=SettingsCard(appearancePage,32,252,820,112);
+        Label themeLabel=new Label{Text="界面材质风格",Left=22,Top=18,Width=200,Height=22,ForeColor=SettingsText,BackColor=Color.Transparent,Font=PluginNavFont};themeCard.Controls.Add(themeLabel);
         string[] themeLabels={"经典（保留原版）","云母","亚克力"},themeValues={UiTheme.Classic,UiTheme.Mica,UiTheme.Acrylic};
-        ComboBox theme=new ComboBox{Left=16,Top=40,Width=220,DropDownStyle=ComboBoxStyle.DropDownList,Font=PluginNavFont};theme.Items.AddRange(themeLabels);int themeSelected=Array.FindIndex(themeValues,x=>String.Equals(x,UiTheme.Current,StringComparison.OrdinalIgnoreCase));theme.SelectedIndex=themeSelected<0?0:themeSelected;themeCard.Controls.Add(theme);
-        Label themeHint=LightUi.Label("云母偏稳重，亚克力更通透；布局与操作保持不变。",252,17,254);themeHint.Height=44;themeCard.Controls.Add(themeHint);
-        Button applyTheme=LightUi.PrimaryButton("应用风格",520,38,98,DialogResult.None);themeCard.Controls.Add(applyTheme);
+        ComboBox theme=new ComboBox{Left=22,Top=50,Width=238,DropDownStyle=ComboBoxStyle.DropDownList,Font=PluginNavFont};theme.Items.AddRange(themeLabels);int themeSelected=Array.FindIndex(themeValues,x=>String.Equals(x,UiTheme.Current,StringComparison.OrdinalIgnoreCase));theme.SelectedIndex=themeSelected<0?0:themeSelected;themeCard.Controls.Add(theme);
+        Label themeHint=new Label{Text="经典保留原版；云母沉稳，亚克力更通透。设置中心与磁贴会使用同一套设计语言。",Left=286,Top=24,Width=334,Height=56,ForeColor=SettingsMuted,BackColor=Color.Transparent,Font=PluginRowSubFont};themeCard.Controls.Add(themeHint);
+        Button applyTheme=LightUi.PrimaryButton("应用风格",658,46,136,DialogResult.None);themeCard.Controls.Add(applyTheme);
         applyTheme.Click+=delegate{try{UiTheme.Save(themeValues[theme.SelectedIndex]);RenderUiScaleSkins();MessageBox.Show("已应用"+UiTheme.DisplayName(themeValues[theme.SelectedIndex])+"风格。","外观设置");}catch(Exception ex){LightUi.Error(ex.Message);}};
 
-        Panel backupCard=SettingsCard(appearancePage,28,324,654,150);
-        Label backupTitle=new Label{Text="加密用户配置备份",Left=16,Top=14,Width=400,Height=22,ForeColor=LightUi.Text,BackColor=Color.Transparent,Font=PluginNavFont};backupCard.Controls.Add(backupTitle);
-        Button export=LightUi.PrimaryButton("导出用户配置",16,84,150,DialogResult.None),import=LightUi.Button("导入用户配置",178,84,150,DialogResult.None);
+        Panel maintenancePage=newPage("数据与维护");
+        Panel backupCard=SettingsCard(maintenancePage,32,120,820,152);
+        Label backupTitle=new Label{Text="加密用户配置备份",Left=22,Top=20,Width=400,Height=24,ForeColor=SettingsText,BackColor=Color.Transparent,Font=PluginNavFont};backupCard.Controls.Add(backupTitle);
+        Label backupHint=new Label{Text="迁移或重装前导出配置；导入时会验证备份内容。",Left=22,Top=50,Width=500,Height=24,ForeColor=SettingsMuted,BackColor=Color.Transparent,Font=PluginRowSubFont};backupCard.Controls.Add(backupHint);
+        Button export=LightUi.PrimaryButton("导出用户配置",22,94,154,DialogResult.None),import=LightUi.Button("导入用户配置",188,94,154,DialogResult.None);
         backupCard.Controls.AddRange(new Control[]{export,import});
         export.Click+=delegate{try{string path=ExportUserBackupInteractive();if(path!="")MessageBox.Show("备份已保存：\r\n"+path,"导出完成",MessageBoxButtons.OK,MessageBoxIcon.Information);}catch(Exception ex){LightUi.Error(ex.Message);}};
         import.Click+=delegate{try{string result=ImportUserBackupInteractive();if(result!=""){RenderUiScaleSkins();MessageBox.Show(result,"导入完成",MessageBoxButtons.OK,MessageBoxIcon.Information);}}catch(Exception ex){LightUi.Error(ex.Message);}};
-        Panel aboutPage=newPage("关于与更新");
-        Panel aboutCard=SettingsCard(aboutPage,28,92,654,180);
-        Label appName=new Label{Text="Rainmeter Desktop Widgets",Left=16,Top=16,Width=400,Height=28,ForeColor=LightUi.Text,BackColor=Color.Transparent,Font=PluginCaptionFont};
-        Label aboutVersion=new Label{Text="版本 "+AppVersion+" · Plugin API v1",Left=16,Top=52,Width=400,Height=20,ForeColor=LightUi.Muted,BackColor=Color.Transparent,Font=PluginRowSubFont};
-        Button update=LightUi.Button("检查主程序更新",16,104,160,DialogResult.None);
-        aboutCard.Controls.AddRange(new Control[]{appName,aboutVersion,update});
+        Panel updateCard=SettingsCard(maintenancePage,32,288,820,112);
+        Label updateTitle=new Label{Text="主程序更新",Left=22,Top=20,Width=300,Height=24,ForeColor=SettingsText,BackColor=Color.Transparent,Font=PluginNavFont};
+        Label updateHint=new Label{Text="检查新版本，并在确认后启动独立升级器。",Left=22,Top=52,Width=460,Height=24,ForeColor=SettingsMuted,BackColor=Color.Transparent,Font=PluginRowSubFont};
+        Button update=LightUi.Button("检查主程序更新",622,38,172,DialogResult.None);
+        updateCard.Controls.AddRange(new Control[]{updateTitle,updateHint,update});
         update.Click+=delegate{try{UpdateCheckResult info=CheckLatestUpdate();if(!info.IsNewer)MessageBox.Show("已是最新版本："+info.Tag,"检查更新");else if(MessageBox.Show("发现 "+info.Tag+"，现在启动升级器？","检查更新",MessageBoxButtons.YesNo,MessageBoxIcon.Question)==DialogResult.Yes){StartExternalUpdater();form.Close();}}catch(Exception ex){LightUi.Error(ex.Message);}};
-        SettingsNavItem navInstalled=NewNavItem("\xE74C","已安装插件",92),navMarket=NewNavItem("\xE719","插件市场",136),navAppearance=NewNavItem("\xE790","外观与备份",180),navAbout=NewNavItem("\xE946","关于与更新",224);
-        sidebar.Controls.AddRange(new Control[]{navInstalled,navMarket,navAppearance,navAbout});
-        Panel[] pages={installedPage,marketPage,appearancePage,aboutPage};
-        SettingsNavItem[] navs={navInstalled,navMarket,navAppearance,navAbout};
+        Panel aboutPage=newPage("关于");
+        Panel aboutCard=SettingsCard(aboutPage,32,120,820,210);
+        Label appName=new Label{Text="Rainmeter Desktop Widgets",Left=28,Top=28,Width=520,Height=36,ForeColor=SettingsText,BackColor=Color.Transparent,Font=new Font("Microsoft YaHei UI",17F,FontStyle.Bold)};
+        Label aboutVersion=new Label{Text="版本 "+AppVersion+"  ·  Plugin API v1",Left=28,Top=76,Width=500,Height=24,ForeColor=SettingsMuted,BackColor=Color.Transparent,Font=PluginRowSubFont};
+        Label aboutCopy=new Label{Text="桌面待办、日程与扩展服务的统一管理工具。\r\n界面重构不会改变磁贴数据与插件兼容边界。",Left=28,Top=116,Width=630,Height=58,ForeColor=SettingsMuted,BackColor=Color.Transparent,Font=PluginRowSubFont};
+        aboutCard.Controls.AddRange(new Control[]{appName,aboutVersion,aboutCopy});
+        SettingsNavItem navInstalled=NewNavItem("\xE74C","已安装插件",92),navMarket=NewNavItem("\xE719","插件市场",142),navAppearance=NewNavItem("\xE790","外观",192),navMaintenance=NewNavItem("\xE713","数据与维护",242),navAbout=NewNavItem("\xE946","关于",292);
+        sidebar.Controls.AddRange(new Control[]{navInstalled,navMarket,navAppearance,navMaintenance,navAbout});
+        Panel[] pages={installedPage,marketPage,appearancePage,maintenancePage,aboutPage};
+        SettingsNavItem[] navs={navInstalled,navMarket,navAppearance,navMaintenance,navAbout};
         Action<int> selectPage=delegate(int index){for(int i=0;i<pages.Length;i++){pages[i].Visible=i==index;navs[i].Selected=i==index;navs[i].Invalidate();}};
         for(int i=0;i<navs.Length;i++){int index=i;navs[index].Activated+=delegate{selectPage(index);};}
         selectPage(initialPage<0||initialPage>=pages.Length?0:initialPage);

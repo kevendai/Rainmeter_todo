@@ -242,7 +242,7 @@ internal static class TodoLayoutProbe
                 DpiLayoutAssertions.AssertManualScaling(form);
                 DpiLayoutAssertions.AssertPixelFonts(form);
                 DpiLayoutAssertions.AssertSingleLineLabelsNotClipped(form);
-                string[] expectedNav = { "已安装插件", "插件市场", "外观与备份", "关于与更新" };
+                string[] expectedNav = { "已安装插件", "插件市场", "外观", "数据与维护", "关于" };
                 foreach (string expected in expectedNav)
                 {
                     if (!Descendants(form).Any(control => control.GetType().Name == "SettingsNavItem" && control.Text == expected))
