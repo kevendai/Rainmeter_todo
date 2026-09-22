@@ -1,6 +1,6 @@
 {
   "id": "io.github.kevendai.ai-deepseek",
-  "name": "DeepSeek AI",
+  "name": "DeepSeek AI 评分",
   "description": "官方 Provider：把 DeepSeek 聊天补全封装成 ai_provider@1 服务，供其他插件请求结构化 JSON 结果。按 token 计费，可能产生费用。",
   "channel": "stable",
   "official": true,

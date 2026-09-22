@@ -217,6 +217,9 @@ Write-Host 'UpdaterHost EXE and minimal legacy PowerShell launcher passed'
     $previousProbeFailureLog = $env:RAINMETER_PROBE_FAILURE_LOG
     $env:RAINMETER_PROBE_FAILURE_LOG = Join-Path $build 'probe-failures.log'
     try {
+        # 临时宿主的 Render 只验证生成结果，绝不能刷新真实 Rainmeter 皮肤。
+        # 否则 Calendar 的 OnRefreshAction 会启动 live Startup，并与下一轮测试争用全局状态锁。
+        $env:RAINMETER_COMMANDS_DISABLED = '1'
         foreach ($scale in @('0.70','0.75','0.80','0.90','1.00','1.10','1.25')) {
             $env:RAINMETER_UI_SCALE_OVERRIDE = $scale
             foreach ($hostExe in @($todo, $calendar)) {
@@ -294,6 +297,8 @@ Write-Host 'UpdaterHost EXE and minimal legacy PowerShell launcher passed'
         }
         Write-Host 'Window DPI compensation probe passed at UI 75% / Windows 200% (effective 120%)'
     } finally {
+        if ($null -eq $previousCommandDisable) { Remove-Item Env:RAINMETER_COMMANDS_DISABLED -ErrorAction SilentlyContinue }
+        else { $env:RAINMETER_COMMANDS_DISABLED = $previousCommandDisable }
         if ($null -eq $previousScaleOverride) { Remove-Item Env:RAINMETER_UI_SCALE_OVERRIDE -ErrorAction SilentlyContinue }
         else { $env:RAINMETER_UI_SCALE_OVERRIDE = $previousScaleOverride }
         if ($null -eq $previousDpiOverride) { Remove-Item Env:RAINMETER_UI_DPI_OVERRIDE -ErrorAction SilentlyContinue }

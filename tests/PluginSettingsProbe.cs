@@ -23,6 +23,7 @@ internal static class PluginSettingsProbe
     private const string ProviderOff = "io.github.test.provider-off";
     private const string ProviderCache = "io.github.test.provider-cache";
 
+    private const string AddressProviderId = "io.github.test.address-provider";
     private static int checks, failures;
     private static string root = "";
 
@@ -44,6 +45,9 @@ internal static class PluginSettingsProbe
             ServiceSection(manifest);
             BindingSection(manifest);
             UiSection(manifest);
+            AddressSection();
+            MarketSection();
+            StatusSection();
         }
         catch (Exception ex)
         {
@@ -106,6 +110,7 @@ internal static class PluginSettingsProbe
     ""cache_service"": {""type"":""string"",""title"":""缓存服务"",""x-service"":""cache_provider@1"",""x-order"":6},
     ""undeclared"": {""type"":""string"",""title"":""未声明的依赖"",""x-service"":""mystery_provider@1"",""x-order"":7},
     ""title_prompt"": {""type"":""multiline"",""title"":""标题提示词"",""default"":"""",""x-order"":10,""x-section"":""评分"",""x-advanced"":true},
+    ""file_url"": {""type"":""string"",""title"":""文件服务器地址"",""default"":""http://198.51.100.20:8080/dav"",""x-address"":true,""x-order"":8},
     ""title_threshold"": {""type"":""integer"",""title"":""阈值"",""minimum"":0,""maximum"":10,""default"":7,""x-order"":11,""x-section"":""评分""},
     ""batch"": {""type"":""integer"",""title"":""批大小"",""minimum"":1,""maximum"":50,""default"":10,""x-order"":12,""x-advanced"":true}
   }
@@ -114,7 +119,7 @@ internal static class PluginSettingsProbe
     private const string ConsumerManifest = @"{
   ""id"": ""io.github.test.consumer"", ""name"": ""Settings fixture"", ""version"": ""1.0.0"",
   ""api_version"": 1, ""min_host_version"": ""2.0.0"", ""entry"": ""bin/Consumer.exe"",
-  ""capabilities"": [""todo_source""], ""settings_schema"": ""settings.schema.json"",
+  ""capabilities"": [""todo_source""], ""settings_schema"": ""settings.schema.json"", ""address_target"": ""test.file_server"",
   ""uses"": [
     {""service"":""translation_provider@1""},
     {""service"":""ai_provider@1""},
@@ -130,21 +135,29 @@ internal static class PluginSettingsProbe
             + "\"provides\":[\"" + service + "\"],\"billing\":\"" + billing + "\"}";
     }
 
+    private const string AddressProviderManifest = @"{
+  ""id"": ""io.github.test.address-provider"", ""name"": ""地址测试插件"", ""version"": ""1.0.0"",
+  ""api_version"": 1, ""min_host_version"": ""2.0.0"", ""entry"": ""bin/Address.exe"",
+  ""capabilities"": [""value_provider""], ""address_provider"": {""priority"":100,""value"":""server_ip"",""targets"":[""test.file_server""]}
+}";
     private static void Fixture()
     {
         PluginPaths.Ensure();
         Directory.CreateDirectory(PluginPaths.DataRoot(ConsumerId));
         WritePlugin(ConsumerId, ConsumerManifest, true, "Consumer.exe");
         File.WriteAllText(Path.Combine(PluginPaths.VersionRoot(ConsumerId, "1.0.0"), "settings.schema.json"), ConsumerSchema, RuntimeUtil.Utf8NoBom);
-        File.WriteAllText(Path.Combine(PluginPaths.DataRoot(ConsumerId), "config.json"), "{\"enabled\":true,\"translate_enabled\":true}", RuntimeUtil.Utf8NoBom);
+        File.WriteAllText(Path.Combine(PluginPaths.DataRoot(ConsumerId), "config.json"), "{\"enabled\":true,\"translate_enabled\":true,\"file_url\":\"http://198.51.100.20:8080/dav\"}", RuntimeUtil.Utf8NoBom);
         WritePlugin(ProviderA, ProviderManifest(ProviderA, "Provider A", "translation_provider@1", "may_charge"), true, "Provider.exe");
         WritePlugin(ProviderB, ProviderManifest(ProviderB, "Provider B", "translation_provider@1", "free"), true, "Provider.exe");
         WritePlugin(ProviderCache, ProviderManifest(ProviderCache, "Provider Cache", "cache_provider@1", "free"), true, "Provider.exe");
         // 装了但没启用：界面该给"启用"而不是"安装"。
         WritePlugin(ProviderOff, ProviderManifest(ProviderOff, "Provider OFF", "ai_provider@1", "free"), false, "Provider.exe");
+        WritePlugin(AddressProviderId, AddressProviderManifest, true, "Address.exe");
+        File.WriteAllText(PluginPaths.Values,"{\"entries\":{\"Plugin_io_github_test_address_provider_server_ip\":{\"value\":\"203.0.113.7\",\"stale\":false}}}",RuntimeUtil.Utf8NoBom);
     }
 
     private static void WritePlugin(string id, string manifest, bool enabled, string exeName)
+
     {
         string versionRoot = PluginPaths.VersionRoot(id, "1.0.0");
         Directory.CreateDirectory(Path.Combine(versionRoot, "bin"));
@@ -190,7 +203,7 @@ internal static class PluginSettingsProbe
             Equal("高级设置", sections[2].Name, "高级项合并成一个折叠组");
         }
         Expect(!sections[0].Advanced && !sections[1].Advanced && sections[2].Advanced, "只有高级组带折叠标记");
-        Equal("enabled,paper_snapshot,ai_service,translate_enabled,translation_service,cache_service,undeclared",
+        Equal("enabled,paper_snapshot,ai_service,translate_enabled,translation_service,cache_service,undeclared,file_url",
             String.Join(",", sections[0].Fields.Select(x => x.Key).ToArray()), "组内按 x-order 排序");
         Equal("title_threshold", String.Join(",", sections[1].Fields.Select(x => x.Key).ToArray()), "评分组只收非高级项");
         Equal("title_prompt,batch", String.Join(",", sections[2].Fields.Select(x => x.Key).ToArray()), "高级组按 x-order 排序");
@@ -268,6 +281,39 @@ internal static class PluginSettingsProbe
             || !File.ReadAllText(Path.Combine(PluginPaths.Root, "plugin-bindings.json"), RuntimeUtil.Utf8NoBom).Contains("Not A Service"), "非法绑定没被写进文件");
     }
 
+    private static void AddressSection()
+    {
+        Equal("http://203.0.113.7:8080/dav",DynamicPluginValues.BindForTarget("http://198.51.100.20:8080/dav","test.file_server"),"地址 Provider 只替换主机");
+        Equal("http://198.51.100.20:9800/dav",DynamicPluginValues.MergeAddressEdit("http://198.51.100.20:8080/dav","http://203.0.113.7:9800/dav","test.file_server"),"保存端口修改时保留用户原主机");
+    }
+
+    private static void MarketSection()
+    {
+        string folder=Path.Combine(root,"market-test");Directory.CreateDirectory(folder);
+        string cache=Path.Combine(folder,"cache.json"),bundled=Path.Combine(folder,"bundled.json"),source,label;
+        string local="{\"plugins\":[{\"id\":\"local\",\"name\":\"本地市场\"}]}";
+        string remote="{\"plugins\":[{\"id\":\"remote\",\"name\":\"远端市场\"}]}";
+        File.WriteAllText(bundled,local,RuntimeUtil.Utf8NoBom);
+        Equal(local,PluginMarketCache.LoadLocal(cache,bundled,out source,out label),"首次打开市场只读内置本地索引");
+        PluginMarketCache.Save(cache,remote);
+        Equal(remote,PluginMarketCache.LoadLocal(cache,bundled,out source,out label),"刷新落盘后下次打开读取本地缓存");
+        File.WriteAllText(cache,"not-json",RuntimeUtil.Utf8NoBom);
+        Equal(local,PluginMarketCache.LoadLocal(cache,bundled,out source,out label),"损坏缓存自动丢弃并回退内置索引");
+        Expect(!File.Exists(cache),"损坏缓存已清理");
+    }
+
+    private static void StatusSection()
+    {
+        Directory.CreateDirectory(PluginPaths.Jobs);
+        File.WriteAllText(Path.Combine(PluginPaths.Jobs,ProviderOff+".json"),"{\"state\":\"failed\",\"message\":\"依赖失败：io.github.test.provider-a\"}",RuntimeUtil.Utf8NoBom);
+        PluginManifest disabled=PluginManifest.Load(PluginPaths.VersionRoot(ProviderOff,"1.0.0"));
+        MethodInfo method=typeof(TodoApp).GetMethod("PluginRuntimeStatus",BindingFlags.Static|BindingFlags.NonPublic);
+        Equal("",Convert.ToString(method.Invoke(null,new object[]{ProviderOff,disabled,false})),"插件未启用时不显示历史 failed");
+        string enabled=Convert.ToString(method.Invoke(null,new object[]{ProviderOff,disabled,true}));
+        Expect(enabled.Contains("Provider A")&&!enabled.Contains(ProviderA),"错误冒号后显示插件名而不是复杂 ID");
+        Equal("日程转待办",PluginNames.Display("io.github.kevendai.calendar-to-todo","Calendar to Todo"),"内置插件统一中文名");
+    }
+
     // ---------- 4) 真对话框（含保存路径与置灰行） ----------
 
     private static void UiSection(PluginManifest manifest)
@@ -280,6 +326,12 @@ internal static class PluginSettingsProbe
             Expect(translateBox != null && !translateBox.Enabled, "没有可用 provider 时「启用标题翻译」置灰（§11-#7）");
             Expect(translateBox != null && translateBox.Checked, "置灰不改值：仍然是用户存过的 true（§11-#8）");
             Expect(Labels(form).Count(x => x.Text == "基本") == 1 && Labels(form).Count(x => x.Text == "评分") == 1, "多组时渲染分组标题（§7.4）");
+
+            Label addressLabel=Labels(form).First(x=>x.Text.StartsWith("文件服务器地址",StringComparison.Ordinal));
+            TextBox addressBox=RowControl<TextBox>(form,addressLabel);
+            Expect(addressBox!=null&&addressBox.Enabled&&!addressBox.ReadOnly,"SSDP 接管主机时端口输入仍可编辑");
+            Equal("http://203.0.113.7:8080/dav",addressBox.Text,"设置页显示已接管 IP 和当前端口");
+            addressBox.Text="http://203.0.113.7:9800/dav";
 
             ComboBox translation = RowControl<ComboBox>(form, Labels(form).First(x => x.Text == "翻译服务"));
             Expect(translation != null && translation.Items.Count == 3, "候选与「不使用」都在下拉里");
@@ -307,6 +359,8 @@ internal static class PluginSettingsProbe
         Dictionary<string, object> config = JsonUtil.LoadObject(Path.Combine(PluginPaths.DataRoot(ConsumerId), "config.json"));
         Expect(JsonUtil.Bool(config, "translate_enabled", false), "保存后开关仍是 true：置灰逻辑没有改写存储值（§11-#8）");
         Expect(JsonUtil.Int(config, "title_threshold", -1) == 7, "保存真的落盘");
+        Equal("http://198.51.100.20:9800/dav",JsonUtil.String(config,"file_url",""),"设置保存用户修改的端口但不把 SSDP IP 写死");
+        Equal("http://203.0.113.7:9800/dav",DynamicPluginValues.BindForTarget(JsonUtil.String(config,"file_url",""),"test.file_server"),"运行时继续用 SSDP IP 和新端口");
         Equal("", ServiceRegistry.BoundProvider(ConsumerId, "translation_provider@1"), "多候选且未选 ⇒ 一个字节都不写（§8/#15）");
         Equal(ProviderOff, ServiceRegistry.BoundProvider(ConsumerId, "ai_provider@1"), "界面上启用的 provider 被记进绑定表");
 

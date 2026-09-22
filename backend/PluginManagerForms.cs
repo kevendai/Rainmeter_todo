@@ -11,6 +11,41 @@ using System.Text;
 using System.Windows.Forms;
 using RainmeterBackend;
 
+internal static class PluginMarketCache
+{
+    internal static string Decode(byte[] raw)
+    {
+        string json=new UTF8Encoding(false,true).GetString(raw);
+        JsonUtil.Deserialize(json);
+        return json;
+    }
+
+    internal static void Save(string path,string json)
+    {
+        JsonUtil.Deserialize(json);
+        string directory=Path.GetDirectoryName(path);if(!String.IsNullOrWhiteSpace(directory))Directory.CreateDirectory(directory);
+        string temporary=path+".tmp-"+Guid.NewGuid().ToString("N");
+        try
+        {
+            File.WriteAllText(temporary,json,RuntimeUtil.Utf8NoBom);
+            if(File.Exists(path))File.Replace(temporary,path,null);else File.Move(temporary,path);
+        }
+        finally{try{if(File.Exists(temporary))File.Delete(temporary);}catch{}}
+    }
+
+    internal static string LoadLocal(string cachePath,string bundledPath,out string sourcePath,out string sourceLabel)
+    {
+        sourcePath=cachePath;sourceLabel="使用本地市场缓存；";
+        if(File.Exists(cachePath))try
+        {
+            string cached=File.ReadAllText(cachePath,RuntimeUtil.Utf8NoBom);JsonUtil.Deserialize(cached);return cached;
+        }
+        catch{try{File.Delete(cachePath);}catch{}}
+        sourcePath=bundledPath;sourceLabel="使用内置官方索引；";
+        if(!File.Exists(bundledPath))throw new FileNotFoundException("找不到本地插件市场索引。",bundledPath);
+        string bundled=File.ReadAllText(bundledPath,RuntimeUtil.Utf8NoBom);JsonUtil.Deserialize(bundled);return bundled;
+    }
+}
 internal static partial class TodoApp
 {
     private const string PluginRegistryUrl = "https://kevendai.github.io/Rainmeter_todo-plugin-registry/index-v1.json";
@@ -21,7 +56,7 @@ internal static partial class TodoApp
     private static string PluginDisplayStatus(Dictionary<string,object> state)
     {
         string path=Path.Combine(PluginPaths.Jobs,"io.github.kevendai.arxiv.json");if(!File.Exists(path))return JsonUtil.String(JsonUtil.Object(JsonUtil.Get(state,"meta")),"status","就绪");
-        try{Dictionary<string,object> job=JsonUtil.LoadObject(path);string value=JsonUtil.String(job,"message","");return value==""?"插件状态："+JsonUtil.String(job,"state","未知"):value;}catch{return "插件状态暂不可读";}
+        try{Dictionary<string,object> job=JsonUtil.LoadObject(path);string value=JsonUtil.String(job,"message","");return PluginNames.Humanize(value==""?"插件状态："+JsonUtil.String(job,"state","未知"):value);}catch{return "插件状态暂不可读";}
     }
     private static readonly Font PluginNavFont = new Font("Microsoft YaHei UI", 10F);
     private static readonly Font PluginNavGlyphFont = new Font(LightUi.IconFontName, 12F);
@@ -300,7 +335,7 @@ internal static partial class TodoApp
         list.SelectionChanged+=delegate{updateInstalledButtons();};
         list.RowActivated+=delegate{if(configure.Enabled)configure.PerformClick();};
         Action reload=delegate{ReloadPlugins(list,status);updateInstalledButtons();};reload();
-        System.Windows.Forms.Timer jobTimer=new System.Windows.Forms.Timer{Interval=500};jobTimer.Tick+=delegate{PluginRow selectedRow=list.SelectedRow;if(selectedRow==null)return;PluginManifest selectedManifest=selectedRow.Tag as PluginManifest;if(selectedManifest==null)return;string path=Path.Combine(PluginPaths.Jobs,selectedManifest.Id+".json");try{if(File.Exists(path)){Dictionary<string,object> job=JsonUtil.LoadObject(path);string state=JsonUtil.String(job,"state",""),message=JsonUtil.String(job,"message","");int current=JsonUtil.Int(job,"current",0),total=JsonUtil.Int(job,"total",0);status.Text=state+(total>0?" "+current+"/"+total:"")+(message==""?"":" · "+message);}}catch{}};jobTimer.Start();form.FormClosed+=delegate{jobTimer.Stop();jobTimer.Dispose();};
+        System.Windows.Forms.Timer jobTimer=new System.Windows.Forms.Timer{Interval=500};jobTimer.Tick+=delegate{PluginRow selectedRow=list.SelectedRow;if(selectedRow==null)return;PluginManifest selectedManifest=selectedRow.Tag as PluginManifest;if(selectedManifest==null)return;try{if(!JsonUtil.Bool(PluginRuntime.Current(selectedManifest.Id),"enabled",false)){status.Text="插件已禁用";status.ForeColor=LightUi.Muted;return;}string path=Path.Combine(PluginPaths.Jobs,selectedManifest.Id+".json");if(File.Exists(path)){Dictionary<string,object> job=JsonUtil.LoadObject(path);string state=JsonUtil.String(job,"state",""),message=PluginNames.Humanize(JsonUtil.String(job,"message",""));int current=JsonUtil.Int(job,"current",0),total=JsonUtil.Int(job,"total",0);string stateText=state=="failed"?"失败":state=="attention"?"需要确认":state=="cancelled"?"已取消":state=="running"?"运行中":state=="completed"?"已完成":state;status.Text=stateText+(total>0?" "+current+"/"+total:"")+(message==""?"":" · "+message);}}catch{}};jobTimer.Start();form.FormClosed+=delegate{jobTimer.Stop();jobTimer.Dispose();};
         toggle.Click+=delegate{try{PluginManifest m=SelectedRunnablePlugin(list);Dictionary<string,object> c=PluginRuntime.Current(m.Id);c["enabled"]=!JsonUtil.Bool(c,"enabled",false);JsonUtil.SaveAtomic(Path.Combine(PluginPaths.PluginRoot(m.Id),"current.json"),c);reload();}catch(Exception ex){LightUi.Error(ex.Message);}};
         configure.Click+=delegate{try{ShowPluginConfig(SelectedRunnablePlugin(list));reload();}catch(Exception ex){LightUi.Error(ex.Message);}};
         run.Click+=delegate{try{PluginManifest m=SelectedRunnablePlugin(list);string verb=m.Capabilities.Contains("value_provider")?"Values":m.Capabilities.Contains("todo_source")?"Sync":"";if(verb=="")throw new Exception("此插件由日历按需调用。 ");StartPluginCommand(verb,m.Id);status.Text="已启动 "+m.Name;}catch(Exception ex){LightUi.Error(ex.Message);}};
@@ -313,8 +348,8 @@ internal static partial class TodoApp
         local.Click+=delegate{try{InstallLocalPlugin(form);reload();}catch(Exception ex){LightUi.Error(ex.Message);}};
 
         Panel marketPage=newPage("插件市场");
-        PluginListControl marketList=new PluginListControl{Left=28,Top=92,Width=654,Height=400,EmptyText="点击「刷新市场」加载官方插件列表。"};
-        Label marketStatus=LightUi.Label("尚未加载市场",28,552,654);
+        PluginListControl marketList=new PluginListControl{Left=28,Top=92,Width=654,Height=400,EmptyText="本地市场暂无可用插件。点击「刷新市场」从远端更新。"};
+        Label marketStatus=LightUi.Label("正在读取本地市场",28,552,654);
         Button refresh=LightUi.PrimaryButton("刷新市场",28,506,120,DialogResult.None);
         Button installMarket=LightUi.Button("安装 / 更新",156,506,120,DialogResult.None);
         marketPage.Controls.Add(marketList);marketPage.Controls.Add(marketStatus);
@@ -322,8 +357,9 @@ internal static partial class TodoApp
         installMarket.Enabled=false;
         marketList.SelectionChanged+=delegate{string required;installMarket.Enabled=marketList.SelectedRow!=null&&MarketCompatible(marketList.SelectedRow.Tag as Dictionary<string,object>,out required);};
         marketList.RowActivated+=delegate{if(installMarket.Enabled)installMarket.PerformClick();};
-        refresh.Click+=delegate{try{LoadMarket(marketList,marketStatus);}catch(Exception ex){marketStatus.Text="市场不可用："+ex.Message;marketStatus.ForeColor=LightUi.Danger;}};
-        installMarket.Click+=delegate{try{PluginRow selectedMarket=marketList.SelectedRow;if(selectedMarket==null)throw new Exception("请先选择一个市场插件。");InstallMarketPlugin(selectedMarket);reload();LoadMarket(marketList,marketStatus);}catch(Exception ex){LightUi.Error(ex.Message);}};
+        refresh.Click+=delegate{try{LoadMarket(marketList,marketStatus,true);}catch(Exception ex){marketStatus.Text="市场不可用："+ex.Message;marketStatus.ForeColor=LightUi.Danger;}};
+        installMarket.Click+=delegate{try{PluginRow selectedMarket=marketList.SelectedRow;if(selectedMarket==null)throw new Exception("请先选择一个市场插件。");InstallMarketPlugin(selectedMarket);reload();LoadMarket(marketList,marketStatus,false);}catch(Exception ex){LightUi.Error(ex.Message);}};
+        try{LoadMarket(marketList,marketStatus,false);}catch(Exception ex){marketStatus.Text="本地市场不可用："+ex.Message;marketStatus.ForeColor=LightUi.Danger;}
         Panel appearancePage=newPage("外观与备份");
         Panel scaleCard=SettingsCard(appearancePage,28,92,654,106);
         string[] labels={"自动","75%","80%","90%","100%","110%","125%"},values={"auto","0.75","0.80","0.90","1.00","1.10","1.25"};
@@ -383,9 +419,9 @@ internal static partial class TodoApp
                 {
                     if(m.Capabilities.Count>0)facts.Add(String.Join(", ",m.Capabilities.ToArray()));
                     if(m.Permissions.Count>0)facts.Add("权限 "+String.Join(", ",m.Permissions.ToArray()));
-                    string runtimeStatus=PluginRuntimeStatus(id,m);if(runtimeStatus!="")facts.Add(runtimeStatus);
+                    string runtimeStatus=PluginRuntimeStatus(id,m,enabled);if(runtimeStatus!="")facts.Add(runtimeStatus);
                 }
-                PluginRow row=new PluginRow();row.Title=m.Name;row.Subtitle=String.Join("  ·  ",facts.ToArray());
+                PluginRow row=new PluginRow();row.Title=PluginNames.Display(id,m.Name);row.Subtitle=String.Join("  ·  ",facts.ToArray());
                 if(m.HostTooOld)
                 {
                     staleHost++;
@@ -407,9 +443,10 @@ internal static partial class TodoApp
             +(staleHost>0?"；"+staleHost+" 个因主程序版本过低已暂停，请升级主程序":"")
             +(invalid>0?"；"+invalid+" 个安装损坏":"");
     }
-    private static string PluginRuntimeStatus(string id,PluginManifest manifest)
+    private static string PluginRuntimeStatus(string id,PluginManifest manifest,bool enabled)
     {
         // job 状态优先，且必须区分 attention / cancelled 与真正的失败（规格 §5.4、§11-#25）。
+        if(!enabled)return "";
         // 原来这一段被 `value_provider` 短路保护着，arxiv（todo_source）根本走不到。
         string jobStatus=PluginJobStatus(id);
         if(jobStatus!="")return jobStatus;
@@ -445,9 +482,9 @@ internal static partial class TodoApp
         {
             string path=Path.Combine(PluginPaths.Jobs,id+".json");if(!File.Exists(path))return "";
             Dictionary<string,object> job=JsonUtil.LoadObject(path);string state=JsonUtil.String(job,"state",""),message=JsonUtil.String(job,"message","");
+            message=PluginNames.Humanize(message);
             if(state=="attention")return "需要确认："+(message==""?"请到磁贴处理":message);
-            if(state=="cancelled")return message==""?"已取消":message;
-            if(state=="failed")return "失败："+(message==""?"未知错误":message);
+            if(state=="cancelled")return message==""?"已取消":message;if(state=="failed")return "失败："+(message==""?"未知错误":message);
             return "";
         }
         catch{return "";}
@@ -500,6 +537,7 @@ internal static partial class TodoApp
         string data=PluginPaths.DataRoot(manifest.Id);Directory.CreateDirectory(data);string configPath=Path.Combine(data,"config.json"),secretPath=Path.Combine(data,"secret.dat");
         Dictionary<string,object> config=File.Exists(configPath)?JsonUtil.LoadObject(configPath):new Dictionary<string,object>();Dictionary<string,object> secret=File.Exists(secretPath)?JsonUtil.ReadDpapiJson(secretPath):new Dictionary<string,object>();
         string oldConfig=JsonUtil.Serialize(config),oldSecret=JsonUtil.Serialize(secret);HashSet<string> required=new HashSet<string>(JsonUtil.Array(JsonUtil.Get(schema,"required")).Select(Convert.ToString),StringComparer.OrdinalIgnoreCase);AddressProviderBinding claimedProvider=String.IsNullOrWhiteSpace(manifest.AddressTarget)?null:DynamicPluginValues.AddressProvider(manifest.AddressTarget);
+        Dictionary<string,string> addressStored=new Dictionary<string,string>(StringComparer.OrdinalIgnoreCase);
         List<SettingsField> fields=PluginSettingsLayout.Parse(props);List<SettingsSection> sections=PluginSettingsLayout.Group(fields);
         // 服务行状态一次算好：x-service 行的下拉框、x-requires 的置灰都读它。
         Dictionary<string,ServiceRowState> services=new Dictionary<string,ServiceRowState>(StringComparer.OrdinalIgnoreCase);
@@ -529,7 +567,8 @@ internal static partial class TodoApp
             }
             catch(Exception ex){LightUi.Error(ex.Message);}
         };
-        Form f=LightUi.Form(manifest.Name+" 设置",680,Math.Max(360,Math.Min(820,190+fields.Count*84)));LightUi.Heading(f,manifest.Name,"敏感项使用当前 Windows 用户 DPAPI 加密。","settings.svg");
+        string displayName=PluginNames.Display(manifest.Id,manifest.Name);
+        Form f=LightUi.Form(displayName+" 设置",680,Math.Max(360,Math.Min(820,190+fields.Count*84)));LightUi.Heading(f,displayName,"敏感项使用当前 Windows 用户 DPAPI 加密。","settings.svg");
         Panel panel=new Panel{Left=24,Top=102,Width=630,Height=200,AutoScroll=true};f.Controls.Add(panel);
         List<SettingsBlock> blocks=new List<SettingsBlock>();Dictionary<string,Control> controls=new Dictionary<string,Control>();Dictionary<string,Func<string>> serviceValue=new Dictionary<string,Func<string>>();
         bool advancedExpanded=false;Label advancedToggle=null;
@@ -559,11 +598,12 @@ internal static partial class TodoApp
             foreach(SettingsField field in section.Fields)
             {
                 bool claimedAddress=claimedProvider!=null&&field.Address;
-                object existing=PluginSettingValue(manifest.Id,field.Key,field.Secret?secret:config,secret,field.Property);
-                if(claimedAddress)existing=DynamicPluginValues.BindForTarget(Convert.ToString(existing??"",CultureInfo.InvariantCulture),manifest.AddressTarget);
+                object existing=PluginSettingValue(manifest.Id,field.Key,field.Secret?secret:config,secret,field.Property);if(claimedAddress)addressStored[field.Key]=Convert.ToString(existing??"",CultureInfo.InvariantCulture);
+                if(claimedAddress)existing=DynamicPluginValues.BindForTarget(addressStored[field.Key],manifest.AddressTarget);
                 string requiresReason="";bool requiresOk=field.Requires==""||PluginSettingsLayout.RequiresSatisfied(manifest,field.Requires,out requiresReason);
                 string title=field.Title;
                 if(!requiresOk)title=title+"（需要「"+PluginSettingsLayout.ServiceLabel(fields,field.Requires)+"」，"+fixHint(requiresReason)+"）";
+                if(claimedAddress)title=title+"（主机由“"+claimedProvider.PluginName+"”提供；端口和路径可修改）";
                 Label label=LightUi.Label(title,8,0,590);panel.Controls.Add(label);Control control;
                 if(PluginSettingsLayout.IsServiceField(field))
                 {
@@ -608,7 +648,7 @@ internal static partial class TodoApp
                 if(field.Type=="boolean")control=new CheckBox{Left=8,Top=0,Width=590,Checked=existing!=null&&Convert.ToBoolean(existing,CultureInfo.InvariantCulture),Text="启用",Font=LightUi.UiFont(10F)};
                 else if(field.Type=="enum"){ComboBox enumBox=new ComboBox{Left=8,Top=0,Width=590,DropDownStyle=ComboBoxStyle.DropDownList};foreach(object option in JsonUtil.Array(JsonUtil.Get(field.Property,"enum")))enumBox.Items.Add(Convert.ToString(option));enumBox.SelectedItem=Convert.ToString(existing);control=enumBox;}
                 else control=new TextBox{Left=8,Top=0,Width=590,Height=field.Type=="multiline"?86:28,Multiline=field.Type=="multiline",ScrollBars=field.Type=="multiline"?ScrollBars.Vertical:ScrollBars.None,Text=existing==null?"":Convert.ToString(existing,CultureInfo.InvariantCulture),UseSystemPasswordChar=field.Secret};
-                if(claimedAddress){TextBox claimedBox=control as TextBox;if(claimedBox!=null){string effective=Convert.ToString(existing??"",CultureInfo.InvariantCulture);claimedBox.ReadOnly=true;claimedBox.BackColor=Color.FromArgb(232,238,244);claimedBox.Cursor=Cursors.Hand;claimedBox.Click+=delegate{MessageBox.Show("本机已安装“"+claimedProvider.PluginName+"”，它正在为这个插件提供服务器主机。\r\n\r\n现在实际使用："+(String.IsNullOrWhiteSpace(effective)?"（尚未填写过完整地址，请先填写一次，之后只替换主机）":effective)+"\r\n\r\n系统只替换地址里的主机/IP，协议、端口和路径都会保留，所以在这里改 IP 没有意义。\r\n如需手动指定地址，请先禁用“"+claimedProvider.PluginName+"”，再重新打开本设置。","地址由插件接管",MessageBoxButtons.OK,MessageBoxIcon.Information);};}}
+                if(claimedAddress){TextBox claimedBox=control as TextBox;if(claimedBox!=null){claimedBox.BackColor=Color.FromArgb(244,249,253);}}
                 if(!requiresOk)
                 {
                     // 无可用 provider ⇒ 控件置灰，但**绝不改存储值**（规格 §11-#7/#8：卸载 provider 后开关必须保持原样）。
@@ -640,13 +680,13 @@ internal static partial class TodoApp
                 Func<string> read;if(serviceValue.TryGetValue(pair.Key,out read))selections.Add(new KeyValuePair<string,string>(field.Service,read()));
                 continue;
             }
-            if(claimedProvider!=null&&field.Address)continue;
             object value;
             if(field.Type=="boolean")value=((CheckBox)pair.Value).Checked;
             else if(field.Type=="integer"){int number;if(!Int32.TryParse(pair.Value.Text,out number))throw new Exception(field.Title+"必须是整数。");int min=JsonUtil.Int(p,"minimum",Int32.MinValue),max=JsonUtil.Int(p,"maximum",Int32.MaxValue);if(number<min||number>max)throw new Exception(field.Title+"超出允许范围。");value=number;}
             else value=pair.Value.Text;
             // 置灰的 x-requires 行原样写回：卸载 provider 不得把用户的开关悄悄改成 false（规格 §11-#8）。
             if(required.Contains(pair.Key)&&String.IsNullOrWhiteSpace(Convert.ToString(value,CultureInfo.InvariantCulture)))throw new Exception(field.Title+"为必填项。");
+            if(claimedProvider!=null&&field.Address)value=DynamicPluginValues.MergeAddressEdit(addressStored.ContainsKey(field.Key)?addressStored[field.Key]:"",Convert.ToString(value,CultureInfo.InvariantCulture),manifest.AddressTarget);
             (field.Secret?secret:config)[pair.Key]=value;
         }
         JsonUtil.SaveAtomic(configPath,config);JsonUtil.WriteDpapiJson(secretPath,secret);
@@ -687,57 +727,32 @@ internal static partial class TodoApp
         EnableTls12();string temporary=Path.Combine(Path.GetTempPath(),"rw-market-"+Guid.NewGuid().ToString("N")+".rwplugin");try{using(WebClient web=new WebClient()){web.Headers[HttpRequestHeader.UserAgent]="RainmeterDesktopWidgets/"+AppVersion;web.DownloadFile(uri,temporary);}RunPluginInstaller(temporary,sha);}finally{try{File.Delete(temporary);}catch{}}
     }
 
-    private static void LoadMarket(PluginListControl view,Label status)
+    private static void LoadMarket(PluginListControl view,Label status,bool refreshRemote)
     {
-        EnableTls12();
-        string json = "", sourcePath = PluginPaths.RegistryCache, sourceLabel = "官方市场已加载；";
-        try
+        string bundledPath=Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"plugin-registry-v1.json");
+        Exception refreshError=null;
+        if(refreshRemote)
         {
-            using (WebClient web = new WebClient())
+            try
             {
-                web.Headers[HttpRequestHeader.UserAgent] = "RainmeterDesktopWidgets/" + AppVersion;
-                // Download raw bytes and decode as UTF-8 explicitly.  WebClient.DownloadString
-                // can fall back to the system's default code page on some machines, which turns
-                // Chinese text in the registry into mojibake and later causes JSON parse errors.
-                byte[] raw = web.DownloadData(PluginRegistryUrl);
-                json = Encoding.UTF8.GetString(raw);
-                // Only cache the response after it parses as valid JSON.
-                JsonUtil.Deserialize(json);
-                File.WriteAllText(PluginPaths.RegistryCache, json, RuntimeUtil.Utf8NoBom);
-            }
-        }
-        catch
-        {
-            bool usable = false;
-            if (File.Exists(PluginPaths.RegistryCache))
-            {
-                try
+                EnableTls12();
+                using(WebClient web=new WebClient())
                 {
-                    json = File.ReadAllText(PluginPaths.RegistryCache, RuntimeUtil.Utf8NoBom);
-                    JsonUtil.Deserialize(json);
-                    sourceLabel = "离线：使用上次成功缓存；";
-                    usable = true;
-                }
-                catch
-                {
-                    // Cache is corrupt; remove it so the next refresh starts clean.
-                    try { File.Delete(PluginPaths.RegistryCache); } catch { }
+                    web.Headers[HttpRequestHeader.UserAgent]="RainmeterDesktopWidgets/"+AppVersion;
+                    string downloaded=PluginMarketCache.Decode(web.DownloadData(PluginRegistryUrl));
+                    PluginMarketCache.Save(PluginPaths.RegistryCache,downloaded);
                 }
             }
-            if (!usable)
-            {
-                sourcePath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "plugin-registry-v1.json");
-                if (!File.Exists(sourcePath)) throw;
-                json = File.ReadAllText(sourcePath, RuntimeUtil.Utf8NoBom);
-                sourceLabel = "离线：使用内置官方索引；";
-            }
+            catch(Exception ex){refreshError=ex;}
         }
+        string sourcePath,sourceLabel;
+        string json=PluginMarketCache.LoadLocal(PluginPaths.RegistryCache,bundledPath,out sourcePath,out sourceLabel);
         Dictionary<string,object> index=JsonUtil.Object(JsonUtil.Deserialize(json));view.Rows.Clear();
         foreach(object raw in JsonUtil.Array(JsonUtil.Get(index,"plugins")))
         {
             Dictionary<string,object> p=JsonUtil.Object(raw);if(!JsonUtil.Bool(p,"official",false))continue;
             string id=JsonUtil.String(p,"id","");if(id=="io.github.kevendai.network-ip")continue;string required;bool compatible=MarketCompatible(p,out required),installedPlugin=Directory.Exists(PluginPaths.PluginRoot(id));
-            PluginRow row=new PluginRow();row.Title=JsonUtil.String(p,"name",id);row.Tag=p;
+            PluginRow row=new PluginRow();row.Title=PluginNames.Display(id,JsonUtil.String(p,"name",id));row.Tag=p;
             string permissions=JsonUtil.String(p,"permissions",""),description=JsonUtil.String(p,"description","");
             row.Subtitle="v"+JsonUtil.String(p,"version","")+(description==""?"":"  ·  "+description)+"  ·  "+JsonUtil.String(p,"capability","")+(permissions==""?"":"  ·  权限 "+permissions);
             if(!compatible){row.Badge="需要主程序 "+required;row.BadgeFore=LightUi.Muted;row.BadgeBack=PluginBadgeBackOff;row.Dimmed=true;}
@@ -746,9 +761,9 @@ internal static partial class TodoApp
             view.Rows.Add(row);
         }
         view.AfterReload();
-        DateTime cacheTime = File.Exists(sourcePath) ? File.GetLastWriteTime(sourcePath) : DateTime.Now;
-        status.ForeColor = LightUi.Muted;
-        status.Text = sourceLabel + "索引时间 " + cacheTime.ToString("yyyy-MM-dd HH:mm");
+        DateTime cacheTime=File.Exists(sourcePath)?File.GetLastWriteTime(sourcePath):DateTime.Now;
+        status.ForeColor=refreshError==null?LightUi.Muted:LightUi.Danger;
+        status.Text=(refreshError==null?(refreshRemote?"已从远端更新；":""):"远端刷新失败，")+sourceLabel+"索引时间 "+cacheTime.ToString("yyyy-MM-dd HH:mm")+(refreshError==null?"":"；"+refreshError.Message);
     }
     private static bool MarketCompatible(Dictionary<string,object> record,out string required){required=record==null?"":JsonUtil.String(record,"min_host_version","");Version host,min;return Version.TryParse(AppVersion,out host)&&Version.TryParse(required,out min)&&host.CompareTo(min)>=0;}
 }

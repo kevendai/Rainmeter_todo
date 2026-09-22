@@ -1,4 +1,4 @@
-# DeepSeek AI（`io.github.kevendai.ai-deepseek`）
+# DeepSeek AI 评分（`io.github.kevendai.ai-deepseek`）
 
 v2.1 官方 **AI Provider**，实现 `ai_provider@1`。规格：`docs/V2.1-PROVIDER-INTERFACE.md` §7.2。
 

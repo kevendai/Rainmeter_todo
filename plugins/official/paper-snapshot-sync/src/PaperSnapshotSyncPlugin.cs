@@ -7,7 +7,7 @@ using System.Text;
 using System.Text.RegularExpressions;
 using RainmeterBackend;
 
-// v2.1 官方 Provider：Paper Snapshot Sync（规格 docs/V2.1-PROVIDER-INTERFACE.md §7.1）。
+// v2.1 官方 Provider：论文快照同步（规格 docs/V2.1-PROVIDER-INTERFACE.md §7.1）。
 //
 // 职责只有一件事：把生成好的 PaperBundle 存进文件服务器（File Browser）、按需取回来。
 // 不负责 arXiv 抓取、AI 评分、prompt、翻译、Todo 导入 —— 那些分别属于 arxiv 与其他 provider。

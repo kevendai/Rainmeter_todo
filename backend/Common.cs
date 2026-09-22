@@ -512,6 +512,20 @@ namespace RainmeterBackend
             return candidates.OrderByDescending(x=>x.Priority).ThenBy(x=>x.PluginId,StringComparer.OrdinalIgnoreCase).FirstOrDefault();
         }
         public static string BindForTarget(string value,string target){AddressProviderBinding provider=AddressProvider(target);return provider==null||String.IsNullOrWhiteSpace(provider.Value)?Resolve(value):ReplaceAnyHost(value,provider.Value);}
+        // 设置页显示的是接管后的实际地址，但保存时只能接收用户对协议、端口、路径、查询参数的修改。
+        // 原始主机继续留在配置里，运行时再由地址 Provider 替换；这样禁用 Provider 后仍能回到用户自己的地址。
+        public static string MergeAddressEdit(string stored,string edited,string target)
+        {
+            AddressProviderBinding provider=AddressProvider(target);if(provider==null||String.IsNullOrWhiteSpace(provider.Value))return edited;
+            Uri editedUri,storedUri;if(!Uri.TryCreate(edited,UriKind.Absolute,out editedUri))return edited;
+            if(!Uri.TryCreate(stored,UriKind.Absolute,out storedUri))return edited;
+            try
+            {
+                bool slash=edited.EndsWith("/",StringComparison.Ordinal);UriBuilder builder=new UriBuilder(editedUri);builder.Host=storedUri.Host;
+                string merged=builder.Uri.AbsoluteUri;return slash?merged:merged.TrimEnd('/');
+            }
+            catch{return edited;}
+        }
         public static string Resolve(string value)
         {
             if(String.IsNullOrEmpty(value))return value;Dictionary<string,object> entries=ReadEntries();

@@ -4,7 +4,7 @@
   "plugins": [
     {
       "id": "io.github.kevendai.arxiv",
-      "name": "arXiv Paper Recommendation",
+      "name": "arXiv 论文推荐",
       "channel": "stable",
       "official": true,
       "version": "2.0.0",
@@ -12,12 +12,12 @@
       "min_host_version": "2.1.0",
       "download": "https://github.com/kevendai/Rainmeter_todo-plugin-registry/releases/download/arxiv-v2.0.0/arxiv-2.0.0.rwplugin",
       "sha256": "541bacef605b6573dbab799e1c49f82f1c5ffadaeef913c1151039482cb1a6cd",
-      "release_notes": "Provider 化改版：arXiv 插件不再自带 AI 评分、标题翻译与文件服务器客户端，也不再保存这三者的密钥；评分改用「AI 评分」Provider（如 DeepSeek AI），标题翻译改用「翻译」Provider（如腾讯云翻译），远端快照改用「论文同步」Provider（如 Paper Snapshot Sync）。三者都是可选的：只装 arXiv 插件时会明确提示「今天没有可用的论文推荐结果」，不会静默生成待办。需要调用付费 AI 时会先弹出确认框，你同意后才发起请求；同一天拒绝过就不会再打扰，但入口一直保留。原有的 DeepSeek / 腾讯云 / 文件服务器配置会被自动复制到对应 Provider，原配置保留不删除，随时可以退回 1.0.2 继续使用。本版本需要主程序 2.1.0 或更高。",
+      "release_notes": "Provider 化改版：arXiv 插件不再自带 AI 评分、标题翻译与文件服务器客户端，也不再保存这三者的密钥；评分改用「AI 评分」Provider（如 DeepSeek AI 评分），标题翻译改用「翻译」Provider（如腾讯云翻译），远端快照改用「论文同步」Provider（如 论文快照同步）。三者都是可选的：只装 arXiv 插件时会明确提示「今天没有可用的论文推荐结果」，不会静默生成待办。需要调用付费 AI 时会先弹出确认框，你同意后才发起请求；同一天拒绝过就不会再打扰，但入口一直保留。原有的 DeepSeek / 腾讯云 / 文件服务器配置会被自动复制到对应 Provider，原配置保留不删除，随时可以退回 1.0.2 继续使用。本版本需要主程序 2.1.0 或更高。",
       "homepage": "https://github.com/kevendai/Rainmeter_todo-plugin-registry/tree/master/official-plugins/arxiv"
     },
     {
       "id": "io.github.kevendai.calendar-to-todo",
-      "name": "Calendar to Todo",
+      "name": "日程转待办",
       "channel": "stable",
       "official": true,
       "version": "1.0.0",
@@ -30,7 +30,7 @@
     },
     {
       "id": "io.github.kevendai.paper-snapshot-sync",
-      "name": "Paper Snapshot Sync",
+      "name": "论文快照同步",
       "description": "官方 Provider：把评分完成的论文推荐快照（PaperBundle）存进文件服务器并在多台机器间同步。",
       "channel": "stable",
       "official": true,
@@ -45,7 +45,7 @@
     },
     {
       "id": "io.github.kevendai.ai-deepseek",
-      "name": "DeepSeek AI",
+      "name": "DeepSeek AI 评分",
       "description": "官方 Provider：把 DeepSeek 聊天补全封装成 ai_provider@1 服务，供其他插件请求结构化 JSON 结果。按 token 计费，可能产生费用。",
       "channel": "stable",
       "official": true,
@@ -86,7 +86,7 @@
       "permissions": "network",
       "download": "https://github.com/kevendai/Rainmeter_todo-plugin-registry/releases/download/ssdp-server-ip-v1.1.0/ssdp-server-ip-1.1.0.rwplugin",
       "sha256": "d15836f358be3e7cf3493b02992525379a4cea019a0040af57cb148f1c5fea5c",
-      "release_notes": "新增 paper_snapshot.file_server 地址声明：文件服务器的地址现在归「论文同步（Paper Snapshot Sync）」插件所有，本插件同时供应 arxiv.file_server 与 paper_snapshot.file_server 两个地址名，因此新旧插件都能被接管（双名并行保留一个版本周期）。对 1.x 老客户端的行为完全不变。",
+      "release_notes": "新增 paper_snapshot.file_server 地址声明：文件服务器的地址现在归「论文同步（论文快照同步）」插件所有，本插件同时供应 arxiv.file_server 与 paper_snapshot.file_server 两个地址名，因此新旧插件都能被接管（双名并行保留一个版本周期）。对 1.x 老客户端的行为完全不变。",
       "homepage": "https://github.com/kevendai/Rainmeter_todo-plugin-registry/tree/master/official-plugins/ssdp-server-ip"
     }
   ]

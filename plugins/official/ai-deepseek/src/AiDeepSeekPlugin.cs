@@ -8,7 +8,7 @@ using System.Text.RegularExpressions;
 using System.Threading;
 using RainmeterBackend;
 
-// v2.1 官方 Provider：DeepSeek AI（规格 docs/V2.1-PROVIDER-INTERFACE.md §7.2）。
+// v2.1 官方 Provider：DeepSeek AI 评分（规格 docs/V2.1-PROVIDER-INTERFACE.md §7.2）。
 //
 // 职责边界（规格原文）：**只负责模型调用** —— endpoint / key / model / timeout / retry /
 // max concurrency / 请求与返回格式 / 厂商错误解析。
@@ -159,7 +159,7 @@ internal static class AiDeepSeekPlugin
     private static void RequireApiKey(Client client)
     {
         if(client.ApiKey=="")
-            throw new Failure("请先在「DeepSeek AI」插件设置里填写 API Key",true);
+            throw new Failure("请先在「DeepSeek AI 评分」插件设置里填写 API Key",true);
     }
 
     // response_schema 只做格式级检查：声明了顶层 required 就必须都有，不看 properties 的业务含义。
@@ -363,7 +363,7 @@ internal static class AiDeepSeekPlugin
     private static string DescribeStatus(int statusCode,string body)
     {
         if(statusCode==402)return "DeepSeek 账户余额不足（HTTP 402），请充值后重新同步论文";
-        if(statusCode==401)return "DeepSeek API Key 无效或已被撤销（HTTP 401），请在「DeepSeek AI」插件设置里检查 API Key";
+        if(statusCode==401)return "DeepSeek API Key 无效或已被撤销（HTTP 401），请在「DeepSeek AI 评分」插件设置里检查 API Key";
         if(statusCode==403)return "DeepSeek 拒绝了本次请求（HTTP 403），请检查账号权限或所在地区限制";
         return "DeepSeek 请求失败（HTTP "+statusCode.ToString(CultureInfo.InvariantCulture)+"）："+SafeText(body);
     }

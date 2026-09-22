@@ -1,4 +1,4 @@
-# Paper Snapshot Sync
+# 论文快照同步
 
 v2.1 官方 Provider 插件（`paper_snapshot_provider@1`，免费）。把评分完成的论文推荐快照
 （PaperBundle v1）上传到文件服务器（File Browser），并在快照缺失时按 `(日期, 配置指纹)`

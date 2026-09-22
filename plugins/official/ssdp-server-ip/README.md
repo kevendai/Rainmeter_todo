@@ -14,5 +14,5 @@
 
 - `calendar.caldav` —— 日历的 CalDAV 服务器
 - `arxiv.file_server` —— 旧版（≤1.0.2）arxiv 插件的文件服务器地址
-- `paper_snapshot.file_server` —— Paper Snapshot Sync 插件的文件服务器地址（v2.1 起）
+- `paper_snapshot.file_server` —— 论文快照同步 插件的文件服务器地址（v2.1 起）
 

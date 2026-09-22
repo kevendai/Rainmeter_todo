@@ -85,7 +85,7 @@ namespace RainmeterBackend
             }
             m.Actions=JsonUtil.Array(JsonUtil.Get(v,"actions")).Select(JsonUtil.Object).ToList();Dictionary<string,object> address=JsonUtil.Object(JsonUtil.Get(v,"address_provider"));m.AddressPriority=JsonUtil.Int(address,"priority",0);m.AddressValueKey=JsonUtil.String(address,"value","");m.AddressTargets=JsonUtil.Array(JsonUtil.Get(address,"targets")).Select(Convert.ToString).Where(x=>!String.IsNullOrWhiteSpace(x)).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
             m.AddressTarget=JsonUtil.String(v,"address_target","").Trim();
-            m.Validate(root,enforceHostVersion); return m;
+            m.Validate(root,enforceHostVersion);m.Name=PluginNames.Display(m.Id,m.Name);return m;
         }
 
         private void Validate(string root,bool enforceHostVersion)
@@ -125,6 +125,40 @@ namespace RainmeterBackend
             string full=Path.GetFullPath(Path.Combine(root,relative));
             if(!full.StartsWith(parent,StringComparison.OrdinalIgnoreCase))throw new InvalidDataException(label+"超出插件目录");
             return full;
+        }
+    }
+
+    // 面向用户统一显示中文插件名。已安装的旧版本清单仍可能保留英文名，
+    // 所以不能只依赖更新后的 plugin.json；内置插件 ID 在宿主侧也必须有稳定映射。
+    internal static class PluginNames
+    {
+        private static readonly Dictionary<string,string> BuiltIn=new Dictionary<string,string>(StringComparer.OrdinalIgnoreCase)
+        {
+            {"io.github.kevendai.arxiv","arXiv 论文推荐"},
+            {"io.github.kevendai.calendar-to-todo","日程转待办"},
+            {"io.github.kevendai.paper-snapshot-sync","论文快照同步"},
+            {"io.github.kevendai.ai-deepseek","DeepSeek AI 评分"},
+            {"io.github.kevendai.translate-tencent","腾讯云翻译"},
+            {"io.github.kevendai.ssdp-server-ip","SSDP 服务器 IP 同步"}
+        };
+
+        public static string Display(string id,string fallback)
+        {
+            string known;if(BuiltIn.TryGetValue(id??"",out known))return known;
+            if(!String.IsNullOrWhiteSpace(fallback)&&!String.Equals(fallback,id,StringComparison.OrdinalIgnoreCase))return fallback;
+            try
+            {
+                PluginManifest manifest=PluginRuntime.ResolveForStatus(id);
+                if(manifest!=null&&!String.IsNullOrWhiteSpace(manifest.Name))return manifest.Name;
+            }
+            catch{}
+            return String.IsNullOrWhiteSpace(fallback)?(id??""):fallback;
+        }
+
+        public static string Humanize(string text)
+        {
+            if(String.IsNullOrWhiteSpace(text))return text??"";
+            return Regex.Replace(text,@"io\.github\.[A-Za-z0-9]+(?:[._-][A-Za-z0-9]+)+",delegate(Match match){return Display(match.Value,match.Value);},RegexOptions.IgnoreCase);
         }
     }
 

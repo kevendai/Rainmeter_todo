@@ -1,6 +1,6 @@
 {
   "id": "io.github.kevendai.paper-snapshot-sync",
-  "name": "Paper Snapshot Sync",
+  "name": "论文快照同步",
   "description": "官方 Provider：把评分完成的论文推荐快照（PaperBundle）存进文件服务器并在多台机器间同步。",
   "channel": "stable",
   "official": true,

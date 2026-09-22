@@ -87,7 +87,7 @@ namespace RainmeterBackend
                         string manifestPath = candidate.Version == "" ? "" : Path.Combine(root, "versions", candidate.Version, "plugin.json");
                         if (manifestPath == "" || !File.Exists(manifestPath)) { list.Add(candidate); continue; }
                         Dictionary<string, object> manifest = JsonUtil.LoadObject(manifestPath);
-                        candidate.Name = JsonUtil.String(manifest, "name", candidate.Id);
+                        candidate.Name = PluginNames.Display(candidate.Id, JsonUtil.String(manifest, "name", candidate.Id));
                         candidate.Billing = JsonUtil.String(manifest, "billing", "");
                         candidate.Provides = JsonUtil.Array(JsonUtil.Get(manifest, "provides")).Select(Convert.ToString)
                             .Where(x => !String.IsNullOrWhiteSpace(x)).Distinct(StringComparer.OrdinalIgnoreCase).ToList();

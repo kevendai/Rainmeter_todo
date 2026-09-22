@@ -1,6 +1,6 @@
 {
   "id": "io.github.kevendai.calendar-to-todo",
-  "name": "Calendar to Todo",
+  "name": "日程转待办",
   "channel": "stable",
   "official": true,
   "version": "1.0.0",
