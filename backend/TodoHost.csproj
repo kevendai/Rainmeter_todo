@@ -25,6 +25,7 @@
   <ItemGroup>
     <Compile Include="ZipArchiveToolkit.cs" />
     <Compile Include="Common.cs" />
+    <Compile Include="DesktopUiBridge.cs" />
     <Compile Include="PluginRuntime.cs" />
     <Compile Include="ServiceRegistry.cs" />
     <Compile Include="ProviderMigration.cs" />

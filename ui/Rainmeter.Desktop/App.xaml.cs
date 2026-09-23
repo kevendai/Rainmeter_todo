@@ -12,6 +12,7 @@ public partial class App : Application
         {
             window = new MainWindow();
             window.Activate();
+            ((MainWindow)window).OpenInitialRoute(Environment.GetCommandLineArgs().Skip(1).ToArray());
         }
         catch (Exception ex)
         {

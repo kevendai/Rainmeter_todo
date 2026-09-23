@@ -64,7 +64,7 @@ public sealed partial class MainWindow
         if (original is JsonElement recurring && Value(recurring, "recurring") == "True")
         {
             ShowMessage("周期日程目前仍需使用高级编辑，避免改动周期规则。");
-            Calendar("Edit", id!);
+            Calendar("LegacyEdit", id!);
             return;
         }
         var title = new TextBox { Header = "标题", PlaceholderText = "这段时间安排什么？",

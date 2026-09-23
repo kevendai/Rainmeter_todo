@@ -33,7 +33,7 @@ public sealed partial class MainWindow
             "查看已安装插件与扩展入口。", Action("打开插件", () => Navigate("plugins"))));
         PageContent.Children.Add(Text("兼容配置", 18, true));
         PageContent.Children.Add(SettingsRow(Symbol.Setting, "旧版高级配置",
-            "迁移期间仍可打开尚未完成的配置功能。", Action("打开", () => Todo("Settings"))));
+            "迁移期间仍可打开尚未完成的配置功能。", Action("打开", () => Todo("LegacySettings"))));
         PageContent.Children.Add(Text("数据目录  " + skinsRoot, 12, muted: true));
     }
 
@@ -66,7 +66,7 @@ public sealed partial class MainWindow
     private void SetStyle(bool immersive)
     {
         studioStyle = immersive;
-        if (Content is FrameworkElement root) root.RequestedTheme = immersive ? ElementTheme.Dark : ElementTheme.Light;
+        if (Content is FrameworkElement root) root.RequestedTheme = ElementTheme.Dark;
         SystemBackdrop = immersive ? new DesktopAcrylicBackdrop() : new MicaBackdrop { Kind = MicaKind.Base };
         Shell.Background = Canvas;
         Sidebar.Background = immersive ? Brush(24, 16, 32, 192) : Brush(24, 16, 32, 235);

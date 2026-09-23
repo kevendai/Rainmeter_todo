@@ -24,6 +24,7 @@
   </ItemGroup>
   <ItemGroup>
     <Compile Include="Common.cs" />
+    <Compile Include="DesktopUiBridge.cs" />
     <Compile Include="CalendarApp.cs" />
     <Compile Include="CalendarCalDavService.cs" />
     <Compile Include="CalendarForms.cs" />

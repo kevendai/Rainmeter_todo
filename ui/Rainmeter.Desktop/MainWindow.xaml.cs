@@ -84,6 +84,32 @@ public sealed partial class MainWindow : Window
         Render();
     }
 
+    public void OpenInitialRoute(string[] route)
+    {
+        if (route.Length == 0) return;
+        DispatcherQueue.TryEnqueue(() =>
+        {
+            var destination = route[0] == "calendar" ? "calendar" : route[0] == "todo" ? "todo" : route[0];
+            if (destination is not ("todo" or "calendar" or "plugins" or "settings")) return;
+            Navigate(destination);
+            var action = route.Length > 1 ? route[1] : "Manage";
+            var id = route.Length > 2 ? route[2] : "";
+            if (destination == "todo")
+            {
+                if (action == "Add") ShowTodoEditor(null);
+                else if (action == "Edit" && id != "") ShowTodoEditor(id);
+                else if (action == "Settings") Navigate("settings");
+            }
+            else if (destination == "calendar")
+            {
+                if (action == "New") ShowCalendarEditor(null);
+                else if (action == "Edit" && id != "") ShowCalendarEditor(id);
+                else if (action == "Detail" && id != "") ShowCalendarDetail(id);
+                else if (action == "Settings") Navigate("settings");
+            }
+        });
+    }
+
     private static bool LoadStyle()
     {
         try { return File.Exists(StylePath) && File.ReadAllText(StylePath).Trim() == "acrylic"; }

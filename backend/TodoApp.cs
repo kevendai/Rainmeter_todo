@@ -47,6 +47,9 @@ internal static partial class TodoApp
         string id = args.Length > 1 ? args[1] : "";
         string pluginAction = args.Length > 2 ? args[2] : "";
         bool force = args.Any(x => String.Equals(x, "Force", StringComparison.OrdinalIgnoreCase));
+        if ((action == "Add" || action == "Edit" || action == "Manage" || action == "Settings")
+            && DesktopUiBridge.TryOpen(ResourceDir, "todo", action, id)) return 0;
+        if (action == "LegacySettings") return SettingsInteractive();
         if (action == "Add") return AddInteractive();
         if (action == "Edit") return EditInteractive(id);
         if (action == "Manage") return ManageInteractive();
