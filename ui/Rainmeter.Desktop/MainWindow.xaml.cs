@@ -7,6 +7,7 @@ using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Media;
 using Microsoft.UI.Xaml.Media.Animation;
+using Microsoft.UI.Xaml.Media.Imaging;
 using Windows.Graphics;
 using Windows.UI;
 using Windows.UI.ViewManagement;
@@ -92,6 +93,8 @@ public sealed partial class MainWindow : Window
                 if (themeMode == "system") { ApplyAppearance(); Render(); }
             });
         BuildWindow();
+        var iconPath = Path.Combine(AppContext.BaseDirectory, "Assets", "brand-mark.ico");
+        if (File.Exists(iconPath)) AppWindow.SetIcon(iconPath);
         skinsRoot = Environment.GetEnvironmentVariable("RAINMETER_SKINS_ROOT")
             ?? FindSkinsRoot();
         todoRoot = Path.Combine(skinsRoot, "Todo", "@Resources");
@@ -179,7 +182,18 @@ public sealed partial class MainWindow : Window
         sidebar.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         sidebar.RowDefinitions.Add(new RowDefinition());
         sidebar.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-        var brand = new StackPanel { Spacing = 4, Margin = new Thickness(10, 0, 0, 36) };
+        var brand = new Grid { ColumnSpacing = 12, Margin = new Thickness(2, 0, 0, 36) };
+        brand.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(48) });
+        brand.ColumnDefinitions.Add(new ColumnDefinition());
+        var brandImage = Path.Combine(AppContext.BaseDirectory, "Assets", "brand-mark.png");
+        if (File.Exists(brandImage))
+            brand.Children.Add(new Image
+            {
+                Source = new BitmapImage(new Uri(brandImage)),
+                Width = 46,
+                Height = 46
+            });
+        var brandText = new StackPanel { Spacing = 4 };
         BrandTitle.Text = "桌面组件";
         BrandTitle.FontSize = 24;
         BrandTitle.FontWeight = Microsoft.UI.Text.FontWeights.Bold;
@@ -187,8 +201,10 @@ public sealed partial class MainWindow : Window
         BrandSubtitle.Text = "让每天井井有条";
         BrandSubtitle.FontSize = 12;
         BrandSubtitle.Foreground = Muted;
-        brand.Children.Add(BrandTitle);
-        brand.Children.Add(BrandSubtitle);
+        brandText.Children.Add(BrandTitle);
+        brandText.Children.Add(BrandSubtitle);
+        Grid.SetColumn(brandText, 1);
+        brand.Children.Add(brandText);
         sidebar.Children.Add(brand);
         foreach (var entry in new[] { ("总览", "home", Symbol.Home), ("待办", "todo", Symbol.AllApps),
                      ("日历", "calendar", Symbol.Calendar), ("插件", "plugins", Symbol.Library),

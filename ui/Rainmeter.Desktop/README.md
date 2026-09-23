@@ -2,6 +2,8 @@
 
 这是独立的 WinUI 3 迁移基础，采用 C#、.NET 10 和 Windows App SDK。界面代码为本项目新写，未复制参考项目源码。
 
+应用图标使用用户提供的原创图稿 `Assets/brand-mark.png`。运行 `scripts/New-DesktopIcon.ps1` 可重新生成 16–256 像素的 Windows `.ico`；构建时将图标嵌入可执行文件，运行时也设置窗口图标。
+
 使用仓库内安装的 .NET SDK 构建：
 
 ```powershell
