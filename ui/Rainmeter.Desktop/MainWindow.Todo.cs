@@ -46,13 +46,33 @@ public sealed partial class MainWindow
         var note = new TextBox { Header = "备注", PlaceholderText = "补充一点背景或细节…",
             Text = existing?.Note ?? "", AcceptsReturn = true, TextWrapping = TextWrapping.Wrap, MinHeight = 110 };
         var error = Text("", 12, muted: true);
-        var fields = new StackPanel { Spacing = 16, MaxWidth = 520 };
-        foreach (var field in new UIElement[] { title, target, labels, available, due, note, error }) fields.Children.Add(field);
+        var basics = new StackPanel { Spacing = 14 };
+        foreach (var field in new UIElement[] { title, target, labels }) basics.Children.Add(field);
+        var dates = new Grid { ColumnSpacing = 14 };
+        dates.ColumnDefinitions.Add(new ColumnDefinition());
+        dates.ColumnDefinitions.Add(new ColumnDefinition());
+        dates.Children.Add(available);
+        Grid.SetColumn(due, 1);
+        dates.Children.Add(due);
+        var schedule = new StackPanel { Spacing = 11 };
+        schedule.Children.Add(Text("时间安排", 15, true));
+        schedule.Children.Add(dates);
+        schedule.Children.Add(Text("留空表示不限定时间；格式为 2026-09-23 20:00。", 12, muted: true));
+        var notes = new StackPanel { Spacing = 11 };
+        notes.Children.Add(Text("补充说明", 15, true));
+        notes.Children.Add(note);
+        var fields = new StackPanel { Spacing = 17, Width = 640 };
+        fields.Children.Add(Text(id is null ? "把想做的事记下来，之后仍会显示在桌面磁贴。" : "调整内容与时间，桌面磁贴会同步更新。", 13, muted: true));
+        fields.Children.Add(Card(basics, 20));
+        fields.Children.Add(Card(schedule, 20));
+        fields.Children.Add(Card(notes, 20));
+        fields.Children.Add(error);
         var dialog = new ContentDialog
         {
             XamlRoot = Shell.XamlRoot,
             Title = id is null ? "新增待办" : "编辑待办",
-            Content = new ScrollViewer { Content = fields, MaxHeight = 550 },
+            Content = new ScrollViewer { Content = fields, MaxHeight = 570 },
+            Width = 720,
             PrimaryButtonText = id is null ? "添加待办" : "保存修改",
             CloseButtonText = "取消",
             DefaultButton = ContentDialogButton.Primary

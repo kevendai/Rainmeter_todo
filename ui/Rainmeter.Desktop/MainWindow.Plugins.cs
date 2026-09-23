@@ -67,9 +67,9 @@ public sealed partial class MainWindow
         Heading(pluginMarketSelected ? "插件市场" : "已安装插件",
             pluginMarketSelected ? "先看本地市场；只有主动刷新才向远端获取新内容。" : "扩展状态与操作，清楚明了。");
         PageContent.Children.Add(Row(
-            Action("插件市场", () => { pluginMarketSelected = true; Render(); }, pluginMarketSelected),
             Action("已安装", () => { pluginMarketSelected = false; Render(); }, !pluginMarketSelected),
-            Action("刷新市场", RefreshMarket)));
+            Action("插件市场", () => { pluginMarketSelected = true; Render(); }, pluginMarketSelected)));
+        if (pluginMarketSelected) PageContent.Children.Add(Action("刷新市场", RefreshMarket));
         var cache = Path.Combine(pluginDataRoot, "registry-cache.json");
         var bundled = Path.Combine(todoRoot, "plugin-registry-v1.json");
         var project = Path.GetFullPath(Path.Combine(skinsRoot, "..", "plugin-registry-template", "index-v1.json"));
@@ -97,22 +97,10 @@ public sealed partial class MainWindow
                 var version = Value(record, "version");
                 var installed = Directory.Exists(Path.Combine(pluginDataRoot, "Plugins", id));
                 var stack = new StackPanel { Spacing = 11 };
-                var header = new Grid { ColumnSpacing = 12 };
-                header.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(42) });
-                header.ColumnDefinitions.Add(new ColumnDefinition());
-                var iconColors = new[] { (111, 65, 143), (67, 105, 145), (104, 88, 156),
-                    (148, 82, 112), (55, 124, 119), (142, 109, 67) };
-                var iconColor = iconColors[(int)(id.Aggregate(0u, (hash, character) => hash * 31 + character) % iconColors.Length)];
-                var icon = new Border { Width = 42, Height = 42, CornerRadius = new CornerRadius(12),
-                    Background = Brush(iconColor.Item1, iconColor.Item2, iconColor.Item3),
-                    Child = Text(name[..1], 21, true) };
-                header.Children.Add(icon);
                 var heading = new StackPanel { Spacing = 2 };
                 heading.Children.Add(Text(name, 17, true));
                 heading.Children.Add(Text("官方扩展 · v" + version, 11, muted: true));
-                Grid.SetColumn(heading, 1);
-                header.Children.Add(heading);
-                stack.Children.Add(header);
+                stack.Children.Add(heading);
                 var desc = Text(description, 12, muted: true);
                 desc.MaxLines = 3;
                 desc.TextTrimming = TextTrimming.CharacterEllipsis;

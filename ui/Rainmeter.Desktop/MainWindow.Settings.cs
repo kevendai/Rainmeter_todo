@@ -22,8 +22,11 @@ public sealed partial class MainWindow
             studioStyle ? "亚克力 · 更通透的背景层次" : "云母 · 更稳定的背景层次",
             Row(Action("云母", () => SetStyle(false), !studioStyle),
                 Action("亚克力", () => SetStyle(true), studioStyle))));
-        PageContent.Children.Add(SettingsRow(Symbol.Edit, "深色配色",
-            "两种材质都使用相同的深色视觉体系。", Text("跟随桌面工作台", 12, muted: true)));
+        PageContent.Children.Add(SettingsRow(Symbol.Edit, "界面配色",
+            "日间、夜间，或跟随 Windows 外观。", Row(
+                Action("日间", () => SetTheme("light"), themeMode == "light"),
+                Action("夜间", () => SetTheme("dark"), themeMode == "dark"),
+                Action("跟随", () => SetTheme("system"), themeMode == "system"))));
         PageContent.Children.Add(Text("桌面磁贴与管理", 18, true));
         PageContent.Children.Add(SettingsRow(Symbol.AllApps, "待办磁贴",
             "保留 Rainmeter 磁贴展示，在新界面管理任务。", Action("打开管理", () => Navigate("todo"))));
@@ -66,18 +69,44 @@ public sealed partial class MainWindow
     private void SetStyle(bool immersive)
     {
         studioStyle = immersive;
-        if (Content is FrameworkElement root) root.RequestedTheme = ElementTheme.Dark;
         SystemBackdrop = immersive ? new DesktopAcrylicBackdrop() : new MicaBackdrop { Kind = MicaKind.Base };
+        ApplyAppearance();
+        SaveStyle(immersive);
+        Render();
+    }
+
+    private void SetTheme(string mode)
+    {
+        themeMode = mode;
+        Directory.CreateDirectory(Path.GetDirectoryName(ThemePath)!);
+        File.WriteAllText(ThemePath, mode);
+        ApplyAppearance();
+        Render();
+    }
+
+    private void ApplyAppearance()
+    {
+        if (Content is FrameworkElement root) root.RequestedTheme = DarkTheme ? ElementTheme.Dark : ElementTheme.Light;
         Shell.Background = Canvas;
-        Sidebar.Background = immersive ? Brush(24, 16, 32, 192) : Brush(24, 16, 32, 235);
+        Sidebar.Background = DarkTheme
+            ? studioStyle ? Brush(24, 16, 32, 192) : Brush(24, 16, 32, 235)
+            : Brush(241, 235, 247, studioStyle ? 220 : 245);
         BrandTitle.Foreground = Ink;
         BrandSubtitle.Foreground = Muted;
         BrandFooter.Foreground = Muted;
         PageTitle.Foreground = Ink;
         PageSubtitle.Foreground = Muted;
         PageEyebrow.Foreground = Accent;
-        SaveStyle(immersive);
-        Render();
+        foreach (var item in Nav.Items.OfType<ListViewItem>())
+            if (item.Content is StackPanel content)
+                foreach (var child in content.Children)
+                {
+                    if (child is TextBlock label) label.Foreground = Ink;
+                    if (child is SymbolIcon symbol) symbol.Foreground = Accent;
+                }
+        Nav.Resources["ListViewItemBackgroundSelected"] = DarkTheme ? Brush(106, 72, 141, 155) : Brush(181, 159, 207, 165);
+        Nav.Resources["ListViewItemBackgroundSelectedPointerOver"] = DarkTheme ? Brush(106, 72, 141, 190) : Brush(181, 159, 207, 195);
+        Nav.Resources["ListViewItemBackgroundSelectedPressed"] = DarkTheme ? Brush(106, 72, 141, 210) : Brush(181, 159, 207, 220);
     }
 
 }

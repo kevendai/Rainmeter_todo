@@ -14,6 +14,8 @@ namespace Rainmeter.Desktop;
 
 public sealed partial class MainWindow
 {
+    private DateTime calendarMonth = new(DateTime.Today.Year, DateTime.Today.Month, 1);
+    private DateTime selectedCalendarDay = DateTime.Today;
     private (JsonElement? Event, string Source) FindCalendarEvent(string id)
     {
         using var cache = ReadJson(Path.Combine(calendarRoot, "calendar-cache.json"));
@@ -86,14 +88,32 @@ public sealed partial class MainWindow
         source.SelectedIndex = previousSource == "caldav" ? 1 : 0;
         source.IsEnabled = id is null;
         var error = Text("", 12, muted: true);
-        var fields = new StackPanel { Spacing = 16, MaxWidth = 520 };
-        foreach (var field in new UIElement[] { source, title, start, end, allDay, location, url, description, error })
-            fields.Children.Add(field);
+        var when = new Grid { ColumnSpacing = 14 };
+        when.ColumnDefinitions.Add(new ColumnDefinition());
+        when.ColumnDefinitions.Add(new ColumnDefinition());
+        when.Children.Add(start);
+        Grid.SetColumn(end, 1);
+        when.Children.Add(end);
+        var essentials = new StackPanel { Spacing = 14 };
+        essentials.Children.Add(title);
+        essentials.Children.Add(when);
+        essentials.Children.Add(allDay);
+        var extras = new StackPanel { Spacing = 14 };
+        extras.Children.Add(location);
+        extras.Children.Add(url);
+        extras.Children.Add(description);
+        var fields = new StackPanel { Spacing = 17, Width = 640 };
+        fields.Children.Add(Text(id is null ? "为这一天留一段时间。桌面日程磁贴会同步显示。" : "修改日程信息并同步到原来的日历来源。", 13, muted: true));
+        fields.Children.Add(Card(source, 20));
+        fields.Children.Add(Card(essentials, 20));
+        fields.Children.Add(Card(extras, 20));
+        fields.Children.Add(error);
         var dialog = new ContentDialog
         {
             XamlRoot = Shell.XamlRoot,
             Title = id is null ? "新建日程" : "编辑日程",
-            Content = new ScrollViewer { Content = fields, MaxHeight = 550 },
+            Content = new ScrollViewer { Content = fields, MaxHeight = 570 },
+            Width = 720,
             PrimaryButtonText = id is null ? "创建日程" : "保存修改",
             CloseButtonText = "取消",
             DefaultButton = ContentDialogButton.Primary
@@ -163,28 +183,112 @@ public sealed partial class MainWindow
 
     private void RenderCalendar()
     {
-        Heading("日历管理", "桌面日程继续使用磁贴，在这里查看和安排。");
-        PageContent.Children.Add(Row(Action("新建日程", () => ShowCalendarEditor(null), true), Action("同步日历", () => Calendar("Sync"))));
+        Heading("日程管理", "桌面继续显示日程磁贴；这里按月浏览、按天查看安排。");
+        PageContent.Children.Add(Row(
+            Action("新增日程", () => ShowCalendarEditor(null), true),
+            Action("同步日历", () => Calendar("Sync"))));
         using var cache = ReadJson(Path.Combine(calendarRoot, "calendar-cache.json"));
         using var state = ReadJson(Path.Combine(calendarRoot, "calendar-state.json"));
         var events = (cache is null ? [] : Items(cache.RootElement, "events"))
-            .Concat(state is null ? [] : Items(state.RootElement, "local_events")).ToArray();
-        if (events.Length == 0) { Empty("暂无日程。你可以新建日程，或从日历服务同步。"); return; }
-        PageContent.Children.Add(Text("近期日程 · " + events.Length, 16, true));
-        var board = TileBoard();
-        foreach (var item in events.Take(80))
+            .Concat(state is null ? [] : Items(state.RootElement, "local_events"))
+            .Where(item => DateTimeOffset.TryParse(Value(item, "start_at"), out _))
+            .OrderBy(item => DateTimeOffset.Parse(Value(item, "start_at"))).ToArray();
+        var monthBar = new Grid { ColumnSpacing = 10 };
+        monthBar.ColumnDefinitions.Add(new ColumnDefinition());
+        monthBar.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        monthBar.Children.Add(Text(calendarMonth.ToString("yyyy 年 M 月"), 22, true));
+        var monthActions = Row(
+            Action("上个月", () => MoveCalendarMonth(-1)),
+            Action("今天", () => { selectedCalendarDay = DateTime.Today; calendarMonth = new DateTime(DateTime.Today.Year, DateTime.Today.Month, 1); Render(); }),
+            Action("下个月", () => MoveCalendarMonth(1)));
+        Grid.SetColumn(monthActions, 1);
+        monthBar.Children.Add(monthActions);
+        PageContent.Children.Add(monthBar);
+        var monthGrid = new Grid { ColumnSpacing = 5, RowSpacing = 5 };
+        for (var column = 0; column < 7; column++)
+            monthGrid.ColumnDefinitions.Add(new ColumnDefinition());
+        for (var row = 0; row < 7; row++)
+            monthGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        var weekdays = new[] { "周一", "周二", "周三", "周四", "周五", "周六", "周日" };
+        for (var column = 0; column < 7; column++)
         {
-            var panel = new StackPanel { Spacing = 12 };
-            panel.Children.Add(Text("日程  /  " + DisplayDate(Value(item, "start", Value(item, "start_at"))), 12, muted: true));
-            panel.Children.Add(Text(Value(item, "summary", Value(item, "title", "未命名日程")), 18, true));
-            var id = Value(item, "id");
-            panel.Children.Add(Row(Action("详情", () => ShowCalendarDetail(id)), Action("编辑", () => ShowCalendarEditor(id))));
-            var tile = Card(panel, 22);
-            tile.Width = 314;
-            tile.Height = 214;
-            board.Children.Add(tile);
+            var label = Text(weekdays[column], 12, true, true);
+            label.HorizontalAlignment = HorizontalAlignment.Center;
+            label.Margin = new Thickness(0, 0, 0, 5);
+            Grid.SetColumn(label, column);
+            monthGrid.Children.Add(label);
         }
-        PageContent.Children.Add(board);
+        var offset = ((int)calendarMonth.DayOfWeek + 6) % 7;
+        for (var index = 0; index < 42; index++)
+        {
+            var day = calendarMonth.AddDays(index - offset);
+            var count = events.Count(item => CalendarOverlapsDay(item, day));
+            var dayContent = new StackPanel { Spacing = 5 };
+            dayContent.Children.Add(Text(day.Day.ToString(), 16, day.Date == selectedCalendarDay.Date, day.Month != calendarMonth.Month));
+            dayContent.Children.Add(Text(count == 0 ? " " : count + " 项日程", 11, count > 0, count == 0));
+            var dayButton = new Button
+            {
+                Content = dayContent,
+                HorizontalContentAlignment = HorizontalAlignment.Left,
+                VerticalContentAlignment = VerticalAlignment.Top,
+                HorizontalAlignment = HorizontalAlignment.Stretch,
+                Height = 72,
+                Padding = new Thickness(12, 9, 8, 6),
+                Background = day.Date == selectedCalendarDay.Date ? Brush(91, 62, 124, DarkTheme ? 225 : 45) : Surface,
+                BorderBrush = day.Date == DateTime.Today ? Accent : Brush(0, 0, 0, 0),
+                BorderThickness = new Thickness(day.Date == DateTime.Today ? 2 : 0),
+                CornerRadius = new CornerRadius(12)
+            };
+            dayButton.Click += (_, _) =>
+            {
+                selectedCalendarDay = day.Date;
+                calendarMonth = new DateTime(day.Year, day.Month, 1);
+                Render();
+            };
+            Grid.SetColumn(dayButton, index % 7);
+            Grid.SetRow(dayButton, index / 7 + 1);
+            monthGrid.Children.Add(dayButton);
+        }
+        PageContent.Children.Add(monthGrid);
+        var selected = events.Where(item => CalendarOverlapsDay(item, selectedCalendarDay)).ToArray();
+        PageContent.Children.Add(Text(selectedCalendarDay.ToString("M 月 d 日 dddd") + "  ·  " + selected.Length + " 项", 19, true));
+        if (selected.Length == 0) { Empty("这一天暂无日程。"); return; }
+        foreach (var item in selected)
+        {
+            var id = Value(item, "id");
+            var begins = DateTimeOffset.Parse(Value(item, "start_at")).ToLocalTime();
+            var allDay = Value(item, "all_day") == "True";
+            var row = new Grid { ColumnSpacing = 17 };
+            row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(88) });
+            row.ColumnDefinitions.Add(new ColumnDefinition());
+            row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            row.Children.Add(Text(allDay ? "全天" : begins.ToString("HH:mm"), 16, true));
+            var details = new StackPanel { Spacing = 5 };
+            details.Children.Add(Text(Value(item, "title", "未命名日程"), 16, true));
+            var location = Value(item, "location");
+            details.Children.Add(Text(location == "" ? "日程安排" : location, 12, muted: true));
+            Grid.SetColumn(details, 1);
+            row.Children.Add(details);
+            var actions = Row(Action("详情", () => ShowCalendarDetail(id)), Action("编辑", () => ShowCalendarEditor(id)));
+            Grid.SetColumn(actions, 2);
+            row.Children.Add(actions);
+            PageContent.Children.Add(Card(row, 17));
+        }
+    }
+
+    private void MoveCalendarMonth(int offset)
+    {
+        calendarMonth = calendarMonth.AddMonths(offset);
+        selectedCalendarDay = calendarMonth;
+        Render();
+    }
+
+    private static bool CalendarOverlapsDay(JsonElement item, DateTime day)
+    {
+        return DateTimeOffset.TryParse(Value(item, "start_at"), out var start)
+            && DateTimeOffset.TryParse(Value(item, "end_at"), out var end)
+            && start.ToLocalTime().DateTime < day.Date.AddDays(1)
+            && end.ToLocalTime().DateTime > day.Date;
     }
 
 }
