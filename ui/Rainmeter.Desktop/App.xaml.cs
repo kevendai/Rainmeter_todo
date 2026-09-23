@@ -8,13 +8,15 @@ public partial class App : Application
 {
     private Window? window;
     private Mutex? instanceMutex;
+    private static string InstanceName => Environment.GetEnvironmentVariable("RAINMETER_UI_TEST_INSTANCE") == "1"
+        ? "RainmeterDesktopUi-Test" : "RainmeterDesktopUi";
     public App() => InitializeComponent();
     protected override void OnLaunched(LaunchActivatedEventArgs args)
     {
         try
         {
             var route = Environment.GetCommandLineArgs().Skip(1).ToArray();
-            instanceMutex = new Mutex(true, @"Local\RainmeterDesktopUi", out var firstInstance);
+            instanceMutex = new Mutex(true, @"Local\" + InstanceName, out var firstInstance);
             if (!firstInstance)
             {
                 instanceMutex.Dispose();
@@ -40,7 +42,7 @@ public partial class App : Application
         {
             try
             {
-                using var pipe = new NamedPipeServerStream("RainmeterDesktopUi", PipeDirection.In, 1,
+                using var pipe = new NamedPipeServerStream(InstanceName, PipeDirection.In, 1,
                     PipeTransmissionMode.Byte, PipeOptions.Asynchronous);
                 await pipe.WaitForConnectionAsync();
                 using var reader = new StreamReader(pipe, Encoding.UTF8);
@@ -59,7 +61,7 @@ public partial class App : Application
         {
             try
             {
-                using var pipe = new NamedPipeClientStream(".", "RainmeterDesktopUi", PipeDirection.Out,
+                using var pipe = new NamedPipeClientStream(".", InstanceName, PipeDirection.Out,
                     PipeOptions.Asynchronous);
                 await pipe.ConnectAsync(200);
                 using var writer = new StreamWriter(pipe, new UTF8Encoding(false));

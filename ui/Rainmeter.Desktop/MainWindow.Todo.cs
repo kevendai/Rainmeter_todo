@@ -39,8 +39,36 @@ public sealed partial class MainWindow
         catch (Exception ex) { ShowMessage(ex.Message); return; }
         if (id is not null && existing is null) { ShowMessage("这条待办已不存在，请刷新后重试。"); return; }
         var title = EditorControl(new TextBox { Header = "标题", PlaceholderText = "例如：整理实验结果", Text = existing?.Title ?? "" });
-        var target = EditorControl(new TextBox { Header = "打开目标", PlaceholderText = "链接或文件路径（可选）", Text = existing?.Target ?? "" });
-        var labels = EditorControl(new TextBox { Header = "标签", PlaceholderText = "工作, 论文", Text = string.Join("，", existing?.Labels ?? []) });
+        var target = EditorControl(new TextBox { Header = "打开目标", PlaceholderText = "输入链接或选择本地文件", Text = existing?.Target ?? "" });
+        var browse = Action("浏览文件…", () => _ = PickTodoTargetAsync(target));
+        browse.VerticalAlignment = VerticalAlignment.Bottom;
+        var targetRow = new Grid { ColumnSpacing = 10 };
+        targetRow.ColumnDefinitions.Add(new ColumnDefinition());
+        targetRow.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        targetRow.Children.Add(target);
+        Grid.SetColumn(browse, 1);
+        targetRow.Children.Add(browse);
+        var labelChoices = new List<CheckBox>();
+        var options = new HashSet<string>(["工作", "学习", "生活", "论文", "其他"]);
+        using (var state = ReadJson(Path.Combine(todoRoot, "tasks.json")))
+            if (state is not null)
+                foreach (var item in Items(state.RootElement, "tasks"))
+                    foreach (var label in Items(item, "labels"))
+                        if (label.ValueKind == JsonValueKind.String && !string.IsNullOrWhiteSpace(label.GetString()))
+                            options.Add(label.GetString()!);
+        foreach (var label in existing?.Labels ?? []) options.Add(label);
+        var labelGrid = new VariableSizedWrapGrid { Orientation = Orientation.Horizontal,
+            ItemWidth = 102, ItemHeight = 35 };
+        foreach (var option in options.OrderBy(x => x, StringComparer.CurrentCulture))
+        {
+            var choice = new CheckBox { Content = option, IsChecked = existing?.Labels.Contains(option) == true,
+                MinWidth = 100 };
+            labelChoices.Add(choice);
+            labelGrid.Children.Add(choice);
+        }
+        var labelSection = new StackPanel { Spacing = 4 };
+        labelSection.Children.Add(Text("标签", 13, true));
+        labelSection.Children.Add(labelGrid);
         var note = EditorControl(new TextBox { Header = "备注", PlaceholderText = "补充一点背景或细节…",
             Text = existing?.Note ?? "", AcceptsReturn = true, TextWrapping = TextWrapping.Wrap, MinHeight = 86 });
         var initialStart = ExistingLocalDate(existing?.AvailableFrom);
@@ -50,26 +78,21 @@ public sealed partial class MainWindow
         var dueDate = new CalendarDatePicker { Date = initialDue is null ? null : LocalPickerDate(initialDue.Value.DateTime) };
         var dueTime = new TimePicker { Time = initialDue?.TimeOfDay ?? new TimeSpan(18, 0, 0) };
         var error = Text("", 12, muted: true);
-        var targetAndLabels = new Grid { ColumnSpacing = 12 };
-        targetAndLabels.ColumnDefinitions.Add(new ColumnDefinition());
-        targetAndLabels.ColumnDefinitions.Add(new ColumnDefinition());
-        targetAndLabels.Children.Add(target);
-        Grid.SetColumn(labels, 1);
-        targetAndLabels.Children.Add(labels);
         var schedule = new StackPanel { Spacing = 12 };
         schedule.Children.Add(EditorDateTimeRow("开始", availableDate, availableTime));
         schedule.Children.Add(EditorDateTimeRow("截止", dueDate, dueTime));
         schedule.Children.Add(Text("日期留空表示不限定时间。", 12, muted: true));
         schedule.Visibility = initialStart is not null || initialDue is not null
             ? Visibility.Visible : Visibility.Collapsed;
-        var timeToggle = Action("时间安排（可选）  ⌄", () =>
+        var timeToggle = Action("设置时间安排", () =>
             schedule.Visibility = schedule.Visibility == Visibility.Visible
                 ? Visibility.Collapsed : Visibility.Visible);
         timeToggle.HorizontalAlignment = HorizontalAlignment.Left;
-        var fields = new StackPanel { Spacing = 18, Width = 540 };
+        var fields = new StackPanel { Spacing = 16, Width = 510 };
         fields.Children.Add(Text(id is null ? "把想做的事记下来，之后仍会显示在桌面磁贴。" : "调整内容与时间，桌面磁贴会同步更新。", 13, muted: true));
         fields.Children.Add(title);
-        fields.Children.Add(targetAndLabels);
+        fields.Children.Add(targetRow);
+        fields.Children.Add(labelSection);
         fields.Children.Add(timeToggle);
         fields.Children.Add(schedule);
         fields.Children.Add(note);
@@ -82,8 +105,8 @@ public sealed partial class MainWindow
             try
             {
                 var draft = new TodoDraft(id, title.Text, target.Text, note.Text,
-                    labels.Text.Split([',', '，', '、'], StringSplitOptions.RemoveEmptyEntries)
-                        .Select(value => value.Trim()).Where(value => value != "").Distinct().ToArray(),
+                    labelChoices.Where(choice => choice.IsChecked == true)
+                        .Select(choice => choice.Content?.ToString() ?? "").Where(value => value != "").ToArray(),
                     PickerIso(availableDate, availableTime), PickerIso(dueDate, dueTime));
                 todoRepository.Save(draft);
                 saved = true;
@@ -100,6 +123,19 @@ public sealed partial class MainWindow
         }
         Render();
         if (saved) RunTodoAction("Render");
+    }
+
+    private async Task PickTodoTargetAsync(TextBox target)
+    {
+        try
+        {
+            var picker = new Windows.Storage.Pickers.FileOpenPicker();
+            picker.FileTypeFilter.Add("*");
+            WinRT.Interop.InitializeWithWindow.Initialize(picker, WinRT.Interop.WindowNative.GetWindowHandle(this));
+            var file = await picker.PickSingleFileAsync();
+            if (file is not null) target.Text = file.Path;
+        }
+        catch (Exception ex) { ShowMessage("无法选择文件：" + ex.Message); }
     }
 
     private async void DeleteTodo(string id, string title)
@@ -126,54 +162,57 @@ public sealed partial class MainWindow
         if (state is null) { Empty("还没有待办数据。"); return; }
         var tasks = Items(state.RootElement, "tasks").ToArray();
         if (tasks.Length == 0) { Empty("一切就绪。新增一条待办，开始安排今天。"); return; }
-        PageContent.Children.Add(Text("全部磁贴 · " + tasks.Length, 16, true));
-        var board = TileBoard();
-        board.ItemHeight = 272;
-        foreach (var task in tasks.Take(80))
+        var pending = tasks.Where(task => Value(task, "completed") != "True").ToArray();
+        var completed = tasks.Where(task => Value(task, "completed") == "True").ToArray();
+        RenderTodoSection("未完成", pending, false);
+        RenderTodoSection("已完成", completed, true);
+    }
+
+    private void RenderTodoSection(string heading, JsonElement[] tasks, bool done)
+    {
+        PageContent.Children.Add(Text($"{heading} · {tasks.Length}", 18, true));
+        if (tasks.Length == 0)
+        {
+            PageContent.Children.Add(Text(done ? "还没有已完成的待办。" : "当前没有未完成的待办。", 13, muted: true));
+            return;
+        }
+        foreach (var task in tasks.Take(100))
         {
             var id = Value(task, "id");
             var title = Value(task, "title", "未命名待办");
             var note = Value(task, "note");
-            var panel = new StackPanel { Spacing = 10 };
-            panel.Children.Add(Text("待办  /  " + Value(task, "source", "手动"), 12, muted: true));
-            var titleText = Text(title, 19, true);
-            titleText.MaxLines = 2;
+            var row = new Grid { ColumnSpacing = 14 };
+            row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(28) });
+            row.ColumnDefinitions.Add(new ColumnDefinition());
+            row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            var check = new CheckBox { IsChecked = done, VerticalAlignment = VerticalAlignment.Center };
+            check.Click += (_, _) => RunTodoAction("Toggle", id);
+            row.Children.Add(check);
+            var details = new StackPanel { Spacing = 4, VerticalAlignment = VerticalAlignment.Center };
+            var titleText = Text(title, 16, !done, done);
+            titleText.MaxLines = 1;
             titleText.TextTrimming = TextTrimming.CharacterEllipsis;
-            panel.Children.Add(titleText);
-            if (!string.IsNullOrWhiteSpace(note))
-            {
-                var noteText = Text(note, 13, muted: true);
-                noteText.MaxLines = 2;
-                noteText.TextTrimming = TextTrimming.CharacterEllipsis;
-                panel.Children.Add(noteText);
-            }
+            details.Children.Add(titleText);
             var due = Value(task, "due_at");
-            if (due != "") panel.Children.Add(Text("截止  " + DisplayDate(due), 12, muted: true));
-            var actions = new Grid { ColumnSpacing = 8, RowSpacing = 8 };
-            actions.ColumnDefinitions.Add(new ColumnDefinition());
-            actions.ColumnDefinitions.Add(new ColumnDefinition());
-            actions.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-            actions.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-            var buttons = new[]
-            {
-                Action("打开", () => RunTodoAction("Open", id)),
-                Action("编辑", () => ShowTodoEditor(id)),
-                Action("完成 / 恢复", () => RunTodoAction("Toggle", id)),
-                Action("删除", () => DeleteTodo(id, title))
-            };
-            for (int index = 0; index < buttons.Length; index++)
-            {
-                Grid.SetColumn(buttons[index], index % 2);
-                Grid.SetRow(buttons[index], index / 2);
-                actions.Children.Add(buttons[index]);
-            }
-            panel.Children.Add(actions);
-            var tile = Card(panel, 20);
-            tile.Width = 314;
-            tile.Height = 256;
-            board.Children.Add(tile);
+            var summary = new[] { due == "" ? "" : "截止 " + DisplayDate(due),
+                note.Length == 0 ? "" : note.ReplaceLineEndings(" ") }
+                .Where(value => value != "");
+            var summaryText = Text(string.Join(" · ", summary), 12, muted: true);
+            summaryText.MaxLines = 1;
+            summaryText.TextTrimming = TextTrimming.CharacterEllipsis;
+            details.Children.Add(summaryText);
+            Grid.SetColumn(details, 1);
+            row.Children.Add(details);
+            var actions = Row();
+            if (Value(task, "target") != "") actions.Children.Add(Action("打开", () => RunTodoAction("Open", id)));
+            actions.Children.Add(Action("编辑", () => ShowTodoEditor(id)));
+            actions.Children.Add(Action("删除", () => DeleteTodo(id, title)));
+            Grid.SetColumn(actions, 2);
+            row.Children.Add(actions);
+            var card = Card(row, 15);
+            card.Opacity = done ? 0.7 : 1;
+            PageContent.Children.Add(card);
         }
-        PageContent.Children.Add(board);
     }
 
 }

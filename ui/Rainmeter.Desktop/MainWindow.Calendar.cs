@@ -115,11 +115,11 @@ public sealed partial class MainWindow
         extras.Children.Add(description);
         extras.Visibility = id is not null && (location.Text != "" || url.Text != "" || description.Text != "")
             ? Visibility.Visible : Visibility.Collapsed;
-        var moreToggle = Action("更多信息  ⌄", () =>
+        var moreToggle = Action("添加地点、链接或备注", () =>
             extras.Visibility = extras.Visibility == Visibility.Visible
                 ? Visibility.Collapsed : Visibility.Visible);
         moreToggle.HorizontalAlignment = HorizontalAlignment.Left;
-        var fields = new StackPanel { Spacing = 17, Width = 540 };
+        var fields = new StackPanel { Spacing = 16, Width = 510 };
         fields.Children.Add(Text(id is null ? "为这一天留一段时间。桌面日程磁贴会同步显示。" : "修改日程信息并同步到原来的日历来源。", 13, muted: true));
         fields.Children.Add(source);
         fields.Children.Add(title);
@@ -244,8 +244,13 @@ public sealed partial class MainWindow
             var day = calendarMonth.AddDays(index - offset);
             var count = events.Count(item => CalendarOverlapsDay(item, day));
             var dayContent = new StackPanel { Spacing = 5 };
-            dayContent.Children.Add(Text(day.Day.ToString(), 16, day.Date == selectedCalendarDay.Date, day.Month != calendarMonth.Month));
-            dayContent.Children.Add(Text(count == 0 ? " " : count + " 项日程", 11, count > 0, count == 0));
+            var outsideMonth = day.Month != calendarMonth.Month;
+            var dayNumber = Text(day.Day.ToString(), 16, day.Date == selectedCalendarDay.Date, outsideMonth);
+            if (outsideMonth) dayNumber.Opacity = DarkTheme ? 0.45 : 0.5;
+            dayContent.Children.Add(dayNumber);
+            var dayCount = Text(count == 0 ? " " : count + " 项日程", 11, count > 0, count == 0);
+            if (outsideMonth) dayCount.Opacity = 0.35;
+            dayContent.Children.Add(dayCount);
             var dayButton = new Button
             {
                 Content = dayContent,
@@ -254,7 +259,8 @@ public sealed partial class MainWindow
                 HorizontalAlignment = HorizontalAlignment.Stretch,
                 Height = 72,
                 Padding = new Thickness(12, 9, 8, 6),
-                Background = day.Date == selectedCalendarDay.Date ? Brush(91, 62, 124, DarkTheme ? 225 : 45) : Surface,
+                Background = day.Date == selectedCalendarDay.Date ? Brush(91, 62, 124, DarkTheme ? 225 : 45)
+                    : outsideMonth ? DarkTheme ? Brush(25, 21, 32) : Brush(238, 234, 243) : Surface,
                 BorderBrush = day.Date == DateTime.Today ? Accent : Brush(0, 0, 0, 0),
                 BorderThickness = new Thickness(day.Date == DateTime.Today ? 2 : 0),
                 CornerRadius = new CornerRadius(12)

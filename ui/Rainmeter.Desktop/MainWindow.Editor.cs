@@ -1,6 +1,7 @@
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Media;
+using Microsoft.UI.Xaml.Input;
 
 namespace Rainmeter.Desktop;
 
@@ -41,11 +42,11 @@ public sealed partial class MainWindow
             Content = new ScrollViewer
             {
                 Content = content,
-                MaxHeight = 580,
+                MaxHeight = 560,
                 VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
                 HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled
             },
-            Width = 640,
+            Width = 690,
             PrimaryButtonText = primaryText,
             PrimaryButtonStyle = primaryStyle,
             CloseButtonText = "取消",
@@ -53,7 +54,21 @@ public sealed partial class MainWindow
         };
         dialog.Resources["AccentFillColorDefaultBrush"] = PrimaryFill;
         dialog.Resources["AccentFillColorSecondaryBrush"] = PrimaryFill;
+        if (dialog.Content is ScrollViewer scroller)
+            ForwardHandledWheel(content, scroller);
         return dialog;
+    }
+
+    private static void ForwardHandledWheel(UIElement content, ScrollViewer scroller)
+    {
+        content.AddHandler(UIElement.PointerWheelChangedEvent,
+            new PointerEventHandler((_, args) =>
+            {
+                if (!args.Handled || scroller.ScrollableHeight <= 0) return;
+                var delta = args.GetCurrentPoint(scroller).Properties.MouseWheelDelta;
+                scroller.ChangeView(null, Math.Clamp(scroller.VerticalOffset - delta / 2.0,
+                    0, scroller.ScrollableHeight), null, true);
+            }), true);
     }
 
     private static DateTimeOffset LocalPickerDate(DateTime value)
@@ -73,8 +88,8 @@ public sealed partial class MainWindow
     {
         var row = new Grid { ColumnSpacing = 10 };
         row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(48) });
-        row.ColumnDefinitions.Add(new ColumnDefinition());
-        row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(132) });
+        row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(185) });
+        row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(205) });
         var caption = Text(label, 13, true);
         caption.VerticalAlignment = VerticalAlignment.Center;
         row.Children.Add(caption);
