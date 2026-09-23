@@ -91,8 +91,16 @@ public sealed partial class MainWindow
             }
             catch (Exception ex) { error.Text = ex.Message; args.Cancel = true; }
         };
-        await dialog.ShowAsync();
-        if (saved) { RunTodoAction("Render"); Render(); }
+        Title = id is null ? "桌面组件 · 新增待办" : "桌面组件 · 编辑待办";
+        try { await dialog.ShowAsync(); }
+        catch (Exception ex)
+        {
+            Render();
+            ShowMessage("无法打开待办编辑窗口：" + ex.Message);
+            return;
+        }
+        Render();
+        if (saved) RunTodoAction("Render");
     }
 
     private async void DeleteTodo(string id, string title)

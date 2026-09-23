@@ -22,6 +22,7 @@ public sealed partial class MainWindow : Window
     private readonly TextBlock PageSubtitle = new();
     private readonly StackPanel PageContent = new();
     private readonly Grid Shell = new();
+    private readonly TaskCompletionSource<bool> uiReady = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private readonly Border Sidebar = new();
     private readonly TextBlock BrandTitle = new();
     private readonly TextBlock BrandSubtitle = new();
@@ -93,6 +94,7 @@ public sealed partial class MainWindow : Window
                 if (themeMode == "system") { ApplyAppearance(); Render(); }
             });
         BuildWindow();
+        Shell.Loaded += (_, _) => uiReady.TrySetResult(true);
         var iconPath = Path.Combine(AppContext.BaseDirectory, "Assets", "brand-mark.ico");
         if (File.Exists(iconPath)) AppWindow.SetIcon(iconPath);
         skinsRoot = Environment.GetEnvironmentVariable("RAINMETER_SKINS_ROOT")
@@ -112,9 +114,12 @@ public sealed partial class MainWindow : Window
         Render();
     }
 
-    public void OpenInitialRoute(string[] route)
+    public async void OpenInitialRoute(string[] route)
     {
         if (route.Length == 0) return;
+        await uiReady.Task;
+        // ContentDialog requires an attached XamlRoot and a completed first layout pass.
+        await Task.Delay(150);
         DispatcherQueue.TryEnqueue(() =>
         {
             Activate();
