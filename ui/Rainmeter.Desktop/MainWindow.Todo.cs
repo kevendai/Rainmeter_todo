@@ -60,13 +60,18 @@ public sealed partial class MainWindow
         schedule.Children.Add(EditorDateTimeRow("开始", availableDate, availableTime));
         schedule.Children.Add(EditorDateTimeRow("截止", dueDate, dueTime));
         schedule.Children.Add(Text("日期留空表示不限定时间。", 12, muted: true));
-        var timeExpander = new Expander { Header = "时间安排（可选）", Content = schedule,
-            IsExpanded = initialStart is not null || initialDue is not null };
+        schedule.Visibility = initialStart is not null || initialDue is not null
+            ? Visibility.Visible : Visibility.Collapsed;
+        var timeToggle = Action("时间安排（可选）  ⌄", () =>
+            schedule.Visibility = schedule.Visibility == Visibility.Visible
+                ? Visibility.Collapsed : Visibility.Visible);
+        timeToggle.HorizontalAlignment = HorizontalAlignment.Left;
         var fields = new StackPanel { Spacing = 18, Width = 540 };
         fields.Children.Add(Text(id is null ? "把想做的事记下来，之后仍会显示在桌面磁贴。" : "调整内容与时间，桌面磁贴会同步更新。", 13, muted: true));
         fields.Children.Add(title);
         fields.Children.Add(targetAndLabels);
-        fields.Children.Add(timeExpander);
+        fields.Children.Add(timeToggle);
+        fields.Children.Add(schedule);
         fields.Children.Add(note);
         fields.Children.Add(error);
         var dialog = EditorDialog(id is null ? "新增待办" : "编辑待办", fields,

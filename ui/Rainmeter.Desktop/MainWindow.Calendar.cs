@@ -113,8 +113,12 @@ public sealed partial class MainWindow
         extras.Children.Add(location);
         extras.Children.Add(url);
         extras.Children.Add(description);
-        var more = new Expander { Header = "更多信息", Content = extras,
-            IsExpanded = id is not null && (location.Text != "" || url.Text != "" || description.Text != "") };
+        extras.Visibility = id is not null && (location.Text != "" || url.Text != "" || description.Text != "")
+            ? Visibility.Visible : Visibility.Collapsed;
+        var moreToggle = Action("更多信息  ⌄", () =>
+            extras.Visibility = extras.Visibility == Visibility.Visible
+                ? Visibility.Collapsed : Visibility.Visible);
+        moreToggle.HorizontalAlignment = HorizontalAlignment.Left;
         var fields = new StackPanel { Spacing = 17, Width = 540 };
         fields.Children.Add(Text(id is null ? "为这一天留一段时间。桌面日程磁贴会同步显示。" : "修改日程信息并同步到原来的日历来源。", 13, muted: true));
         fields.Children.Add(source);
@@ -122,7 +126,8 @@ public sealed partial class MainWindow
         fields.Children.Add(timeHeader);
         fields.Children.Add(EditorDateTimeRow("开始", startDate, startTime));
         fields.Children.Add(EditorDateTimeRow("结束", endDate, endTime));
-        fields.Children.Add(more);
+        fields.Children.Add(moreToggle);
+        fields.Children.Add(extras);
         fields.Children.Add(error);
         var dialog = EditorDialog(id is null ? "新建日程" : "编辑日程", fields,
             id is null ? "创建日程" : "保存修改");
