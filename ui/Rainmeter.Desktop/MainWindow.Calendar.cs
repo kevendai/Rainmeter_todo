@@ -69,68 +69,77 @@ public sealed partial class MainWindow
             Calendar("LegacyEdit", id!);
             return;
         }
-        var title = new TextBox { Header = "标题", PlaceholderText = "这段时间安排什么？",
-            Text = original is JsonElement oldTitle ? Value(oldTitle, "title") : "" };
-        var start = new TextBox { Header = "开始时间", PlaceholderText = "YYYY-MM-DD HH:mm",
-            Text = original is JsonElement oldStart ? DisplayDate(Value(oldStart, "start_at"))
-                : DateTime.Now.ToString("yyyy-MM-dd HH:mm") };
-        var end = new TextBox { Header = "结束时间", PlaceholderText = "YYYY-MM-DD HH:mm",
-            Text = original is JsonElement oldEnd ? DisplayDate(Value(oldEnd, "end_at"))
-                : DateTime.Now.AddHours(1).ToString("yyyy-MM-dd HH:mm") };
-        var location = new TextBox { Header = "地点", Text = original is JsonElement oldLocation ? Value(oldLocation, "location") : "" };
-        var url = new TextBox { Header = "链接", Text = original is JsonElement oldUrl ? Value(oldUrl, "url") : "" };
-        var description = new TextBox { Header = "备注", AcceptsReturn = true, TextWrapping = TextWrapping.Wrap,
-            MinHeight = 92, Text = original is JsonElement oldDescription ? Value(oldDescription, "description") : "" };
-        var allDay = new CheckBox { Content = "全天日程", IsChecked = original is JsonElement oldAllDay && Value(oldAllDay, "all_day") == "True" };
-        var source = new ComboBox { Header = "保存到", MinWidth = 180 };
+        var initialStart = original is JsonElement oldStart
+            ? ExistingLocalDate(Value(oldStart, "start_at")) ?? DateTimeOffset.Now
+            : DateTimeOffset.Now;
+        var initialEnd = original is JsonElement oldEnd
+            ? ExistingLocalDate(Value(oldEnd, "end_at")) ?? initialStart.AddHours(1)
+            : initialStart.AddHours(1);
+        var isAllDay = original is JsonElement oldAllDay && Value(oldAllDay, "all_day") == "True";
+        var visibleEnd = isAllDay ? initialEnd.AddDays(-1) : initialEnd;
+        var title = EditorControl(new TextBox { Header = "标题", PlaceholderText = "这段时间安排什么？",
+            Text = original is JsonElement oldTitle ? Value(oldTitle, "title") : "" });
+        var startDate = new CalendarDatePicker { Date = LocalPickerDate(initialStart.DateTime) };
+        var startTime = new TimePicker { Time = new TimeSpan(initialStart.Hour, initialStart.Minute, 0) };
+        var endDate = new CalendarDatePicker { Date = LocalPickerDate(visibleEnd.DateTime) };
+        var endTime = new TimePicker { Time = new TimeSpan(visibleEnd.Hour, visibleEnd.Minute, 0) };
+        var location = EditorControl(new TextBox { Header = "地点", PlaceholderText = "添加地点",
+            Text = original is JsonElement oldLocation ? Value(oldLocation, "location") : "" });
+        var url = EditorControl(new TextBox { Header = "链接", PlaceholderText = "https://...",
+            Text = original is JsonElement oldUrl ? Value(oldUrl, "url") : "" });
+        var description = EditorControl(new TextBox { Header = "备注", PlaceholderText = "添加备注…",
+            AcceptsReturn = true, TextWrapping = TextWrapping.Wrap, MinHeight = 82,
+            Text = original is JsonElement oldDescription ? Value(oldDescription, "description") : "" });
+        var allDay = new ToggleSwitch { Header = "全天", IsOn = isAllDay, OnContent = "", OffContent = "" };
+        startTime.IsEnabled = endTime.IsEnabled = !isAllDay;
+        allDay.Toggled += (_, _) => startTime.IsEnabled = endTime.IsEnabled = !allDay.IsOn;
+        var source = EditorControl(new ComboBox { Header = "保存到", HorizontalAlignment = HorizontalAlignment.Stretch });
         source.Items.Add(new ComboBoxItem { Content = "本地日历", Tag = "local" });
-        source.Items.Add(new ComboBoxItem { Content = "CalDAV 日历", Tag = "caldav" });
-        source.SelectedIndex = previousSource == "caldav" ? 1 : 0;
+        var hasCalDav = File.Exists(Path.Combine(todoRoot, "caldav.secret"));
+        if (hasCalDav || previousSource == "caldav")
+            source.Items.Add(new ComboBoxItem { Content = "CalDAV 日历", Tag = "caldav" });
+        source.SelectedIndex = previousSource == "caldav" || id is null && hasCalDav ? 1 : 0;
         source.IsEnabled = id is null;
         var error = Text("", 12, muted: true);
-        var when = new Grid { ColumnSpacing = 14 };
-        when.ColumnDefinitions.Add(new ColumnDefinition());
-        when.ColumnDefinitions.Add(new ColumnDefinition());
-        when.Children.Add(start);
-        Grid.SetColumn(end, 1);
-        when.Children.Add(end);
-        var essentials = new StackPanel { Spacing = 14 };
-        essentials.Children.Add(title);
-        essentials.Children.Add(when);
-        essentials.Children.Add(allDay);
-        var extras = new StackPanel { Spacing = 14 };
+        var timeHeader = new Grid();
+        timeHeader.ColumnDefinitions.Add(new ColumnDefinition());
+        timeHeader.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        var timeTitle = Text("日期与时间", 15, true);
+        timeTitle.VerticalAlignment = VerticalAlignment.Center;
+        timeHeader.Children.Add(timeTitle);
+        Grid.SetColumn(allDay, 1);
+        timeHeader.Children.Add(allDay);
+        var extras = new StackPanel { Spacing = 12 };
         extras.Children.Add(location);
         extras.Children.Add(url);
         extras.Children.Add(description);
-        var fields = new StackPanel { Spacing = 17, Width = 640 };
+        var more = new Expander { Header = "更多信息", Content = extras,
+            IsExpanded = id is not null && (location.Text != "" || url.Text != "" || description.Text != "") };
+        var fields = new StackPanel { Spacing = 17, Width = 540 };
         fields.Children.Add(Text(id is null ? "为这一天留一段时间。桌面日程磁贴会同步显示。" : "修改日程信息并同步到原来的日历来源。", 13, muted: true));
-        fields.Children.Add(Card(source, 20));
-        fields.Children.Add(Card(essentials, 20));
-        fields.Children.Add(Card(extras, 20));
+        fields.Children.Add(source);
+        fields.Children.Add(title);
+        fields.Children.Add(timeHeader);
+        fields.Children.Add(EditorDateTimeRow("开始", startDate, startTime));
+        fields.Children.Add(EditorDateTimeRow("结束", endDate, endTime));
+        fields.Children.Add(more);
         fields.Children.Add(error);
-        var dialog = new ContentDialog
-        {
-            XamlRoot = Shell.XamlRoot,
-            Title = id is null ? "新建日程" : "编辑日程",
-            Content = new ScrollViewer { Content = fields, MaxHeight = 570 },
-            Width = 720,
-            PrimaryButtonText = id is null ? "创建日程" : "保存修改",
-            CloseButtonText = "取消",
-            DefaultButton = ContentDialogButton.Primary
-        };
-        bool saved = false;
+        var dialog = EditorDialog(id is null ? "新建日程" : "编辑日程", fields,
+            id is null ? "创建日程" : "保存修改");
         dialog.PrimaryButtonClick += async (_, args) =>
         {
             var deferral = args.GetDeferral();
             try
             {
-                var startsAt = ParseDate(start.Text, "开始时间") ?? throw new ArgumentException("开始时间不能为空。");
-                var endsAt = ParseDate(end.Text, "结束时间") ?? throw new ArgumentException("结束时间不能为空。");
-                if (allDay.IsChecked == true)
+                var startsAt = PickerIso(startDate, startTime) ?? throw new ArgumentException("请选择开始日期。");
+                var endsAt = PickerIso(endDate, endTime) ?? throw new ArgumentException("请选择结束日期。");
+                if (allDay.IsOn)
                 {
-                    var day = DateTimeOffset.Parse(startsAt).LocalDateTime.Date;
+                    var day = startDate.Date!.Value.LocalDateTime.Date;
+                    var lastDay = endDate.Date!.Value.LocalDateTime.Date;
+                    if (lastDay < day) throw new ArgumentException("结束日期不能早于开始日期。");
                     startsAt = new DateTimeOffset(day, TimeZoneInfo.Local.GetUtcOffset(day)).ToString("O");
-                    var next = day.AddDays(1);
+                    var next = lastDay.AddDays(1);
                     endsAt = new DateTimeOffset(next, TimeZoneInfo.Local.GetUtcOffset(next)).ToString("O");
                 }
                 if (DateTimeOffset.Parse(endsAt) <= DateTimeOffset.Parse(startsAt))
@@ -142,18 +151,24 @@ public sealed partial class MainWindow
                     title = title.Text.Trim(),
                     start_at = startsAt,
                     end_at = endsAt,
-                    all_day = allDay.IsChecked == true,
+                    all_day = allDay.IsOn,
                     location = location.Text.Trim(),
                     url = url.Text.Trim(),
                     description = description.Text
                 });
-                saved = true;
             }
             catch (Exception ex) { error.Text = ex.Message; args.Cancel = true; }
             finally { deferral.Complete(); }
         };
-        await dialog.ShowAsync();
-        if (saved) Render();
+        Title = id is null ? "桌面组件 · 新建日程" : "桌面组件 · 编辑日程";
+        try { await dialog.ShowAsync(); }
+        catch (Exception ex)
+        {
+            Render();
+            ShowMessage("无法打开日程编辑窗口：" + ex.Message);
+            return;
+        }
+        Render();
     }
 
     private async void ShowCalendarDetail(string id)

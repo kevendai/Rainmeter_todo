@@ -38,45 +38,39 @@ public sealed partial class MainWindow
         try { existing = id is null ? null : todoRepository.Find(id); }
         catch (Exception ex) { ShowMessage(ex.Message); return; }
         if (id is not null && existing is null) { ShowMessage("这条待办已不存在，请刷新后重试。"); return; }
-        var title = new TextBox { Header = "标题", PlaceholderText = "这件事叫什么？", Text = existing?.Title ?? "" };
-        var target = new TextBox { Header = "打开目标", PlaceholderText = "链接或文件路径（可选）", Text = existing?.Target ?? "" };
-        var labels = new TextBox { Header = "标签", PlaceholderText = "用逗号分隔", Text = string.Join("，", existing?.Labels ?? []) };
-        var available = new TextBox { Header = "开始时间", PlaceholderText = "YYYY-MM-DD HH:mm（可选）", Text = DisplayDate(existing?.AvailableFrom) };
-        var due = new TextBox { Header = "截止时间", PlaceholderText = "YYYY-MM-DD HH:mm（可选）", Text = DisplayDate(existing?.DueAt) };
-        var note = new TextBox { Header = "备注", PlaceholderText = "补充一点背景或细节…",
-            Text = existing?.Note ?? "", AcceptsReturn = true, TextWrapping = TextWrapping.Wrap, MinHeight = 110 };
+        var title = EditorControl(new TextBox { Header = "标题", PlaceholderText = "例如：整理实验结果", Text = existing?.Title ?? "" });
+        var target = EditorControl(new TextBox { Header = "打开目标", PlaceholderText = "链接或文件路径（可选）", Text = existing?.Target ?? "" });
+        var labels = EditorControl(new TextBox { Header = "标签", PlaceholderText = "工作, 论文", Text = string.Join("，", existing?.Labels ?? []) });
+        var note = EditorControl(new TextBox { Header = "备注", PlaceholderText = "补充一点背景或细节…",
+            Text = existing?.Note ?? "", AcceptsReturn = true, TextWrapping = TextWrapping.Wrap, MinHeight = 86 });
+        var initialStart = ExistingLocalDate(existing?.AvailableFrom);
+        var initialDue = ExistingLocalDate(existing?.DueAt);
+        var availableDate = new CalendarDatePicker { Date = initialStart is null ? null : LocalPickerDate(initialStart.Value.DateTime) };
+        var availableTime = new TimePicker { Time = initialStart?.TimeOfDay ?? new TimeSpan(9, 0, 0) };
+        var dueDate = new CalendarDatePicker { Date = initialDue is null ? null : LocalPickerDate(initialDue.Value.DateTime) };
+        var dueTime = new TimePicker { Time = initialDue?.TimeOfDay ?? new TimeSpan(18, 0, 0) };
         var error = Text("", 12, muted: true);
-        var basics = new StackPanel { Spacing = 14 };
-        foreach (var field in new UIElement[] { title, target, labels }) basics.Children.Add(field);
-        var dates = new Grid { ColumnSpacing = 14 };
-        dates.ColumnDefinitions.Add(new ColumnDefinition());
-        dates.ColumnDefinitions.Add(new ColumnDefinition());
-        dates.Children.Add(available);
-        Grid.SetColumn(due, 1);
-        dates.Children.Add(due);
-        var schedule = new StackPanel { Spacing = 11 };
-        schedule.Children.Add(Text("时间安排", 15, true));
-        schedule.Children.Add(dates);
-        schedule.Children.Add(Text("留空表示不限定时间；格式为 2026-09-23 20:00。", 12, muted: true));
-        var notes = new StackPanel { Spacing = 11 };
-        notes.Children.Add(Text("补充说明", 15, true));
-        notes.Children.Add(note);
-        var fields = new StackPanel { Spacing = 17, Width = 640 };
+        var targetAndLabels = new Grid { ColumnSpacing = 12 };
+        targetAndLabels.ColumnDefinitions.Add(new ColumnDefinition());
+        targetAndLabels.ColumnDefinitions.Add(new ColumnDefinition());
+        targetAndLabels.Children.Add(target);
+        Grid.SetColumn(labels, 1);
+        targetAndLabels.Children.Add(labels);
+        var schedule = new StackPanel { Spacing = 12 };
+        schedule.Children.Add(EditorDateTimeRow("开始", availableDate, availableTime));
+        schedule.Children.Add(EditorDateTimeRow("截止", dueDate, dueTime));
+        schedule.Children.Add(Text("日期留空表示不限定时间。", 12, muted: true));
+        var timeExpander = new Expander { Header = "时间安排（可选）", Content = schedule,
+            IsExpanded = initialStart is not null || initialDue is not null };
+        var fields = new StackPanel { Spacing = 18, Width = 540 };
         fields.Children.Add(Text(id is null ? "把想做的事记下来，之后仍会显示在桌面磁贴。" : "调整内容与时间，桌面磁贴会同步更新。", 13, muted: true));
-        fields.Children.Add(Card(basics, 20));
-        fields.Children.Add(Card(schedule, 20));
-        fields.Children.Add(Card(notes, 20));
+        fields.Children.Add(title);
+        fields.Children.Add(targetAndLabels);
+        fields.Children.Add(timeExpander);
+        fields.Children.Add(note);
         fields.Children.Add(error);
-        var dialog = new ContentDialog
-        {
-            XamlRoot = Shell.XamlRoot,
-            Title = id is null ? "新增待办" : "编辑待办",
-            Content = new ScrollViewer { Content = fields, MaxHeight = 570 },
-            Width = 720,
-            PrimaryButtonText = id is null ? "添加待办" : "保存修改",
-            CloseButtonText = "取消",
-            DefaultButton = ContentDialogButton.Primary
-        };
+        var dialog = EditorDialog(id is null ? "新增待办" : "编辑待办", fields,
+            id is null ? "添加待办" : "保存修改");
         bool saved = false;
         dialog.PrimaryButtonClick += (_, args) =>
         {
@@ -85,7 +79,7 @@ public sealed partial class MainWindow
                 var draft = new TodoDraft(id, title.Text, target.Text, note.Text,
                     labels.Text.Split([',', '，', '、'], StringSplitOptions.RemoveEmptyEntries)
                         .Select(value => value.Trim()).Where(value => value != "").Distinct().ToArray(),
-                    ParseDate(available.Text, "开始时间"), ParseDate(due.Text, "截止时间"));
+                    PickerIso(availableDate, availableTime), PickerIso(dueDate, dueTime));
                 todoRepository.Save(draft);
                 saved = true;
             }

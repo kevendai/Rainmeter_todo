@@ -47,6 +47,7 @@ public sealed partial class MainWindow : Window
         ? studioStyle ? Brush(48, 40, 57, 208) : Brush(47, 40, 54, 243)
         : Brush(255, 255, 255, studioStyle ? 224 : 248);
     private Brush Accent => DarkTheme ? Brush(206, 147, 255) : Brush(103, 58, 166);
+    private Brush PrimaryFill => Brush(123, 86, 196);
     private Brush Canvas => !DarkTheme
         ? new LinearGradientBrush
         {
@@ -342,10 +343,15 @@ public sealed partial class MainWindow : Window
         Child = content
     };
 
-    private static Button Action(string title, Action callback, bool primary = false)
+    private Button Action(string title, Action callback, bool primary = false)
     {
         var button = new Button { Content = title, CornerRadius = new CornerRadius(10), MinHeight = 38,
             Style = primary ? (Style)Application.Current.Resources["AccentButtonStyle"] : null };
+        if (primary)
+        {
+            button.Background = PrimaryFill;
+            button.Foreground = Brush(255, 255, 255);
+        }
         button.Click += (_, _) => callback();
         return button;
     }
