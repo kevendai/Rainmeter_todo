@@ -52,6 +52,8 @@ internal static partial class TodoApp
         if (action == "Manage") return ManageInteractive();
         if (action == "Settings") return SettingsInteractive();
         if (action == "BackupSelfTest") return RunBackupSelfTests();
+        if (action == "UiMarketRefresh") return UiMarketRefresh(id);
+        if (action == "UiMarketInstall") return UiMarketInstall(id, pluginAction);
         if(action=="PluginAction"){if(id==""||pluginAction=="")return 2;StartPluginCommand("PluginAction",id+" "+pluginAction);return 0;}
         // 规格 §5.2：磁贴上的【使用 DeepSeek AI】按钮与插件管理里的「处理待确认…」都走这里。
         if(action=="PluginConfirmAttention")return ConfirmPaidAttention(id);
@@ -190,4 +192,3 @@ internal static partial class TodoApp
     }
     private static void Refresh(){File.WriteAllText(GuardPath,RuntimeUtil.Iso(DateTimeOffset.Now),RuntimeUtil.Utf8NoBom);RuntimeUtil.Refresh("Todo");string calendar=Path.GetFullPath(Path.Combine(ResourceDir,"..","..","Calendar","Calendar.ini"));if(File.Exists(calendar))RuntimeUtil.Refresh("Calendar");}
 }
-

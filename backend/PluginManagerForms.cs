@@ -501,8 +501,8 @@ internal static partial class TodoApp
         string[] categories={"全部","内容","服务","工具","其他"};
         List<Button> categoryButtons=new List<Button>();
         for(int i=0;i<categories.Length;i++){string category=categories[i];Button chip=LightUi.Button(category,344+i*68,116,64,DialogResult.None);chip.Height=36;chip.BackColor=category=="全部"?SettingsAccent:SettingsCardBack;chip.ForeColor=category=="全部"?Color.White:SettingsText;categoryButtons.Add(chip);}
-        Button refresh=LightUi.PrimaryButton("刷新远端市场",694,114,158,DialogResult.None);refresh.Height=38;
-        PluginMarketControl marketList=new PluginMarketControl{Left=32,Top=170,Width=820,Height=478,EmptyText="本地市场暂无匹配插件。点击「刷新远端市场」可更新索引。"};
+        Button refresh=LightUi.PrimaryButton("刷新市场",694,114,158,DialogResult.None);refresh.Height=38;
+        PluginMarketControl marketList=new PluginMarketControl{Left=32,Top=170,Width=820,Height=478,EmptyText="本地市场暂无匹配插件。点击「刷新市场」可更新索引。"};
         Label marketStatus=new Label{Text="正在读取本地市场",Left=34,Top=656,Width=630,Height=24,ForeColor=SettingsMuted,BackColor=Color.Transparent,Font=PluginRowSubFont};
         Button installMarket=LightUi.PrimaryButton("安装或更新所选插件",674,650,178,DialogResult.None);
         LightUi.SetCue(marketSearch,"搜索插件");
@@ -954,6 +954,50 @@ internal static partial class TodoApp
         if(id=="io.github.kevendai.translate-tencent")return "提供腾讯云机器翻译服务，支持其他插件批量翻译文本。";
         if(id=="io.github.kevendai.ssdp-server-ip")return "自动发现服务器 IP，同时保留用户手动设置的端口。";
         return String.IsNullOrWhiteSpace(fallback)?"提供扩展功能与桌面联动。":fallback;
+    }
+
+    private static int UiMarketRefresh(string resultPath)
+    {
+        try
+        {
+            EnableTls12();
+            using(WebClient web=new WebClient())
+            {
+                web.Headers[HttpRequestHeader.UserAgent]="RainmeterDesktopWidgets/"+AppVersion;
+                string downloaded=PluginMarketCache.Decode(web.DownloadData(PluginRegistryUrl));
+                PluginMarketCache.Save(PluginPaths.RegistryCache,downloaded);
+            }
+            JsonUtil.SaveAtomic(resultPath,new Dictionary<string,object>{{"ok",true}});
+            return 0;
+        }
+        catch(Exception ex)
+        {
+            try{JsonUtil.SaveAtomic(resultPath,new Dictionary<string,object>{{"ok",false},{"error",ex.Message}});}catch{}
+            return 1;
+        }
+    }
+
+    private static int UiMarketInstall(string pluginId,string resultPath)
+    {
+        try
+        {
+            string sourcePath,sourceLabel;
+            string bundledPath=Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"plugin-registry-v1.json");
+            string json=PluginMarketCache.LoadLocal(PluginPaths.RegistryCache,bundledPath,out sourcePath,out sourceLabel);
+            Dictionary<string,object> index=JsonUtil.Object(JsonUtil.Deserialize(json));
+            Dictionary<string,object> record=JsonUtil.Array(JsonUtil.Get(index,"plugins"))
+                .Select(JsonUtil.Object).FirstOrDefault(p=>JsonUtil.String(p,"id","")==pluginId&&JsonUtil.Bool(p,"official",false));
+            if(record==null)throw new Exception("本地市场中找不到该官方插件，请先刷新市场。");
+            PluginRow row=new PluginRow();row.Tag=record;
+            InstallMarketPlugin(row);
+            JsonUtil.SaveAtomic(resultPath,new Dictionary<string,object>{{"ok",true}});
+            return 0;
+        }
+        catch(Exception ex)
+        {
+            try{JsonUtil.SaveAtomic(resultPath,new Dictionary<string,object>{{"ok",false},{"error",ex.Message}});}catch{}
+            return 1;
+        }
     }
     private static string MarketCategory(string id,string capability)
     {

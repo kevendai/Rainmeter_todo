@@ -10,4 +10,13 @@
 
 默认读取仓库 `skins` 目录；部署时可设置 `RAINMETER_SKINS_ROOT` 指向实际 Rainmeter Skins 目录。
 
-迁移状态：总览、待办、日历、插件、设置的 WinUI 导航与只读展示已实现。新增、编辑、同步和插件市场暂时转交现有宿主。它们还不是最终的 WinUI 原生实现，不能把当前版本当作完整替换。旧设计在原分支/存档中保留；完成迁移后应删除新分支中不再使用的旧窗体。
+迁移状态：
+
+- Rainmeter 桌面待办和日程继续保持磁贴；WinUI 管理页也使用磁贴浏览。
+- 待办新增、编辑、删除与日程新增、普通日程编辑、详情已经是 WinUI 窗口。日程保存通过无界面命令复用现有本地日历和 CalDAV 服务。
+- 插件市场从本地缓存打开，点击“刷新市场”才下载并更新缓存；安装确认、搜索、已安装状态与启用/禁用在 WinUI 内完成。
+- 云母与亚克力两种深色材质可切换，选择保存在当前用户的本地应用数据目录。
+
+仍待迁移：周期日程高级编辑、插件逐项配置、备份与 CalDAV 账号等高级设置。当前版本尚未完全替换旧界面；完成迁移后应删除新分支中不再使用的旧窗体。旧设计在原分支/存档中保留。
+
+隔离验证：`& .winui-tools/dotnet/dotnet.exe run --project ui/Rainmeter.Desktop.Tests/Rainmeter.Desktop.Tests.csproj -c Release`。可设置 `RAINMETER_UI_START_PAGE` 为 `todo`、`calendar`、`plugins`、`settings`，搭配 `RAINMETER_SKINS_ROOT` 指向测试数据启动指定页面。

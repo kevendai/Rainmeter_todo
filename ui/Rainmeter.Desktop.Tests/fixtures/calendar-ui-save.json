@@ -1,0 +1,11 @@
+{
+  "id": "",
+  "source": "local",
+  "title": "虚构的新建日程",
+  "start_at": "2026-09-24T10:00:00+08:00",
+  "end_at": "2026-09-24T11:00:00+08:00",
+  "all_day": false,
+  "location": "测试地点",
+  "url": "",
+  "description": "仅用于隔离测试"
+}

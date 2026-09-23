@@ -211,7 +211,7 @@ internal static class TodoLayoutProbe
                 DpiLayoutAssertions.AssertPixelFonts(form);
                 DpiLayoutAssertions.AssertSingleLineLabelsNotClipped(form);
                 List<Control> controls = Descendants(form).ToList();
-                if (!controls.Any(control => control.Text == "桌面磁贴缩放") || !controls.Any(control => control.Text == "管理与编辑窗口缩放") || !controls.Any(control => control.Text == "磁贴视觉风格"))
+                if (!controls.Any(control => control.Text == "桌面磁贴缩放") || !controls.Any(control => control.Text == "管理与编辑窗口缩放") || !controls.Any(control => control.Text == "界面材质风格"))
                     throw new Exception("Independent tile/window scale controls are missing");
                 if (controls.OfType<ComboBox>().Count() < 3) throw new Exception("Scale or theme selectors are missing");
                 Button apply = controls.OfType<Button>().First(button => button.Text == "应用缩放");

@@ -1,10 +1,13 @@
 using System.Diagnostics;
+using System.Globalization;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using Microsoft.UI.Composition.SystemBackdrops;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Media;
 using Microsoft.UI.Xaml.Media.Animation;
+using Windows.Graphics;
 using Windows.UI;
 
 namespace Rainmeter.Desktop;
@@ -24,32 +27,81 @@ public sealed partial class MainWindow : Window
     private readonly string skinsRoot;
     private readonly string todoRoot;
     private readonly string calendarRoot;
+    private readonly TodoRepository todoRepository;
+    private readonly string pluginDataRoot;
+    private bool pluginMarketSelected = true;
+    private static readonly string StylePath = Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+        "RainmeterDesktop", "appearance.txt");
     private string page = "home";
     private bool studioStyle;
-    private Brush Ink => Brush(studioStyle ? 240 : 23, studioStyle ? 244 : 32, studioStyle ? 249 : 43);
-    private Brush Muted => Brush(studioStyle ? 163 : 104, studioStyle ? 180 : 117, studioStyle ? 199 : 134);
-    private Brush Surface => Brush(studioStyle ? 28 : 255, studioStyle ? 40 : 255, studioStyle ? 54 : 255);
+    private Brush Ink => Brush(244, 239, 249);
+    private Brush Muted => Brush(183, 172, 192);
+    private Brush Surface => studioStyle ? Brush(48, 40, 57, 208) : Brush(47, 40, 54, 243);
+    private Brush Accent => Brush(206, 147, 255);
+    private Brush Canvas => studioStyle
+        ? new LinearGradientBrush
+        {
+            StartPoint = new Windows.Foundation.Point(0, 0),
+            EndPoint = new Windows.Foundation.Point(1, 1),
+            GradientStops =
+            {
+                new GradientStop { Color = Color.FromArgb(184, 30, 18, 39), Offset = 0 },
+                new GradientStop { Color = Color.FromArgb(184, 25, 29, 48), Offset = 1 }
+            }
+        }
+        : new LinearGradientBrush
+        {
+            StartPoint = new Windows.Foundation.Point(0, 0),
+            EndPoint = new Windows.Foundation.Point(1, 1),
+            GradientStops =
+            {
+                new GradientStop { Color = Color.FromArgb(245, 31, 22, 40), Offset = 0 },
+                new GradientStop { Color = Color.FromArgb(245, 26, 28, 47), Offset = 1 }
+            }
+        };
     private static Brush Brush(int r, int g, int b) => new SolidColorBrush(Color.FromArgb(255, (byte)r, (byte)g, (byte)b));
+    private static Brush Brush(int r, int g, int b, int alpha) => new SolidColorBrush(Color.FromArgb((byte)alpha, (byte)r, (byte)g, (byte)b));
 
     public MainWindow()
     {
+        studioStyle = LoadStyle();
         BuildWindow();
         skinsRoot = Environment.GetEnvironmentVariable("RAINMETER_SKINS_ROOT")
             ?? FindSkinsRoot();
         todoRoot = Path.Combine(skinsRoot, "Todo", "@Resources");
         calendarRoot = Path.Combine(skinsRoot, "Calendar", "@Resources");
+        todoRepository = new TodoRepository(todoRoot);
+        pluginDataRoot = Environment.GetEnvironmentVariable("RAINMETER_PLUGIN_ROOT")
+            ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "RainmeterDesktopWidgets");
         ExtendsContentIntoTitleBar = false;
-        SystemBackdrop = new MicaBackdrop { Kind = MicaKind.Base };
+        SystemBackdrop = studioStyle ? new DesktopAcrylicBackdrop() : new MicaBackdrop { Kind = MicaKind.Base };
+        if (Content is FrameworkElement shell) shell.RequestedTheme = ElementTheme.Dark;
+        AppWindow.Resize(new SizeInt32(1190, 820));
         Nav.SelectedIndex = 0;
+        var startPage = Environment.GetEnvironmentVariable("RAINMETER_UI_START_PAGE");
+        if (startPage is "todo" or "calendar" or "plugins" or "settings") Navigate(startPage);
         Render();
+    }
+
+    private static bool LoadStyle()
+    {
+        try { return File.Exists(StylePath) && File.ReadAllText(StylePath).Trim() == "acrylic"; }
+        catch { return false; }
+    }
+
+    private static void SaveStyle(bool acrylic)
+    {
+        Directory.CreateDirectory(Path.GetDirectoryName(StylePath)!);
+        File.WriteAllText(StylePath, acrylic ? "acrylic" : "mica");
     }
 
     private void BuildWindow()
     {
         Title = "桌面组件";
         var root = Shell;
-        root.Background = Brush(245, 245, 241);
-        root.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(230) });
+        root.Background = Canvas;
+        root.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(236) });
         root.ColumnDefinitions.Add(new ColumnDefinition());
         var sidebar = new Grid();
         sidebar.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
@@ -66,9 +118,15 @@ public sealed partial class MainWindow : Window
         brand.Children.Add(BrandTitle);
         brand.Children.Add(BrandSubtitle);
         sidebar.Children.Add(brand);
-        foreach (var entry in new[] { ("总览", "home"), ("待办", "todo"), ("日历", "calendar"),
-                     ("插件", "plugins"), ("外观与设置", "settings") })
-            Nav.Items.Add(new ListViewItem { Content = entry.Item1, Tag = entry.Item2, MinHeight = 48 });
+        foreach (var entry in new[] { ("总览", "home", Symbol.Home), ("待办", "todo", Symbol.AllApps),
+                     ("日历", "calendar", Symbol.Calendar), ("插件", "plugins", Symbol.Library),
+                     ("外观与设置", "settings", Symbol.Setting) })
+        {
+            var label = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 13 };
+            label.Children.Add(new SymbolIcon(entry.Item3) { Foreground = Accent });
+            label.Children.Add(Text(entry.Item1, 15));
+            Nav.Items.Add(new ListViewItem { Content = label, Tag = entry.Item2, MinHeight = 54 });
+        }
         Nav.Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent);
         Nav.BorderThickness = new Thickness(0);
         Nav.SelectionChanged += Nav_SelectionChanged;
@@ -80,19 +138,19 @@ public sealed partial class MainWindow : Window
         BrandFooter.Margin = new Thickness(10, 0, 0, 0);
         Grid.SetRow(BrandFooter, 2);
         sidebar.Children.Add(BrandFooter);
-        Sidebar.Background = Surface;
+        Sidebar.Background = Brush(24, 16, 32, 235);
         Sidebar.Padding = new Thickness(20, 28, 20, 28);
         Sidebar.Child = sidebar;
         root.Children.Add(Sidebar);
 
-        var body = new StackPanel { Spacing = 22, Margin = new Thickness(42, 30, 42, 48) };
+        var body = new StackPanel { Spacing = 22, Margin = new Thickness(34, 28, 34, 42) };
         var header = new Grid();
         header.ColumnDefinitions.Add(new ColumnDefinition());
         header.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         var titles = new StackPanel { Spacing = 6 };
         PageEyebrow.FontSize = 12;
-        PageEyebrow.Foreground = new SolidColorBrush(Color.FromArgb(255, 41, 107, 223));
-        PageTitle.FontSize = 34;
+        PageEyebrow.Foreground = Accent;
+        PageTitle.FontSize = 32;
         PageTitle.FontWeight = Microsoft.UI.Text.FontWeights.Bold;
         PageTitle.TextWrapping = TextWrapping.Wrap;
         PageTitle.Foreground = Ink;
@@ -195,6 +253,15 @@ public sealed partial class MainWindow : Window
         return row;
     }
 
+    private static VariableSizedWrapGrid TileBoard()
+        => new()
+        {
+            Orientation = Orientation.Horizontal,
+            ItemWidth = 330,
+            ItemHeight = 230,
+            HorizontalAlignment = HorizontalAlignment.Stretch
+        };
+
     private void Run(string root, string exe, params string[] args)
     {
         var path = Path.Combine(root, exe);
@@ -207,6 +274,20 @@ public sealed partial class MainWindow : Window
     private void Todo(string action, string id = "") => Run(todoRoot, "TodoHost.exe", action, id);
     private void Calendar(string action, string id = "") => Run(calendarRoot, "CalendarHost.exe", action, id);
 
+    private void ShowMessage(string message) => PageContent.Children.Insert(0, Card(Text(message, 13, muted: true), 14));
+
+    private static string DisplayDate(string? iso)
+        => DateTimeOffset.TryParse(iso, out var date) ? date.ToLocalTime().ToString("yyyy-MM-dd HH:mm") : "";
+
+    private static string? ParseDate(string input, string label)
+    {
+        if (string.IsNullOrWhiteSpace(input)) return null;
+        if (!DateTime.TryParseExact(input.Trim(), "yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture,
+            DateTimeStyles.None, out var value))
+            throw new ArgumentException(label + "格式应为 YYYY-MM-DD HH:mm。");
+        return new DateTimeOffset(value, TimeZoneInfo.Local.GetUtcOffset(value)).ToString("O");
+    }
+
     private void Heading(string title, string subtitle)
     {
         PageTitle.Text = title;
@@ -216,15 +297,17 @@ public sealed partial class MainWindow : Window
     private void RenderHome()
     {
         Heading("今天，先做重要的事。", DateTime.Now.ToString("M月d日 dddd") + " · 你的桌面工作台");
-        var todo = ReadJson(Path.Combine(todoRoot, "tasks.json"));
-        var calendar = ReadJson(Path.Combine(calendarRoot, "calendar-cache.json"));
+        using var todo = ReadJson(Path.Combine(todoRoot, "tasks.json"));
+        using var calendar = ReadJson(Path.Combine(calendarRoot, "calendar-cache.json"));
+        using var calendarState = ReadJson(Path.Combine(calendarRoot, "calendar-state.json"));
         int tasks = todo is null ? 0 : Items(todo.RootElement, "tasks").Count();
-        int events = calendar is null ? 0 : Items(calendar.RootElement, "events").Count();
+        int events = (calendar is null ? 0 : Items(calendar.RootElement, "events").Count())
+            + (calendarState is null ? 0 : Items(calendarState.RootElement, "local_events").Count());
         var hero = new StackPanel { Spacing = 14 };
         hero.Children.Add(Text("GOOD MORNING", 12, true, true));
         hero.Children.Add(Text("把注意力留给真正重要的事", 28, true));
         hero.Children.Add(Text("用磁贴组织今天，点开卡片继续完成工作。", 14, muted: true));
-        hero.Children.Add(Row(Action("新增待办", () => Todo("Add"), true), Action("新建日程", () => Calendar("New"))));
+        hero.Children.Add(Row(Action("新增待办", () => ShowTodoEditor(null), true), Action("新建日程", () => ShowCalendarEditor(null))));
         PageContent.Children.Add(Card(hero, 30));
         var tiles = new Grid { ColumnSpacing = 16 };
         tiles.ColumnDefinitions.Add(new ColumnDefinition());
@@ -234,7 +317,6 @@ public sealed partial class MainWindow : Window
         Grid.SetColumn(calTile, 1);
         tiles.Children.Add(calTile);
         PageContent.Children.Add(tiles);
-        PageContent.Children.Add(Card(Text("磁贴布局与 Rainmeter 桌面配置保持独立；这里是完整的管理工作台。", 13, muted: true)));
     }
 
     private FrameworkElement StatTile(string title, string number, string note, Action action)
@@ -246,97 +328,6 @@ public sealed partial class MainWindow : Window
         var card = Card(content, 28);
         card.Tapped += (_, _) => action();
         return card;
-    }
-
-    private void RenderTodo()
-    {
-        Heading("待办事项", "清晰地看到下一步，轻松管理每件小事。");
-        PageContent.Children.Add(Row(Action("新增待办", () => Todo("Add"), true), Action("管理待办", () => Todo("Manage")), Action("同步", () => Todo("Refresh"))));
-        using var state = ReadJson(Path.Combine(todoRoot, "tasks.json"));
-        if (state is null) { Empty("还没有待办数据。"); return; }
-        var tasks = Items(state.RootElement, "tasks").ToArray();
-        if (tasks.Length == 0) { Empty("一切就绪。新增一条待办，开始安排今天。"); return; }
-        foreach (var task in tasks.Take(80))
-        {
-            var id = Value(task, "id");
-            var title = Value(task, "title", "未命名待办");
-            var note = Value(task, "description");
-            var panel = new StackPanel { Spacing = 8 };
-            panel.Children.Add(Text(title, 18, true));
-            if (!string.IsNullOrWhiteSpace(note)) panel.Children.Add(Text(note, 13, muted: true));
-            panel.Children.Add(Row(Action("打开", () => Todo("Open", id)), Action("编辑", () => Todo("Edit", id)), Action("完成 / 恢复", () => Todo("Toggle", id))));
-            PageContent.Children.Add(Card(panel));
-        }
-    }
-
-    private void RenderCalendar()
-    {
-        Heading("日历日程", "为生活和工作留出恰好的空间。");
-        PageContent.Children.Add(Row(Action("新建日程", () => Calendar("New"), true), Action("管理日程", () => Calendar("Manage")), Action("同步日历", () => Calendar("Sync"))));
-        using var cache = ReadJson(Path.Combine(calendarRoot, "calendar-cache.json"));
-        if (cache is null) { Empty("还没有日历数据。"); return; }
-        var events = Items(cache.RootElement, "events").ToArray();
-        if (events.Length == 0) { Empty("暂无日程。你可以新建日程，或从日历服务同步。"); return; }
-        foreach (var item in events.Take(80))
-        {
-            var panel = new StackPanel { Spacing = 7 };
-            panel.Children.Add(Text(Value(item, "summary", Value(item, "title", "未命名日程")), 18, true));
-            panel.Children.Add(Text(Value(item, "start", Value(item, "start_at")), 13, muted: true));
-            var id = Value(item, "occurrence_key", Value(item, "uid"));
-            panel.Children.Add(Row(Action("详情", () => Calendar("Detail", id)), Action("编辑", () => Calendar("Edit", id))));
-            PageContent.Children.Add(Card(panel));
-        }
-    }
-
-    private void RenderPlugins()
-    {
-        Heading("插件中心", "用恰好的扩展，让工作台更称手。");
-        PageContent.Children.Add(Card(Row(Action("已安装插件与市场", () => Todo("Settings"), true), Action("立即同步", () => Todo("Refresh")))));
-        var bundled = Path.Combine(todoRoot, "BundledPlugins");
-        var projectBundled = Path.Combine(skinsRoot, "..", "plugins", "official");
-        var source = Directory.Exists(bundled) ? bundled : projectBundled;
-        if (!Directory.Exists(source)) { Empty("插件目录尚不可用。"); return; }
-        foreach (var directory in Directory.EnumerateDirectories(source).OrderBy(Path.GetFileName))
-        {
-            var manifest = Directory.EnumerateFiles(directory, "*.json").FirstOrDefault();
-            string name = Path.GetFileName(directory);
-            if (manifest is not null)
-            {
-                using var data = ReadJson(manifest);
-                if (data is not null) name = Value(data.RootElement, "name", name);
-            }
-            var stack = new StackPanel { Spacing = 5 };
-            stack.Children.Add(Text(name, 18, true));
-            stack.Children.Add(Text("本地插件 · " + Path.GetFileName(directory), 12, muted: true));
-            PageContent.Children.Add(Card(stack));
-        }
-    }
-
-    private void RenderSettings()
-    {
-        Heading("外观与设置", "选择适合你的氛围，其他配置清爽归位。");
-        var style = new StackPanel { Spacing = 12 };
-        style.Children.Add(Text("两种界面风格", 20, true));
-        style.Children.Add(Text(studioStyle ? "当前：沉浸风格" : "当前：明亮风格", 13, muted: true));
-        style.Children.Add(Row(Action("明亮风格", () => SetStyle(false), !studioStyle), Action("沉浸风格", () => SetStyle(true), studioStyle)));
-        PageContent.Children.Add(Card(style));
-        PageContent.Children.Add(Card(Row(Action("待办与插件设置", () => Todo("Settings")), Action("日历设置", () => Calendar("Settings")))));
-        PageContent.Children.Add(Card(Text("数据位置：" + skinsRoot, 12, muted: true)));
-    }
-
-    private void SetStyle(bool immersive)
-    {
-        studioStyle = immersive;
-        if (Content is FrameworkElement root) root.RequestedTheme = immersive ? ElementTheme.Dark : ElementTheme.Light;
-        SystemBackdrop = immersive ? new DesktopAcrylicBackdrop() : new MicaBackdrop { Kind = MicaKind.Base };
-        Shell.Background = immersive ? Brush(17, 25, 35) : Brush(245, 245, 241);
-        Sidebar.Background = Surface;
-        BrandTitle.Foreground = Ink;
-        BrandSubtitle.Foreground = Muted;
-        BrandFooter.Foreground = Muted;
-        PageTitle.Foreground = Ink;
-        PageSubtitle.Foreground = Muted;
-        Render();
     }
 
     private void Empty(string message) => PageContent.Children.Add(Card(Text(message, 16, muted: true), 32));
