@@ -24,6 +24,9 @@ paper-sync.secret
 
 .codex/
 .workbuddy/
+.winui-tools/
+ui/**/bin/
+ui/**/obj/
 remote-paper-backups/
 skins/Todo/@Resources/PluginValues.inc
 skins/Todo/@Resources/ui-scale.txt
