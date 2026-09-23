@@ -69,6 +69,8 @@ internal static partial class TodoApp
             RenderUiScaleSkins();
             MessageBox.Show("桌面磁贴大小已应用。", "磁贴缩放", MessageBoxButtons.OK, MessageBoxIcon.Information);
         });
+        if (action == "UiBackupExport" || action == "UiBackupPreview" || action == "UiBackupApply")
+            return RunBackupUiCommand(action);
         if (action == "Add") return AddInteractive();
         if (action == "Edit") return EditInteractive(id);
         if (action == "Manage") return ManageInteractive();

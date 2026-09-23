@@ -130,6 +130,64 @@ internal static partial class TodoApp
         };
     }
 
+    private static int RunBackupUiCommand(string action)
+    {
+        try
+        {
+            Dictionary<string, object> request = JsonUtil.Object(JsonUtil.Deserialize(Console.In.ReadToEnd()));
+            string path = JsonUtil.String(request, "path", "");
+            string password = JsonUtil.String(request, "password", "");
+            if (path == "") throw new Exception("请选择备份文件。 ");
+            if (password.Length > 0 && password.Length < 10)
+                throw new Exception("设置密码时至少需要 10 个字符；也可以留空。 ");
+            if (action == "UiBackupExport")
+            {
+                Dictionary<string, object> payload = BuildBackupPayload(JsonUtil.Bool(request, "full", false));
+                WriteBytesAtomic(path, EncryptBackup(JsonUtil.Serialize(payload), password, BackupKdfIterations));
+                WriteBackupUiResponse(new Dictionary<string, object> { { "ok", true }, { "path", path } });
+                return 0;
+            }
+            FileInfo file = new FileInfo(path);
+            if (!file.Exists || file.Length > MaxBackupBytes) throw new Exception("备份文件不存在或过大。 ");
+            Dictionary<string, object> imported = JsonUtil.Object(JsonUtil.Deserialize(DecryptBackup(File.ReadAllBytes(path), password)));
+            UpgradeBackupPayload(imported);
+            ValidateBackupPayload(imported);
+            Dictionary<string, object> components = JsonUtil.Object(JsonUtil.Get(imported, "components"));
+            bool hasData = JsonUtil.Get(components, "tasks") != null && JsonUtil.Get(components, "calendar_state") != null;
+            if (action == "UiBackupPreview")
+            {
+                int taskCount = hasData ? JsonUtil.Array(JsonUtil.Get(JsonUtil.Object(JsonUtil.Get(components, "tasks")), "tasks")).Count : 0;
+                int eventCount = hasData ? JsonUtil.Array(JsonUtil.Get(JsonUtil.Object(JsonUtil.Get(components, "calendar_state")), "local_events")).Count : 0;
+                WriteBackupUiResponse(new Dictionary<string, object> {
+                    { "ok", true }, { "has_data", hasData }, { "tasks", taskCount }, { "events", eventCount },
+                    { "app_version", JsonUtil.String(imported, "app_version", "未知") }
+                });
+                return 0;
+            }
+            bool configuration = JsonUtil.Bool(request, "configuration", false);
+            bool data = JsonUtil.Bool(request, "data", false);
+            if (!configuration && !data) throw new Exception("请至少选择一类要导入的内容。 ");
+            if (data && !hasData) throw new Exception("该备份不包含完整用户数据。 ");
+            WithGlobalStateLocks(delegate { ApplyBackupPayload(imported, configuration, data); });
+            RenderUiScaleSkins();
+            WriteBackupUiResponse(new Dictionary<string, object> { { "ok", true } });
+            return 0;
+        }
+        catch (Exception ex)
+        {
+            WriteBackupUiResponse(new Dictionary<string, object> { { "ok", false }, { "error", ex.Message } });
+            return 1;
+        }
+    }
+
+    private static void WriteBackupUiResponse(Dictionary<string, object> response)
+    {
+        byte[] bytes = new UTF8Encoding(false).GetBytes(JsonUtil.Serialize(response) + "\n");
+        Stream output = Console.OpenStandardOutput();
+        output.Write(bytes, 0, bytes.Length);
+        output.Flush();
+    }
+
     private static List<object> BuildPluginBackup()
     {
         PluginPaths.Ensure();HashSet<string> ids=new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -409,7 +467,7 @@ internal static partial class TodoApp
         form.CancelButton = cancel;
         BackupPasswordResult result = null;
         ok.Click += delegate {
-            if (password.Text.Length < 10) { LightUi.Error("备份密码至少需要 10 个字符。"); return; }
+            if (password.Text.Length > 0 && password.Text.Length < 10) { LightUi.Error("设置密码时至少需要 10 个字符；也可以留空。"); return; }
             if (exporting && password.Text != confirm.Text) { LightUi.Error("两次输入的备份密码不一致。"); return; }
             result = new BackupPasswordResult { Password = password.Text, FullBackup = exporting && full.Checked };
             form.DialogResult = DialogResult.OK;
@@ -639,6 +697,9 @@ internal static partial class TodoApp
             byte[] tampered = (byte[])encrypted.Clone();
             tampered[tampered.Length / 2] ^= 0x40;
             try { DecryptBackup(tampered, "correct horse battery staple"); return 64; } catch { }
+            byte[] withoutPassword = EncryptBackup(original, "", 100000);
+            if (DecryptBackup(withoutPassword, "") != original) return 75;
+            try { DecryptBackup(withoutPassword, "not empty"); return 76; } catch { }
 
             string todo = Path.Combine(testRoot, "Skins", "Todo", "@Resources");
             string calendar = Path.Combine(testRoot, "Skins", "Calendar", "@Resources");

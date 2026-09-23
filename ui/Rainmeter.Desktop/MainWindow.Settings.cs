@@ -40,9 +40,9 @@ public sealed partial class MainWindow
                 Action("应用", () => Todo("UiTileScale", (scale.SelectedItem as ComboBoxItem)?.Tag?.ToString() ?? "auto"), true))));
         PageContent.Children.Add(Text("数据与维护", 18, true));
         PageContent.Children.Add(SettingsRow(Symbol.Save, "用户配置备份",
-            "加密导出；导入前可预览并选择是否覆盖数据。", Row(
-                Action("导出配置", () => Todo("UiExportBackup")),
-                Action("导入配置", () => Todo("UiImportBackup")))));
+            "可选择是否设置密码；导入前预览并选择覆盖范围。", Row(
+                Action("导出配置", () => _ = ExportBackupAsync()),
+                Action("导入配置", () => _ = ImportBackupAsync()))));
         PageContent.Children.Add(SettingsRow(Symbol.Download, "检查更新",
             "检查主程序的新版本；安装前会再次询问。", Action("检查更新", () => Todo("UiCheckUpdate"))));
         PageContent.Children.Add(Text("数据目录  " + skinsRoot, 12, muted: true));

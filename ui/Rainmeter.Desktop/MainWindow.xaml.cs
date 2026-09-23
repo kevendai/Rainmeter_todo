@@ -153,6 +153,11 @@ public sealed partial class MainWindow : Window
 
     private static string LoadTheme()
     {
+        if (Environment.GetEnvironmentVariable("RAINMETER_UI_TEST_INSTANCE") == "1")
+        {
+            var preview = Environment.GetEnvironmentVariable("RAINMETER_UI_TEST_THEME");
+            if (preview is "light" or "dark" or "system") return preview;
+        }
         try
         {
             var value = File.ReadAllText(ThemePath).Trim();
