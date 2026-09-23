@@ -46,7 +46,7 @@ public sealed partial class MainWindow
                 VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
                 HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled
             },
-            Width = 690,
+            Width = 600,
             PrimaryButtonText = primaryText,
             PrimaryButtonStyle = primaryStyle,
             CloseButtonText = "取消",
@@ -84,24 +84,23 @@ public sealed partial class MainWindow
         return new DateTimeOffset(local, TimeZoneInfo.Local.GetUtcOffset(local)).ToString("O");
     }
 
-    private Grid EditorDateTimeRow(string label, CalendarDatePicker date, TimePicker time)
+    private StackPanel EditorDateTimeRow(string label, CalendarDatePicker date, TimePicker time)
     {
         var row = new Grid { ColumnSpacing = 10 };
-        row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(48) });
-        row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(185) });
-        row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(205) });
+        row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(145) });
+        row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(265) });
         var caption = Text(label, 13, true);
-        caption.VerticalAlignment = VerticalAlignment.Center;
-        row.Children.Add(caption);
         date.HorizontalAlignment = HorizontalAlignment.Stretch;
         date.PlaceholderText = "选择日期";
-        Grid.SetColumn(date, 1);
         row.Children.Add(date);
         time.HorizontalAlignment = HorizontalAlignment.Stretch;
         time.ClockIdentifier = "24HourClock";
         time.MinuteIncrement = 5;
-        Grid.SetColumn(time, 2);
+        Grid.SetColumn(time, 1);
         row.Children.Add(time);
-        return row;
+        var section = new StackPanel { Spacing = 5 };
+        section.Children.Add(caption);
+        section.Children.Add(row);
+        return section;
     }
 }

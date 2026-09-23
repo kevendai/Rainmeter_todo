@@ -119,7 +119,7 @@ public sealed partial class MainWindow
             extras.Visibility = extras.Visibility == Visibility.Visible
                 ? Visibility.Collapsed : Visibility.Visible);
         moreToggle.HorizontalAlignment = HorizontalAlignment.Left;
-        var fields = new StackPanel { Spacing = 16, Width = 510 };
+        var fields = new StackPanel { Spacing = 16, Width = 420 };
         fields.Children.Add(Text(id is null ? "为这一天留一段时间。桌面日程磁贴会同步显示。" : "修改日程信息并同步到原来的日历来源。", 13, muted: true));
         fields.Children.Add(source);
         fields.Children.Add(title);
@@ -227,7 +227,9 @@ public sealed partial class MainWindow
         var monthGrid = new Grid { ColumnSpacing = 5, RowSpacing = 5 };
         for (var column = 0; column < 7; column++)
             monthGrid.ColumnDefinitions.Add(new ColumnDefinition());
-        for (var row = 0; row < 7; row++)
+        var offset = ((int)calendarMonth.DayOfWeek + 6) % 7;
+        var weekRows = (offset + DateTime.DaysInMonth(calendarMonth.Year, calendarMonth.Month) + 6) / 7;
+        for (var row = 0; row <= weekRows; row++)
             monthGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         var weekdays = new[] { "周一", "周二", "周三", "周四", "周五", "周六", "周日" };
         for (var column = 0; column < 7; column++)
@@ -238,8 +240,7 @@ public sealed partial class MainWindow
             Grid.SetColumn(label, column);
             monthGrid.Children.Add(label);
         }
-        var offset = ((int)calendarMonth.DayOfWeek + 6) % 7;
-        for (var index = 0; index < 42; index++)
+        for (var index = 0; index < weekRows * 7; index++)
         {
             var day = calendarMonth.AddDays(index - offset);
             var count = events.Count(item => CalendarOverlapsDay(item, day));

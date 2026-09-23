@@ -16,7 +16,7 @@ public sealed partial class MainWindow
 {
     private void RenderSettings()
     {
-        Heading("外观与设置", "让窗口材质、管理入口和桌面磁贴各归其位。");
+        Heading("外观与设置", "调整界面、磁贴大小，并管理用户配置与更新。");
         PageContent.Children.Add(Text("外观", 18, true));
         PageContent.Children.Add(SettingsRow(Symbol.Preview, "窗口材质",
             studioStyle ? "亚克力 · 更通透的背景层次" : "云母 · 更稳定的背景层次",
@@ -27,16 +27,24 @@ public sealed partial class MainWindow
                 Action("日间", () => SetTheme("light"), themeMode == "light"),
                 Action("夜间", () => SetTheme("dark"), themeMode == "dark"),
                 Action("跟随", () => SetTheme("system"), themeMode == "system"))));
-        PageContent.Children.Add(Text("桌面磁贴与管理", 18, true));
-        PageContent.Children.Add(SettingsRow(Symbol.AllApps, "待办磁贴",
-            "保留 Rainmeter 磁贴展示，在新界面管理任务。", Action("打开管理", () => Navigate("todo"))));
-        PageContent.Children.Add(SettingsRow(Symbol.Calendar, "日程磁贴",
-            "保留日程磁贴展示，在新界面查看安排。", Action("打开管理", () => Navigate("calendar"))));
-        PageContent.Children.Add(SettingsRow(Symbol.Library, "插件中心",
-            "查看已安装插件与扩展入口。", Action("打开插件", () => Navigate("plugins"))));
-        PageContent.Children.Add(Text("兼容配置", 18, true));
-        PageContent.Children.Add(SettingsRow(Symbol.Setting, "旧版高级配置",
-            "迁移期间仍可打开尚未完成的配置功能。", Action("打开", () => Todo("LegacySettings"))));
+        var scale = EditorControl(new ComboBox { MinWidth = 132 });
+        var scaleChoices = new[] { ("自动", "auto"), ("75%", "0.75"), ("80%", "0.80"),
+            ("90%", "0.90"), ("100%", "1.00"), ("110%", "1.10"), ("125%", "1.25") };
+        foreach (var choice in scaleChoices) scale.Items.Add(new ComboBoxItem { Content = choice.Item1, Tag = choice.Item2 });
+        var savedScale = File.Exists(Path.Combine(todoRoot, "ui-scale.txt"))
+            ? File.ReadAllText(Path.Combine(todoRoot, "ui-scale.txt")).Trim() : "auto";
+        scale.SelectedIndex = Array.FindIndex(scaleChoices, choice => choice.Item2 == savedScale);
+        if (scale.SelectedIndex < 0) scale.SelectedIndex = 0;
+        PageContent.Children.Add(SettingsRow(Symbol.AllApps, "桌面磁贴大小",
+            "只调整待办和日程磁贴；管理窗口可直接拖动边缘改变大小。", Row(scale,
+                Action("应用", () => Todo("UiTileScale", (scale.SelectedItem as ComboBoxItem)?.Tag?.ToString() ?? "auto"), true))));
+        PageContent.Children.Add(Text("数据与维护", 18, true));
+        PageContent.Children.Add(SettingsRow(Symbol.Save, "用户配置备份",
+            "加密导出；导入前可预览并选择是否覆盖数据。", Row(
+                Action("导出配置", () => Todo("UiExportBackup")),
+                Action("导入配置", () => Todo("UiImportBackup")))));
+        PageContent.Children.Add(SettingsRow(Symbol.Download, "检查更新",
+            "检查主程序的新版本；安装前会再次询问。", Action("检查更新", () => Todo("UiCheckUpdate"))));
         PageContent.Children.Add(Text("数据目录  " + skinsRoot, 12, muted: true));
     }
 

@@ -243,7 +243,6 @@ public sealed partial class MainWindow : Window
         var body = new StackPanel { Spacing = 22, Margin = new Thickness(34, 28, 34, 42) };
         var header = new Grid();
         header.ColumnDefinitions.Add(new ColumnDefinition());
-        header.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         var titles = new StackPanel { Spacing = 6 };
         PageEyebrow.FontSize = 12;
         PageEyebrow.Foreground = Accent;
@@ -258,10 +257,6 @@ public sealed partial class MainWindow : Window
         titles.Children.Add(PageTitle);
         titles.Children.Add(PageSubtitle);
         header.Children.Add(titles);
-        var refresh = Action("刷新", Render);
-        refresh.VerticalAlignment = VerticalAlignment.Top;
-        Grid.SetColumn(refresh, 1);
-        header.Children.Add(refresh);
         body.Children.Add(header);
         PageContent.Spacing = 16;
         body.Children.Add(PageContent);

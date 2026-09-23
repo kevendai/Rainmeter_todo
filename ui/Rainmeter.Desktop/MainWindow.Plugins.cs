@@ -69,7 +69,6 @@ public sealed partial class MainWindow
         PageContent.Children.Add(Row(
             Action("已安装", () => { pluginMarketSelected = false; Render(); }, !pluginMarketSelected),
             Action("插件市场", () => { pluginMarketSelected = true; Render(); }, pluginMarketSelected)));
-        if (pluginMarketSelected) PageContent.Children.Add(Action("刷新市场", RefreshMarket));
         var cache = Path.Combine(pluginDataRoot, "registry-cache.json");
         var bundled = Path.Combine(todoRoot, "plugin-registry-v1.json");
         var project = Path.GetFullPath(Path.Combine(skinsRoot, "..", "plugin-registry-template", "index-v1.json"));
@@ -81,11 +80,23 @@ public sealed partial class MainWindow
         var byId = records.Where(item => Value(item, "id") != "").ToDictionary(item => Value(item, "id"));
         if (pluginMarketSelected)
         {
-            PageContent.Children.Add(Text((source == cache ? "本地市场缓存" : "内置官方索引") +
-                " · " + (File.Exists(source) ? File.GetLastWriteTime(source).ToString("yyyy-MM-dd HH:mm") : "尚未下载"), 12, muted: true));
+            var toolbar = new Grid { ColumnSpacing = 10 };
+            toolbar.ColumnDefinitions.Add(new ColumnDefinition());
+            toolbar.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            toolbar.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            var search = EditorControl(new TextBox { PlaceholderText = "搜索插件名称或用途",
+                HorizontalAlignment = HorizontalAlignment.Stretch });
+            toolbar.Children.Add(search);
+            var refresh = Action("刷新市场", RefreshMarket);
+            Grid.SetColumn(refresh, 1);
+            toolbar.Children.Add(refresh);
+            var cacheTime = Text((source == cache ? "缓存 " : "内置 ") +
+                (File.Exists(source) ? File.GetLastWriteTime(source).ToString("MM-dd HH:mm") : "尚未下载"), 12, muted: true);
+            cacheTime.VerticalAlignment = VerticalAlignment.Center;
+            Grid.SetColumn(cacheTime, 2);
+            toolbar.Children.Add(cacheTime);
+            PageContent.Children.Add(toolbar);
             if (records.Length == 0) { Empty("本地市场暂无插件。点击“刷新市场”获取索引。"); return; }
-            var search = new TextBox { PlaceholderText = "搜索插件名称或用途", MaxWidth = 360, HorizontalAlignment = HorizontalAlignment.Left };
-            PageContent.Children.Add(search);
             var board = TileBoard();
             board.ItemHeight = 262;
             var filter = new List<(FrameworkElement Card, string Keywords)>();

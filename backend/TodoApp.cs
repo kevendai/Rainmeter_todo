@@ -50,6 +50,25 @@ internal static partial class TodoApp
         if ((action == "Add" || action == "Edit" || action == "Manage" || action == "Settings")
             && DesktopUiBridge.TryOpen(ResourceDir, "todo", action, id)) return 0;
         if (action == "LegacySettings") return SettingsInteractive();
+        if (action == "UiExportBackup") return RunUiSetting(delegate {
+            string path = ExportUserBackupInteractive();
+            if (path != "") MessageBox.Show("备份已保存：\r\n" + path, "导出完成", MessageBoxButtons.OK, MessageBoxIcon.Information);
+        });
+        if (action == "UiImportBackup") return RunUiSetting(delegate {
+            string result = ImportUserBackupInteractive();
+            if (result != "") { RenderUiScaleSkins(); MessageBox.Show(result, "导入完成", MessageBoxButtons.OK, MessageBoxIcon.Information); }
+        });
+        if (action == "UiCheckUpdate") return RunUiSetting(delegate {
+            UpdateCheckResult info = CheckLatestUpdate();
+            if (!info.IsNewer) MessageBox.Show("已是最新版本：" + info.Tag, "检查更新");
+            else if (MessageBox.Show("发现 " + info.Tag + "，现在启动升级器？", "检查更新",
+                MessageBoxButtons.YesNo, MessageBoxIcon.Question) == DialogResult.Yes) StartExternalUpdater();
+        });
+        if (action == "UiTileScale") return RunUiSetting(delegate {
+            UiScale.SaveMode(id);
+            RenderUiScaleSkins();
+            MessageBox.Show("桌面磁贴大小已应用。", "磁贴缩放", MessageBoxButtons.OK, MessageBoxIcon.Information);
+        });
         if (action == "Add") return AddInteractive();
         if (action == "Edit") return EditInteractive(id);
         if (action == "Manage") return ManageInteractive();
@@ -110,6 +129,12 @@ internal static partial class TodoApp
             }
             finally { if (held) mutex.ReleaseMutex(); }
         }
+    }
+
+    private static int RunUiSetting(Action action)
+    {
+        try { action(); return 0; }
+        catch (Exception ex) { LightUi.Error(ex.Message); return 1; }
     }
 
 
