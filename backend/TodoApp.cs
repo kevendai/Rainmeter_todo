@@ -78,9 +78,8 @@ internal static partial class TodoApp
         if (action == "BackupSelfTest") return RunBackupSelfTests();
         if (action == "UiMarketRefresh") return UiMarketRefresh(id);
         if (action == "UiMarketInstall") return UiMarketInstall(id, pluginAction);
-        if (action == "UiPluginConfig") return RunUiSetting(delegate {
-            ShowPluginConfig(PluginRuntime.Resolve(id, false));
-        });
+        if (action == "UiPluginConfigModel") return UiPluginConfigModel(id, pluginAction);
+        if (action == "UiPluginConfigSave") return UiPluginConfigSave(id, pluginAction, args.Length > 3 ? args[3] : "");
         if(action=="PluginAction"){if(id==""||pluginAction=="")return 2;StartPluginCommand("PluginAction",id+" "+pluginAction);return 0;}
         // 规格 §5.2：磁贴上的【使用 DeepSeek AI】按钮与插件管理里的「处理待确认…」都走这里。
         if(action=="PluginConfirmAttention")return ConfirmPaidAttention(id);

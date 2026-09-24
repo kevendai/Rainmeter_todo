@@ -266,7 +266,7 @@ public sealed partial class MainWindow : Window
         PageContent.Spacing = 16;
         body.Children.Add(PageContent);
         var scroll = new ScrollViewer { Content = body };
-        ForwardHandledWheel(body, scroll);
+        ForwardHandledWheel(scroll, scroll);
         Grid.SetColumn(scroll, 1);
         root.Children.Add(scroll);
         Content = root;

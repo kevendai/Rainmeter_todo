@@ -31,14 +31,22 @@ public sealed partial class MainWindow
         };
         primaryStyle.Setters.Add(new Setter(Control.BackgroundProperty, PrimaryFill));
         primaryStyle.Setters.Add(new Setter(Control.ForegroundProperty, Brush(255, 255, 255)));
+        var secondaryStyle = new Style(typeof(Button));
+        secondaryStyle.Setters.Add(new Setter(Control.BackgroundProperty, EditorField));
+        secondaryStyle.Setters.Add(new Setter(Control.ForegroundProperty, Ink));
+        secondaryStyle.Setters.Add(new Setter(Control.BorderBrushProperty, EditorStroke));
+        secondaryStyle.Setters.Add(new Setter(Control.BorderThicknessProperty, new Thickness(1)));
+        secondaryStyle.Setters.Add(new Setter(Control.CornerRadiusProperty, new CornerRadius(10)));
         var dialog = new ContentDialog
         {
             XamlRoot = Shell.XamlRoot,
             RequestedTheme = DarkTheme ? ElementTheme.Dark : ElementTheme.Light,
             Background = EditorSurface,
             Foreground = Ink,
+            BorderBrush = EditorStroke,
+            BorderThickness = new Thickness(1),
             CornerRadius = new CornerRadius(20),
-            Title = title,
+            Title = Text(title, 23, true),
             Content = new ScrollViewer
             {
                 Content = content,
@@ -50,12 +58,13 @@ public sealed partial class MainWindow
             PrimaryButtonText = primaryText,
             PrimaryButtonStyle = primaryStyle,
             CloseButtonText = "取消",
+            CloseButtonStyle = secondaryStyle,
             DefaultButton = ContentDialogButton.Primary
         };
         dialog.Resources["AccentFillColorDefaultBrush"] = PrimaryFill;
         dialog.Resources["AccentFillColorSecondaryBrush"] = PrimaryFill;
         if (dialog.Content is ScrollViewer scroller)
-            ForwardHandledWheel(content, scroller);
+            ForwardHandledWheel(scroller, scroller);
         return dialog;
     }
 

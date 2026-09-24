@@ -78,21 +78,7 @@ public sealed partial class MainWindow
         return !string.Equals(installedVersion, marketVersion, StringComparison.OrdinalIgnoreCase);
     }
 
-    private async void ConfigurePlugin(string id)
-    {
-        try
-        {
-            var host = Path.Combine(todoRoot, "TodoHost.exe");
-            using var process = Process.Start(new ProcessStartInfo(host)
-            {
-                UseShellExecute = false,
-                ArgumentList = { "UiPluginConfig", id }
-            }) ?? throw new InvalidOperationException("无法打开插件配置。");
-            await process.WaitForExitAsync();
-            Render();
-        }
-        catch (Exception ex) { ShowMessage("无法配置插件：" + ex.Message); }
-    }
+    private void ConfigurePlugin(string id) => _ = ShowPluginConfigAsync(id);
 
     private void RunInstalledPlugin(string id, string capability)
     {
@@ -168,14 +154,10 @@ public sealed partial class MainWindow
         }
         Add("取消当前任务", () => StartPluginUtility("PluginHost.exe", "Cancel", id));
         Add("清除该插件创建的待办", () => StartPluginUtility("TodoHost.exe", "PluginClearTasks", id));
-        Add("查看最近错误", () =>
-        {
-            var path = Path.Combine(pluginDataRoot, "PluginLogs", id + ".log");
-            ShowMessage(File.Exists(path) ? File.ReadAllText(path) : "暂无插件日志。");
-        });
         if (manifest is JsonElement data)
             foreach (var action in Items(data, "actions"))
             {
+                if (Value(action, "settings_ui") == "True") continue;
                 var actionId = Value(action, "id");
                 if (actionId == "") continue;
                 var label = Value(action, "name", actionId);

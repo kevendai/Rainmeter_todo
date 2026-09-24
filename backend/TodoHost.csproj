@@ -32,6 +32,7 @@
     <Compile Include="PluginSettingsLayout.cs" />
     <Compile Include="PluginPackageInstaller.cs" />
     <Compile Include="PluginManagerForms.cs" />
+    <Compile Include="PluginConfigUi.cs" />
     <Compile Include="TodoApp.cs" />
     <Compile Include="TodoBackupService.cs" />
     <Compile Include="TodoForms.cs" />
