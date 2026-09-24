@@ -22,6 +22,7 @@ public sealed partial class MainWindow : Window
     private readonly TextBlock PageSubtitle = new();
     private readonly StackPanel PageContent = new();
     private readonly Grid Shell = new();
+    private Action<DependencyObject>? registerPageWheelTargets;
     private readonly TaskCompletionSource<bool> uiReady = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private readonly Border Sidebar = new();
     private readonly TextBlock BrandTitle = new();
@@ -266,7 +267,7 @@ public sealed partial class MainWindow : Window
         PageContent.Spacing = 16;
         body.Children.Add(PageContent);
         var scroll = new ScrollViewer { Content = body };
-        ForwardHandledWheel(body, scroll);
+        registerPageWheelTargets = ForwardHandledWheel(body, scroll);
         Grid.SetColumn(scroll, 1);
         root.Children.Add(scroll);
         Content = root;
@@ -315,6 +316,7 @@ public sealed partial class MainWindow : Window
             case "settings": RenderSettings(); break;
             default: RenderHome(); break;
         }
+        registerPageWheelTargets?.Invoke(PageContent);
     }
 
     private static JsonDocument? ReadJson(string file)

@@ -2,6 +2,7 @@ using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Media;
 using Microsoft.UI.Xaml.Input;
+using System.Runtime.CompilerServices;
 
 namespace Rainmeter.Desktop;
 
@@ -80,11 +81,16 @@ public sealed partial class MainWindow
         return dialog;
     }
 
-    private static void ForwardHandledWheel(UIElement content, ScrollViewer scroller)
+    private static Action<DependencyObject> ForwardHandledWheel(UIElement content, ScrollViewer scroller)
     {
-        content.AddHandler(UIElement.PointerWheelChangedEvent,
-            new PointerEventHandler((_, args) =>
+        var registered = new HashSet<UIElement>();
+        var seen = new ConditionalWeakTable<PointerRoutedEventArgs, object>();
+        var handler = new PointerEventHandler((_, args) =>
             {
+                // A wheel event can visit several registered ancestors. Only the
+                // first (deepest) handler may route it.
+                if (seen.TryGetValue(args, out _)) return;
+                seen.Add(args, new object());
                 var timeBox = FindTimeWheelTarget(args.OriginalSource as DependencyObject);
                 if (timeBox is not null && !timeBox.IsDropDownOpen)
                 {
@@ -108,7 +114,18 @@ public sealed partial class MainWindow
                 if (Math.Abs(next - scroller.VerticalOffset) >= 0.5)
                     scroller.ChangeView(null, next, null, true);
                 args.Handled = true;
-            }), true);
+            });
+        void Register(DependencyObject node)
+        {
+            if (node is UIElement element && registered.Add(element))
+                element.AddHandler(UIElement.PointerWheelChangedEvent, handler, true);
+            for (var index = 0; index < VisualTreeHelper.GetChildrenCount(node); index++)
+                Register(VisualTreeHelper.GetChild(node, index));
+        }
+        Register(content);
+        if (content is FrameworkElement framework)
+            framework.Loaded += (_, _) => Register(content);
+        return Register;
     }
 
     private static ComboBox? FindTimeWheelTarget(DependencyObject? target)
