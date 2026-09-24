@@ -80,9 +80,11 @@ public sealed partial class MainWindow
         var title = EditorControl(new TextBox { Header = "标题", PlaceholderText = "这段时间安排什么？",
             Text = original is JsonElement oldTitle ? Value(oldTitle, "title") : "" });
         var startDate = new CalendarDatePicker { Date = LocalPickerDate(initialStart.DateTime) };
-        var startTime = new TimePicker { Time = new TimeSpan(initialStart.Hour, initialStart.Minute, 0) };
+        var startHour = TimePart(24, initialStart.Hour);
+        var startMinute = TimePart(60, initialStart.Minute);
         var endDate = new CalendarDatePicker { Date = LocalPickerDate(visibleEnd.DateTime) };
-        var endTime = new TimePicker { Time = new TimeSpan(visibleEnd.Hour, visibleEnd.Minute, 0) };
+        var endHour = TimePart(24, visibleEnd.Hour);
+        var endMinute = TimePart(60, visibleEnd.Minute);
         var location = EditorControl(new TextBox { Header = "地点", PlaceholderText = "添加地点",
             Text = original is JsonElement oldLocation ? Value(oldLocation, "location") : "" });
         var url = EditorControl(new TextBox { Header = "链接", PlaceholderText = "https://...",
@@ -91,8 +93,9 @@ public sealed partial class MainWindow
             AcceptsReturn = true, TextWrapping = TextWrapping.Wrap, MinHeight = 82,
             Text = original is JsonElement oldDescription ? Value(oldDescription, "description") : "" });
         var allDay = new ToggleSwitch { Header = "全天", IsOn = isAllDay, OnContent = "", OffContent = "" };
-        startTime.IsEnabled = endTime.IsEnabled = !isAllDay;
-        allDay.Toggled += (_, _) => startTime.IsEnabled = endTime.IsEnabled = !allDay.IsOn;
+        startHour.IsEnabled = startMinute.IsEnabled = endHour.IsEnabled = endMinute.IsEnabled = !isAllDay;
+        allDay.Toggled += (_, _) => startHour.IsEnabled = startMinute.IsEnabled =
+            endHour.IsEnabled = endMinute.IsEnabled = !allDay.IsOn;
         var source = EditorControl(new ComboBox { Header = "保存到", HorizontalAlignment = HorizontalAlignment.Stretch });
         source.Items.Add(new ComboBoxItem { Content = "本地日历", Tag = "local" });
         var hasCalDav = File.Exists(Path.Combine(todoRoot, "caldav.secret"));
@@ -124,8 +127,8 @@ public sealed partial class MainWindow
         fields.Children.Add(source);
         fields.Children.Add(title);
         fields.Children.Add(timeHeader);
-        fields.Children.Add(EditorDateTimeRow("开始", startDate, startTime));
-        fields.Children.Add(EditorDateTimeRow("结束", endDate, endTime));
+        fields.Children.Add(CompactTodoTimeRow("开始", startDate, startHour, startMinute, false));
+        fields.Children.Add(CompactTodoTimeRow("结束", endDate, endHour, endMinute, false));
         fields.Children.Add(moreToggle);
         fields.Children.Add(extras);
         fields.Children.Add(error);
@@ -136,8 +139,8 @@ public sealed partial class MainWindow
             var deferral = args.GetDeferral();
             try
             {
-                var startsAt = PickerIso(startDate, startTime) ?? throw new ArgumentException("请选择开始日期。");
-                var endsAt = PickerIso(endDate, endTime) ?? throw new ArgumentException("请选择结束日期。");
+                var startsAt = PickerIso(startDate, startHour, startMinute) ?? throw new ArgumentException("请选择开始日期。");
+                var endsAt = PickerIso(endDate, endHour, endMinute) ?? throw new ArgumentException("请选择结束日期。");
                 if (allDay.IsOn)
                 {
                     var day = startDate.Date!.Value.LocalDateTime.Date;
