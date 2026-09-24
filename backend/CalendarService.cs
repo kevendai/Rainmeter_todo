@@ -39,14 +39,14 @@ internal static partial class CalendarApp
     }
     private static FetchResult FetchWithSsdpRetry(Dictionary<string,object> credentials,string cachedCalendarUrl)
     {
-        AddressProviderBinding provider=DynamicPluginValues.AddressProvider("calendar.caldav");string cached=DynamicPluginValues.BindForTarget(cachedCalendarUrl,"calendar.caldav");
+        string source=S(credentials,"AddressSource");AddressProviderBinding provider=source=="manual"?null:DynamicPluginValues.AddressProvider("calendar.caldav");string cached=DynamicPluginValues.BindSelected(cachedCalendarUrl,"calendar.caldav",source);
         try{return Fetch(credentials,cached);}
         catch(Exception first)
         {
             if(provider==null)throw;
             string refreshError;if(!TryRefreshAddressProvider(provider.PluginId,out refreshError))throw new Exception(first.Message+"；"+provider.PluginName+" 未找到服务器："+refreshError+"。服务器可能已关机或故障。");
             Dictionary<string,object> refreshed=ReadCredentials();
-            try{return Fetch(refreshed,DynamicPluginValues.BindForTarget(cachedCalendarUrl,"calendar.caldav"));}
+            try{return Fetch(refreshed,DynamicPluginValues.BindSelected(cachedCalendarUrl,"calendar.caldav",source));}
             catch(Exception retry){throw new Exception(retry.Message+"；地址插件已找到服务器，但 CalDAV 仍无法连接，服务器服务可能故障。");}
         }
     }

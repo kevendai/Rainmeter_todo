@@ -154,35 +154,35 @@ internal static partial class CalendarApp
         if (!File.Exists(SecretPath)) return new Dictionary<string,object>();
         try
         {
-            Dictionary<string,object> credentials=JsonUtil.ReadDpapiJson(SecretPath);string stored=JsonUtil.String(credentials,"Server","");credentials["_StoredServer"]=stored;credentials["Server"]=DynamicPluginValues.BindForTarget(stored,"calendar.caldav");return credentials;
+            Dictionary<string,object> credentials=JsonUtil.ReadDpapiJson(SecretPath);string stored=JsonUtil.String(credentials,"Server","");credentials["_StoredServer"]=stored;credentials["Server"]=DynamicPluginValues.BindSelected(stored,"calendar.caldav",JsonUtil.String(credentials,"AddressSource",""));return credentials;
         }
         catch (Exception ex) { calendarCredentialsLoadError = "CalDAV 凭据无法解密或已损坏：" + ex.Message.Replace("\r", " ").Replace("\n", " "); return new Dictionary<string,object>(); }
     }
 
-    private static void SaveCredentials(string server, string username, string password, Dictionary<string,object> cache)
+    private static void SaveCredentials(string server, string username, string password, Dictionary<string,object> cache, string addressSource="ssdp")
     {
         string s = (server??"").Trim(), u = (username??"").Trim(), p = password??"";
         if (s == "") throw new Exception("CalDAV 地址不能为空");
         if (!s.StartsWith("http://", StringComparison.OrdinalIgnoreCase) && !s.StartsWith("https://", StringComparison.OrdinalIgnoreCase)) s = "https://" + s;
         if (u == "" || p == "") throw new Exception("账号和密码不能为空");
         s = s.TrimEnd('/');
-        JsonUtil.WriteDpapiJson(SecretPath, new Dictionary<string,object>{{"Server",s},{"Username",u},{"Password",p}});
+        JsonUtil.WriteDpapiJson(SecretPath, new Dictionary<string,object>{{"Server",s},{"Username",u},{"Password",p},{"AddressSource",addressSource}});
         cache["calendar_url"] = "";cache["events"] = new List<object>();cache["fetched_at"] = "";cache["status"] = "CalDAV 凭据已保存";Save(CachePath, cache);
     }
 
     private static Dictionary<string,object> CredentialsFromFields(TextBox server, TextBox username, TextBox password){return CredentialsFromValues(server.Text, username.Text, password.Text);}
-    private static Dictionary<string,object> CredentialsFromValues(string server, string username, string password)
+    private static Dictionary<string,object> CredentialsFromValues(string server, string username, string password, string addressSource="ssdp")
     {
         string s = (server ?? "").Trim(), u = (username ?? "").Trim(), p = password ?? "";
         if (s == "") throw new Exception("CalDAV 地址不能为空");
         if (!s.StartsWith("http://", StringComparison.OrdinalIgnoreCase) && !s.StartsWith("https://", StringComparison.OrdinalIgnoreCase)) s = "https://" + s;
-        s=DynamicPluginValues.BindForTarget(s,"calendar.caldav");if (u == "" || p == "") throw new Exception("账号和密码不能为空");
-        return new Dictionary<string,object>{{"Server",s},{"Username",u},{"Password",p}};
+        s=DynamicPluginValues.BindSelected(s,"calendar.caldav",addressSource);if (u == "" || p == "") throw new Exception("账号和密码不能为空");
+        return new Dictionary<string,object>{{"Server",s},{"Username",u},{"Password",p},{"AddressSource",addressSource}};
     }
     private static string TestCredentials(TextBox server, TextBox username, TextBox password){return TestCredentials(server.Text, username.Text, password.Text);}
-    private static string TestCredentials(string server, string username, string password)
+    private static string TestCredentials(string server, string username, string password, string addressSource="ssdp")
     {
-        CalendarInfo calendar = Discover(CredentialsFromValues(server, username, password));return "连接成功：" + (calendar.Name == "" ? calendar.Uri : calendar.Name);
+        CalendarInfo calendar = Discover(CredentialsFromValues(server, username, password, addressSource));return "连接成功：" + (calendar.Name == "" ? calendar.Uri : calendar.Name);
     }
 
     private static void ClearCredentials(Dictionary<string,object> cache)
@@ -466,7 +466,7 @@ internal static partial class CalendarApp
     {
         Dictionary<string,object> credentials = ReadCredentials();
         bool syncChangedTodo = false;
-        Form f = LightUi.Form("日程设置", 720, 560);
+        Form f = LightUi.Form("日程设置", 720, 620);
         Panel headerIcon = RoundedPanel(38, 34, 48, 48, Color.FromArgb(238,245,252), Color.FromArgb(205,224,241), 14);
         AddHeaderSvgIcon(headerIcon, "settings.svg", "shield", 8, 8, 32);
         Label title = new Label { Text = "日程设置", Left = 112, Top = 34, Width = 240, Height = 40, BackColor = Color.Transparent, ForeColor = LightUi.Text, Font = LightUi.UiFont( 18F, System.Drawing.FontStyle.Bold) };
@@ -484,8 +484,8 @@ internal static partial class CalendarApp
         tabRail.Controls.AddRange(new Control[] { tabAccount, tabRules });
         f.Controls.Add(tabRail);
 
-        Panel accountPage = RoundedPanel(32, 196, 656, 286, Color.FromArgb(248, 252, 255), Color.FromArgb(224, 233, 244), 18);
-        Panel rulePage = RoundedPanel(32, 196, 656, 286, Color.FromArgb(248, 252, 255), Color.FromArgb(224, 233, 244), 18);
+        Panel accountPage = RoundedPanel(32, 196, 656, 342, Color.FromArgb(248, 252, 255), Color.FromArgb(224, 233, 244), 18);
+        Panel rulePage = RoundedPanel(32, 196, 656, 342, Color.FromArgb(248, 252, 255), Color.FromArgb(224, 233, 244), 18);
         rulePage.Visible = false;
         f.Controls.AddRange(new Control[] { accountPage, rulePage });
 
@@ -495,14 +495,23 @@ internal static partial class CalendarApp
 
         Panel reveal;
         AddressProviderBinding calendarProvider=DynamicPluginValues.AddressProvider("calendar.caldav");string storedCalendarServer=S(credentials,"_StoredServer");if(storedCalendarServer=="")storedCalendarServer=S(credentials,"Server");
-        TextBox server = AddCredentialField(accountPage, "globe", "CalDAV 地址", 10, S(credentials, "Server"), false, out reveal);
-        if(calendarProvider!=null)
-        {
-            server.ReadOnly=true;server.BackColor=Color.FromArgb(232,238,244);server.Cursor=Cursors.Hand;if(server.Parent!=null){server.Parent.BackColor=Color.FromArgb(232,238,244);server.Parent.Cursor=Cursors.Hand;}
-            EventHandler explain=delegate{MessageBox.Show("CalDAV 地址当前由“"+calendarProvider.PluginName+"”接管。系统只替换发送地址中的主机/IP，保留协议、端口和路径。\r\n\r\n如需手动修改，请先在待办设置中禁用该插件，再重新打开日程设置。","地址由插件接管",MessageBoxButtons.OK,MessageBoxIcon.Information);};server.Click+=explain;if(server.Parent!=null)server.Parent.Click+=explain;
-        }
-        TextBox username = AddCredentialField(accountPage, "user", "账号", 92, S(credentials, "Username"), false, out reveal);
-        TextBox password = AddCredentialField(accountPage, "lock", "密码", 174, S(credentials, "Password"), true, out reveal);
+        Uri savedUri;bool hasUri=Uri.TryCreate(storedCalendarServer,UriKind.Absolute,out savedUri);
+        string originalHost=hasUri?savedUri.Host:"",originalPort=hasUri?savedUri.Port.ToString(CultureInfo.InvariantCulture):"";
+        ComboBox addressSource=new ComboBox{Left=84,Top=12,Width=560,Height=32,DropDownStyle=ComboBoxStyle.DropDownList,Font=LightUi.UiFont(10F)};
+        addressSource.Items.Add("手动填写 IP");addressSource.Items.Add("使用 SSDP 地址");
+        string savedAddressSource=S(credentials,"AddressSource");
+        addressSource.SelectedIndex=savedAddressSource=="manual"||savedAddressSource==""&&calendarProvider==null?0:1;
+        accountPage.Controls.Add(addressSource);
+        TextBox server = AddCredentialField(accountPage, "globe", "服务器 IP / 主机名", 52, originalHost, false, out reveal);
+        Panel hostBox=server.Parent as Panel;if(hostBox!=null){hostBox.Width=402;server.Width=370;}
+        accountPage.Controls.Add(new Label{Text="端口",Left=500,Top=65,Width=80,Height=24,ForeColor=LightUi.Text,BackColor=Color.Transparent,Font=LightUi.UiFont(9.5F)});
+        TextBox port=new TextBox{Left=500,Top=96,Width=144,Height=44,Text=originalPort,Font=LightUi.UiFont(10F),BackColor=Color.White,ForeColor=LightUi.Text};accountPage.Controls.Add(port);
+        string manualHost=originalHost;server.TextChanged+=delegate{if(addressSource.SelectedIndex==0)manualHost=server.Text;};
+        Action updateAddress=delegate{AddressProviderBinding found=DynamicPluginValues.AddressProvider("calendar.caldav");bool selected=addressSource.SelectedIndex==1;string ip=found==null?"":found.Value;server.ReadOnly=selected;server.BackColor=selected?Color.FromArgb(232,238,244):Color.White;if(hostBox!=null)hostBox.BackColor=server.BackColor;server.Text=selected?ip:manualHost;};
+        addressSource.SelectedIndexChanged+=delegate{updateAddress();};updateAddress();
+        System.Windows.Forms.Timer addressTimer=new System.Windows.Forms.Timer{Interval=1500};addressTimer.Tick+=delegate{if(addressSource.SelectedIndex==1){AddressProviderBinding found=DynamicPluginValues.AddressProvider("calendar.caldav");string ip=found==null?"":found.Value;if(server.Text!=ip)server.Text=ip;}};addressTimer.Start();f.FormClosed+=delegate{addressTimer.Stop();addressTimer.Dispose();};
+        TextBox username = AddCredentialField(accountPage, "user", "账号", 136, S(credentials, "Username"), false, out reveal);
+        TextBox password = AddCredentialField(accountPage, "lock", "密码", 218, S(credentials, "Password"), true, out reveal);
         if (reveal != null) reveal.Click += delegate { password.UseSystemPasswordChar = !password.UseSystemPasswordChar; reveal.Tag = password.UseSystemPasswordChar ? "eye-off" : "eye"; reveal.Invalidate(); };
 
         ListBox list = new ListBox { Left = 34, Top = 28, Width = 588, Height = 176, BackColor = Color.FromArgb(252, 254, 255), ForeColor = LightUi.Text, DisplayMember = "Value", BorderStyle = BorderStyle.None };
@@ -517,10 +526,10 @@ internal static partial class CalendarApp
         rulePage.Controls.Add(stop);
 
         string initialCredentialStatus = calendarCredentialsLoadError != "" ? calendarCredentialsLoadError : S(cache, "status");
-        Label saveStatus = new Label { Text = initialCredentialStatus, Left = 64, Top = 502, Width = 280, Height = 28, BackColor = Color.Transparent, ForeColor = calendarCredentialsLoadError != "" ? LightUi.Danger : S(cache, "status").Contains("成功") || S(cache, "status").Contains("已同步") ? LightUi.Done : Color.FromArgb(76, 94, 132), Font = LightUi.UiFont( 10F, System.Drawing.FontStyle.Bold) };
-        Button clearAccount = LightUi.DangerButton("清除设置", 364, 494, 98, DialogResult.None);
-        Button testAccount = LightUi.Button("测试连接", 476, 494, 98, DialogResult.None);
-        Button saveAccount = LightUi.PrimaryButton("保存凭据", 588, 494, 100, DialogResult.None);
+        Label saveStatus = new Label { Text = initialCredentialStatus, Left = 64, Top = 562, Width = 280, Height = 28, BackColor = Color.Transparent, ForeColor = calendarCredentialsLoadError != "" ? LightUi.Danger : S(cache, "status").Contains("成功") || S(cache, "status").Contains("已同步") ? LightUi.Done : Color.FromArgb(76, 94, 132), Font = LightUi.UiFont( 10F, System.Drawing.FontStyle.Bold) };
+        Button clearAccount = LightUi.DangerButton("清除设置", 364, 554, 98, DialogResult.None);
+        Button testAccount = LightUi.Button("测试连接", 476, 554, 98, DialogResult.None);
+        Button saveAccount = LightUi.PrimaryButton("保存凭据", 588, 554, 100, DialogResult.None);
         clearAccount.Height = testAccount.Height = saveAccount.Height = 38;
         clearAccount.Font = testAccount.Font = saveAccount.Font = LightUi.UiFont( 9F, System.Drawing.FontStyle.Bold);
         f.Controls.AddRange(new Control[] { saveStatus, clearAccount, testAccount, saveAccount });
@@ -540,16 +549,27 @@ internal static partial class CalendarApp
         };
         showAccount(true);
 
+        Func<string> serverAddress=delegate{
+            string source=addressSource.SelectedIndex==1?"ssdp":"manual";
+            AddressProviderBinding selectedProvider=source=="ssdp"?DynamicPluginValues.AddressProvider("calendar.caldav"):null;
+            string host=source=="ssdp"?(selectedProvider==null?"":selectedProvider.Value):server.Text.Trim();
+            if(host=="")throw new Exception(source=="ssdp"?"SSDP 尚未提供服务器 IP，请先执行 SSDP 插件。":"请填写服务器 IP 或主机名。");
+            int number;if(!Int32.TryParse(port.Text.Trim(),out number)||number<1||number>65535)throw new Exception("端口必须是 1–65535。");
+            UriBuilder builder=hasUri?new UriBuilder(savedUri):new UriBuilder("https",host);
+            builder.Host=host;builder.Port=number;
+            return builder.Uri.AbsoluteUri.TrimEnd('/');
+        };
 
         testAccount.Click += delegate {
             try
             {
-                string serverValue = server.Text, usernameValue = username.Text, passwordValue = password.Text;
+                string serverValue = serverAddress(), usernameValue = username.Text, passwordValue = password.Text;
+                string sourceValue=addressSource.SelectedIndex==1?"ssdp":"manual";
 
                 testAccount.Enabled = false; saveStatus.Text = "正在测试…"; saveStatus.ForeColor = Color.FromArgb(76, 94, 132);
                 ThreadPool.QueueUserWorkItem(delegate {
                     string result = ""; Exception failure = null;
-                    try { result = TestCredentials(serverValue, usernameValue, passwordValue); } catch (Exception ex) { failure = ex; }
+                    try { result = TestCredentials(serverValue, usernameValue, passwordValue, sourceValue); } catch (Exception ex) { failure = ex; }
                     if (f.IsDisposed || !f.IsHandleCreated) return;
                     try { f.BeginInvoke(new Action(delegate { if (f.IsDisposed) return; testAccount.Enabled = true; if (failure != null) { LightUi.Error("连接失败：" + failure.Message); saveStatus.Text = "连接失败"; saveStatus.ForeColor = LightUi.Danger; } else { saveStatus.Text = result; saveStatus.ForeColor = LightUi.Done; } })); } catch (InvalidOperationException) { }
                 });
@@ -559,11 +579,11 @@ internal static partial class CalendarApp
         tabAccount.MouseLeave += delegate { showAccount(accountSelected); };
         tabRules.MouseLeave += delegate { showAccount(accountSelected); };
         saveAccount.Click += delegate {
-            try { SaveCredentials(calendarProvider==null?server.Text:storedCalendarServer, username.Text, password.Text, cache); saveStatus.Text = "已保存"; saveStatus.ForeColor = LightUi.Done; }
+            try { SaveCredentials(serverAddress(), username.Text, password.Text, cache, addressSource.SelectedIndex==1?"ssdp":"manual"); saveStatus.Text = "已保存"; saveStatus.ForeColor = LightUi.Done; }
             catch (Exception ex) { LightUi.Error(ex.Message); }
         };
         clearAccount.Click += delegate {
-            try { ClearCredentials(cache); server.Text = ""; username.Text = ""; password.Text = ""; saveStatus.Text = "CalDAV 未连接"; saveStatus.ForeColor = Color.FromArgb(76, 94, 132); }
+            try { ClearCredentials(cache); server.Text = ""; port.Text=""; username.Text = ""; password.Text = ""; saveStatus.Text = "CalDAV 未连接"; saveStatus.ForeColor = Color.FromArgb(76, 94, 132); }
             catch (Exception ex) { LightUi.Error(ex.Message); }
         };
         stop.Click += delegate {

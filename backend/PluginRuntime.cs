@@ -264,7 +264,7 @@ namespace RainmeterBackend
             // 本体不向插件注入任何地址：声明了 address_target 的插件自己决定用哪个地址
             // （通过 DynamicPluginValues.AddressProvider 向地址插件申请，并自行记录是否被接管）。
             // 这里只做用户自己写的 {{plugin:...}} 占位符替换，不再替插件绑定/改写地址。
-            Dictionary<string,object> resolvedConfig=ReadObject(Path.Combine(PluginPaths.DataRoot(id),"config.json"));DynamicPluginValues.ResolveObject(resolvedConfig);
+            Dictionary<string,object> resolvedConfig=ReadObject(Path.Combine(PluginPaths.DataRoot(id),"config.json"));string manualFileUrl=id=="io.github.kevendai.paper-snapshot-sync"&&JsonUtil.String(resolvedConfig,"address_source","")=="manual"?JsonUtil.String(resolvedConfig,"file_url",""):null;DynamicPluginValues.ResolveObject(resolvedConfig);if(manualFileUrl!=null)resolvedConfig["file_url"]=manualFileUrl;
             // 跨插件服务解析（规格 §3）：唯一候选自动绑定并落 plugin-bindings.json，
             // 绑定失效/多候选一律视为"没有该 provider"（不回落、不按顺序挑）。
             List<ServiceResolution> services=ServiceRegistry.ResolveAll(id,m.Uses,true);

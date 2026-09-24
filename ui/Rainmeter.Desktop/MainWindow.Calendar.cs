@@ -209,7 +209,8 @@ public sealed partial class MainWindow
         Heading("日程管理", "桌面继续显示日程磁贴；这里按月浏览、按天查看安排。");
         PageContent.Children.Add(Row(
             Action("新增日程", () => ShowCalendarEditor(null), true),
-            Action("同步", () => Calendar("Sync"))));
+            Action("同步", () => Calendar("Sync")),
+            Action("同步服务器", () => Calendar("LegacySettings"))));
         using var cache = ReadJson(Path.Combine(calendarRoot, "calendar-cache.json"));
         using var state = ReadJson(Path.Combine(calendarRoot, "calendar-state.json"));
         var events = (cache is null ? [] : Items(cache.RootElement, "events"))

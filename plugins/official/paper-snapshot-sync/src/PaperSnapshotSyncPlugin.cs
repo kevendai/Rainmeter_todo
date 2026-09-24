@@ -153,11 +153,12 @@ internal static class PaperSnapshotSyncPlugin
         server.AutoDownload=JsonUtil.Bool(config,"auto_download",true);
         string stored=JsonUtil.String(config,"file_url","").Trim();
         // 宿主传来的 config 已经把 {{plugin:...}} 占位符展开过一次；这里再走一遍是幂等的。
-        string resolved=DynamicPluginValues.Resolve(stored);
+        string source=JsonUtil.String(config,"address_source","");
+        string resolved=source=="manual"?stored:DynamicPluginValues.Resolve(stored);
         // 装了声明同一 address_target 的地址插件（例如 SSDP 服务器 IP 同步）并已有主机值时，
         // 本插件就是「被接管」状态：只把地址里的主机换成插件给的主机，端口与路径原样保留。
         AddressProviderBinding provider=DynamicPluginValues.AddressProvider(AddressTarget);
-        bool managed=provider!=null&&!String.IsNullOrWhiteSpace(provider.Value);
+        bool managed=source!="manual"&&provider!=null&&!String.IsNullOrWhiteSpace(provider.Value);
         if(managed)
         {
             string bound=DynamicPluginValues.BindForTarget(resolved,AddressTarget);
@@ -165,6 +166,7 @@ internal static class PaperSnapshotSyncPlugin
             server.Managed=true;server.ManagedBy=provider.PluginId;server.ManagedByName=provider.PluginName;
             if(stored!="")server.StoredUrl=stored;
         }
+        else if(source=="ssdp")resolved="";
         server.BaseUrl=NormalizeHttpUrl(resolved);
         server.Account=JsonUtil.String(config,"file_account","").Trim();
         server.Password=JsonUtil.String(secret,"file_password","");
@@ -323,9 +325,14 @@ internal static class PaperSnapshotSyncPlugin
             ServerConfig managed=BuildServerConfig(PlainConfig("http://192.0.2.10:8900/files"),new Dictionary<string,object>());
             if(managed.BaseUrl!="http://203.0.113.9:8900/files"||!managed.Managed
                 ||managed.ManagedBy!="io.github.test.fake-address"||managed.StoredUrl!="http://192.0.2.10:8900/files")return 66;
+            Dictionary<string,object> manual=PlainConfig("http://192.0.2.10:9800/files");manual["address_source"]="manual";
+            if(BuildServerConfig(manual,new Dictionary<string,object>()).BaseUrl!="http://192.0.2.10:9800/files")return 69;
+            Dictionary<string,object> selected=PlainConfig("http://192.0.2.10:9800/files");selected["address_source"]="ssdp";
+            if(BuildServerConfig(selected,new Dictionary<string,object>()).BaseUrl!="http://203.0.113.9:9800/files")return 70;
             // 67：地址插件已启用但还没拿到主机 / 被禁用 → 都视为未接管。
             WriteFakeAddressProvider(isolated,true,"server_ip","","Fake SSDP");
             if(BuildServerConfig(PlainConfig("http://192.0.2.10:8900"),new Dictionary<string,object>()).Managed)return 67;
+            if(BuildServerConfig(selected,new Dictionary<string,object>()).BaseUrl!="")return 71;
             WriteFakeAddressProvider(isolated,false,"server_ip","203.0.113.9","Fake SSDP");
             if(BuildServerConfig(PlainConfig("http://192.0.2.10:8900"),new Dictionary<string,object>()).Managed)return 68;
             return 0;

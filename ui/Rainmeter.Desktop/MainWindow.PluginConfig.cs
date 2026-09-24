@@ -72,6 +72,7 @@ public sealed partial class MainWindow
             var fieldRows = Items(model.RootElement, "fields").ToArray();
             var edits = new Dictionary<string, Func<object?>>();
             var clearSecrets = new Dictionary<string, CheckBox>();
+            Action<string>? refreshAddress = null;
             var sections = new StackPanel { Spacing = 16, HorizontalAlignment = HorizontalAlignment.Stretch };
             sections.Children.Add(Text("调整“" + name + "”的运行设置。敏感项只在保存时提交，留空保持原值。", 13, muted: true));
             var grouped = fieldRows.GroupBy(field => Value(field, "section"));
@@ -82,6 +83,7 @@ public sealed partial class MainWindow
                 foreach (var field in group)
                 {
                     var key = Value(field, "key");
+                    if (id == "io.github.kevendai.paper-snapshot-sync" && key == "address_source") continue;
                     var kind = Value(field, "type");
                     var service = Value(field, "service");
                     var enabled = Value(field, "available", "True") != "False";
@@ -91,6 +93,58 @@ public sealed partial class MainWindow
                     if (description != "") item.Children.Add(Text(description, 12, muted: true));
                     if (!enabled) item.Children.Add(Text("依赖服务当前不可用：" +
                         Value(field, "reason", "请先启用对应插件。"), 12, muted: true));
+                    if (id == "io.github.kevendai.paper-snapshot-sync" && key == "file_url")
+                    {
+                        var stored = ConfigFieldValue(field);
+                        var parsed = Uri.TryCreate(stored, UriKind.Absolute, out var address) &&
+                            (address.Scheme == "http" || address.Scheme == "https") ? address : null;
+                        var sourceField = fieldRows.FirstOrDefault(row => Value(row, "key") == "address_source");
+                        var savedSource = sourceField.ValueKind == JsonValueKind.Undefined ? "" : ConfigFieldValue(sourceField);
+                        var ssdpIp = Value(model.RootElement, "address_provider_ip");
+                        var mode = EditorControl(new ComboBox { Header = "IP 地址来源", HorizontalAlignment = HorizontalAlignment.Stretch });
+                        mode.Items.Add(new ComboBoxItem { Content = "手动填写", Tag = "manual" });
+                        mode.Items.Add(new ComboBoxItem { Content = "SSDP 自动发现", Tag = "ssdp" });
+                        mode.SelectedIndex = savedSource == "manual" || savedSource == "" && ssdpIp == "" ? 0 : 1;
+                        var host = EditorControl(new TextBox { Header = "IP 地址 / 主机名", Text = parsed?.Host ?? "",
+                            MinHeight = 40 });
+                        var manualHost = host.Text;
+                        host.TextChanged += (_, _) => { if (mode.SelectedIndex == 0) manualHost = host.Text; };
+                        var port = EditorControl(new TextBox { Header = "端口", Text = parsed?.Port.ToString() ?? "8900",
+                            MinHeight = 40, Width = 130 });
+                        var scheme = EditorControl(new ComboBox { Header = "协议", Width = 130 });
+                        scheme.Items.Add("http"); scheme.Items.Add("https");
+                        scheme.SelectedIndex = parsed?.Scheme == "https" ? 1 : 0;
+                        var path = EditorControl(new TextBox { Header = "路径（可选）", Text = parsed?.AbsolutePath == "/" ? "" : parsed?.AbsolutePath ?? "",
+                            MinHeight = 40 });
+                        void UpdateHost()
+                        {
+                            var automatic = mode.SelectedIndex == 1;
+                            host.Text = automatic ? ssdpIp : manualHost;
+                            host.IsEnabled = !automatic;
+                        }
+                        mode.SelectionChanged += (_, _) => UpdateHost();
+                        UpdateHost();
+                        refreshAddress = value => { ssdpIp = value; if (mode.SelectedIndex == 1) host.Text = ssdpIp; };
+                        var addressRow = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 10 };
+                        host.Width = 320; addressRow.Children.Add(host); addressRow.Children.Add(port); addressRow.Children.Add(scheme);
+                        item.Children.Add(mode); item.Children.Add(addressRow); item.Children.Add(path);
+                        item.Children.Add(Text("选择 SSDP 后只接管 IP；端口、协议和路径仍由你设置，服务器 IP 变化会在连接时自动切换。", 12, muted: true));
+                        edits["address_source"] = () => mode.SelectedIndex == 1 ? "ssdp" : "manual";
+                        edits["file_url"] = () =>
+                        {
+                            var selectedHost = mode.SelectedIndex == 1 ? ssdpIp : host.Text.Trim();
+                            if (selectedHost == "") throw new InvalidOperationException(mode.SelectedIndex == 1
+                                ? "SSDP 尚未提供地址，请先执行 SSDP 插件。" : "请填写服务器 IP 或主机名。");
+                            if (!int.TryParse(port.Text.Trim(), out var number) || number is < 1 or > 65535)
+                                throw new InvalidOperationException("端口必须是 1–65535。");
+                            var builder = parsed is null ? new UriBuilder() : new UriBuilder(parsed);
+                            builder.Scheme = scheme.SelectedIndex == 1 ? "https" : "http";
+                            builder.Host = selectedHost; builder.Port = number; builder.Path = path.Text.Trim();
+                            return builder.Uri.AbsoluteUri.TrimEnd('/');
+                        };
+                        section.Children.Add(item);
+                        continue;
+                    }
                     if (service != "")
                     {
                         var choices = EditorControl(new ComboBox { HorizontalAlignment = HorizontalAlignment.Stretch });
@@ -187,7 +241,27 @@ public sealed partial class MainWindow
                 catch (Exception ex) { error.Text = ex.Message; args.Cancel = true; }
                 finally { deferral.Complete(); }
             };
-            if (await dialog.ShowAsync() == ContentDialogResult.Primary) Render();
+            DispatcherTimer? addressTimer = null;
+            if (refreshAddress is not null)
+            {
+                addressTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(3) };
+                var polling = false;
+                addressTimer.Tick += async (_, _) =>
+                {
+                    if (polling) return;
+                    polling = true;
+                    try
+                    {
+                        using var latest = await PluginConfigCommandAsync("UiPluginConfigModel", id);
+                        refreshAddress(Value(latest.RootElement, "address_provider_ip"));
+                    }
+                    catch { }
+                    finally { polling = false; }
+                };
+                addressTimer.Start();
+            }
+            try { if (await dialog.ShowAsync() == ContentDialogResult.Primary) Render(); }
+            finally { addressTimer?.Stop(); }
           }
         }
         catch (Exception ex) { ShowMessage("插件配置界面未能打开：" + ex.Message); }

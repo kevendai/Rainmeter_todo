@@ -69,6 +69,9 @@ internal static partial class TodoApp
             JsonUtil.SaveAtomic(resultPath, new Dictionary<string, object>{
                 {"ok", true}, {"name", PluginNames.Display(pluginId, manifest.Name)},
                 {"version", manifest.Version}, {"scan", pluginId == DynamicPluginValues.SsdpPluginId},
+                {"address_provider_ip", manifest.AddressTarget == "" ? "" :
+                    (DynamicPluginValues.AddressProvider(manifest.AddressTarget) == null ? "" :
+                    DynamicPluginValues.AddressProvider(manifest.AddressTarget).Value)},
                 {"fields", rows}
             });
             return 0;
@@ -159,7 +162,7 @@ internal static partial class TodoApp
                 if (required.Contains(field.Key) &&
                     String.IsNullOrWhiteSpace(Convert.ToString(value, CultureInfo.InvariantCulture)))
                     throw new InvalidDataException(field.Title + "为必填项。");
-                if (provider != null && field.Address)
+                if (provider != null && field.Address && !(pluginId == "io.github.kevendai.paper-snapshot-sync" && JsonUtil.String(edits,"address_source",JsonUtil.String(config,"address_source","ssdp")) == "manual"))
                 {
                     object stored = PluginSettingValue(pluginId, field.Key,
                         field.Secret ? secret : config, secret, field.Property);

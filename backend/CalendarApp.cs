@@ -30,6 +30,7 @@ internal static partial class CalendarApp
         if((action=="New"||action=="Edit"||action=="Detail"||action=="Manage"||action=="Settings")
             && DesktopUiBridge.TryOpen(TodoDir,"calendar",action,id))return 0;
         if(action=="LegacyEdit")action="Edit";
+        if(action=="LegacySettings")action="Settings";
         bool softOpen=action=="Manage"||action=="Settings";
         using(Mutex mutex=new Mutex(false,@"Global\RainmeterCalendarState")){bool held=false;Dictionary<string,object> cache=null,state=null;try{
             held=mutex.WaitOne(softOpen?TimeSpan.FromMilliseconds(300):TimeSpan.FromSeconds(20));if(!held&&!softOpen)return 4;cache=Load(CachePath,NewCache());state=Load(StatePath,NewState());Shape(cache,state);if(held&&Reconcile(state))Save(StatePath,state);bool refresh=false,refreshTodo=false;
