@@ -35,7 +35,6 @@ internal static partial class TodoApp
         // 规格 §5.5：attention 的提示与入口必须由 meter 渲染 —— 后端往 job 里加字段不会自己出现在桌面上。
         List<AttentionEntry> attention = TodoSourceAttention();
         AttentionEntry pendingAttention = attention.FirstOrDefault(entry => !entry.DeclinedToday);
-        AttentionEntry declinedAttention = attention.FirstOrDefault(entry => entry.DeclinedToday);
         if (pendingAttention != null)
         {
             string hint = pendingAttention.Message == "" ? "这个任务需要你确认后才能继续。" : RuntimeUtil.CleanRainmeter(pendingAttention.Message);
@@ -90,13 +89,6 @@ internal static partial class TodoApp
         string status = RuntimeUtil.CleanRainmeter(PluginDisplayStatus(state)); y += 18;
         Meter(lines, "FooterRule", "Meter=Shape", "X=24", "Y=" + y, "Shape=Rectangle 0,0,472,1 | Fill Color #BorderColor# | StrokeWidth 0");
         Meter(lines, "Status", "Meter=String", "MeterStyle=StyleText", "X=24", "Y=" + (y + 13), "W=470", "H=18", "FontSize=9", "FontColor=#MutedColor#", "Text=" + status, "ToolTipText=" + status);
-        // 规格 §4.6-6 第 2 条：同一天里用户已经拒绝过一次 ⇒ 不再显示醒目横幅打扰他，
-        // 但入口必须还在，于是降到页脚、文案弱化，点进去还是同一个确认流程。
-        if (declinedAttention != null)
-        {
-            Meter(lines, "DeclinedAiEntry", "Meter=String", "MeterStyle=StyleText", "X=24", "Y=" + (y + 33), "W=470", "H=18", "FontSize=9", "FontColor=#AccentColor#", "Text=" + RuntimeUtil.CleanRainmeter("今天已跳过 AI 评分 · 点此使用 AI 评分"), Action("PluginConfirmAttention", declinedAttention.PluginId), "ToolTipText=点这里今天改用 AI 评分");
-            y += 22;
-        }
         y += 42;
         Meter(lines, "BottomSpacer", "Meter=Shape", "X=0", "Y=" + y, "Shape=Rectangle 0,0,520,1 | Fill Color 0,0,0,0 | StrokeWidth 0");
 
@@ -166,4 +158,3 @@ internal static partial class TodoApp
     }
 
 }
-

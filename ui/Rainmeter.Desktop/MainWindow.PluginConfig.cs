@@ -202,8 +202,29 @@ public sealed partial class MainWindow
         var choices = EditorControl(new ComboBox { HorizontalAlignment = HorizontalAlignment.Stretch,
             PlaceholderText = "选择找到的服务器" });
         choices.IsEnabled = false;
-        var search = Action("搜索设备", () => _ = SearchSsdpDevicesAsync(id, edits, choices, status));
+        var systems = EditorControl(new ComboBox { Header = "系统筛选",
+            HorizontalAlignment = HorizontalAlignment.Stretch });
+        systems.Items.Add("全部系统");
+        systems.SelectedIndex = 0;
+        systems.IsEnabled = false;
+        var devices = new List<JsonElement>();
+        void ApplySystemFilter()
+        {
+            var selected = systems.SelectedItem?.ToString() ?? "全部系统";
+            choices.Items.Clear();
+            foreach (var device in devices.Where(device => selected == "全部系统" ||
+                         SsdpSystemName(Value(device, "server")) == selected))
+                choices.Items.Add(new ComboBoxItem { Content = Value(device, "ip") + " · " +
+                    SsdpSystemName(Value(device, "server")) + " · " + Value(device, "server"), Tag = device });
+            choices.IsEnabled = choices.Items.Count > 0;
+            status.Text = devices.Count == 0 ? "未发现设备，请检查扫描范围。" :
+                "显示 " + choices.Items.Count + " / " + devices.Count + " 台设备。";
+        }
+        systems.SelectionChanged += (_, _) => ApplySystemFilter();
+        var search = Action("搜索设备", () => _ = SearchSsdpDevicesAsync(id, edits, systems,
+            devices, ApplySystemFilter, status));
         section.Children.Add(search);
+        section.Children.Add(systems);
         section.Children.Add(choices);
         section.Children.Add(status);
         edits["selected_usn"] = () => (choices.SelectedItem as ComboBoxItem)?.Tag is JsonElement device
@@ -215,8 +236,19 @@ public sealed partial class MainWindow
         return Card(section, 18);
     }
 
+    private static string SsdpSystemName(string server)
+    {
+        if (server.Contains("istoreos", StringComparison.OrdinalIgnoreCase)) return "iStoreOS";
+        if (server.Contains("nanopi-r2s", StringComparison.OrdinalIgnoreCase)) return "NanoPi R2S";
+        if (server.StartsWith("microsoft-windows", StringComparison.OrdinalIgnoreCase)) return "Windows UPnP";
+        if (server.StartsWith("go upnp", StringComparison.OrdinalIgnoreCase)) return "Go UPnP";
+        var system = server.Contains('|') ? server[(server.IndexOf('|') + 1)..].Trim() : server.Trim();
+        var slash = system.IndexOf('/');
+        return slash > 0 ? system[..slash] : system == "" ? "未知系统" : system;
+    }
+
     private async Task SearchSsdpDevicesAsync(string id, Dictionary<string, Func<object?>> edits,
-        ComboBox choices, TextBlock status)
+        ComboBox systems, List<JsonElement> devices, Action applyFilter, TextBlock status)
     {
         try
         {
@@ -246,7 +278,7 @@ public sealed partial class MainWindow
             await process.StandardInput.WriteLineAsync(JsonSerializer.Serialize(new {
                 scan_ip = ip, subnet_mask = mask, scan_wait_ms = wait }));
             process.StandardInput.Close();
-            var devices = new List<JsonElement>();
+            var found = new List<JsonElement>();
             using var timeout = new CancellationTokenSource(TimeSpan.FromMinutes(3));
             string? line;
             try
@@ -257,18 +289,21 @@ public sealed partial class MainWindow
                     if (Value(message.RootElement, "type") != "result") continue;
                     if (Value(message.RootElement, "ok") != "True")
                         throw new InvalidOperationException(Value(message.RootElement, "error", "扫描失败。"));
-                    devices.AddRange(Items(message.RootElement, "devices").Select(value => value.Clone()));
+                    found.AddRange(Items(message.RootElement, "devices").Select(value => value.Clone()));
                 }
                 await process.WaitForExitAsync(timeout.Token);
             }
             finally { if (!process.HasExited) process.Kill(); }
-            choices.Items.Clear();
-            foreach (var device in devices)
-                choices.Items.Add(new ComboBoxItem { Content = Value(device, "ip") + " · " +
-                    Value(device, "server"), Tag = device });
-            choices.IsEnabled = devices.Count > 0;
-            status.Text = devices.Count == 0 ? "未发现设备，请检查扫描范围。" :
-                "找到 " + devices.Count + " 台设备，请选择要同步的服务器。";
+            devices.Clear();
+            devices.AddRange(found);
+            systems.Items.Clear();
+            systems.Items.Add("全部系统");
+            foreach (var name in devices.Select(device => SsdpSystemName(Value(device, "server")))
+                         .Distinct(StringComparer.OrdinalIgnoreCase).OrderBy(name => name))
+                systems.Items.Add(name);
+            systems.IsEnabled = devices.Count > 0;
+            systems.SelectedIndex = 0;
+            applyFilter();
         }
         catch (Exception ex) { status.Text = "搜索失败：" + ex.Message; }
     }

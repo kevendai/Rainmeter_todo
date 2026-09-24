@@ -15,7 +15,7 @@ internal sealed class SsdpServerIpSetupForm : Form
     private static readonly JavaScriptSerializer Json=new JavaScriptSerializer{MaxJsonLength=4*1024*1024};
     private readonly Dictionary<string,object> _config;
     private readonly TextBox _scanIp=new TextBox(),_mask=new TextBox(),_filter=new TextBox();
-    private readonly ComboBox _devices=new ComboBox();
+    private readonly ComboBox _devices=new ComboBox(),_systemFilter=new ComboBox();
     private readonly Label _status=new Label(),_details=new Label(),_progressText=new Label();
     private readonly ProgressBar _progress=new ProgressBar();
     private readonly Button _search=new Button(),_save=new Button(),_cancel=new Button();
@@ -32,7 +32,10 @@ internal sealed class SsdpServerIpSetupForm : Form
         Controls.Add(NewLabel("扫描范围中的 IP",30,118,260,24,10F,FontStyle.Regular));_scanIp.SetBounds(30,146,290,32);_scanIp.Text=S(config,"scan_ip","");Controls.Add(_scanIp);
         Controls.Add(NewLabel("子网掩码",350,118,200,24,10F,FontStyle.Regular));_mask.SetBounds(350,146,200,32);_mask.Text=S(config,"subnet_mask","255.255.255.0");Controls.Add(_mask);
         _search.Text="全量搜索";_search.SetBounds(566,142,104,38);StylePrimary(_search);_search.Click+=delegate{StartSearch();};Controls.Add(_search);AcceptButton=_search;
-        Controls.Add(NewLabel("筛选设备（IP、系统、SERVER 或 USN）",30,204,620,24,10F,FontStyle.Regular));_filter.SetBounds(30,232,640,32);_filter.TextChanged+=delegate{ApplyFilter();};Controls.Add(_filter);
+        Controls.Add(NewLabel("筛选设备（IP、系统、SERVER 或 USN）",30,204,620,24,10F,FontStyle.Regular));_filter.SetBounds(30,232,390,32);_filter.TextChanged+=delegate{ApplyFilter();};Controls.Add(_filter);
+        _systemFilter.SetBounds(430,232,240,32);_systemFilter.DropDownStyle=ComboBoxStyle.DropDownList;
+        _systemFilter.Items.Add("全部系统");_systemFilter.SelectedIndex=0;
+        _systemFilter.SelectedIndexChanged+=delegate{ApplyFilter();};Controls.Add(_systemFilter);
         Controls.Add(NewLabel("选择设备（IP · 系统 · 设备标识）",30,274,620,24,10F,FontStyle.Regular));_devices.SetBounds(30,302,640,34);_devices.DropDownStyle=ComboBoxStyle.DropDownList;_devices.SelectedIndexChanged+=delegate{ShowSelectedDetails();};Controls.Add(_devices);
         _details.SetBounds(30,344,640,46);_details.ForeColor=Color.FromArgb(75,98,120);_details.Font=new Font("Microsoft YaHei UI",8.5F);_details.AutoEllipsis=true;Controls.Add(_details);
         _status.SetBounds(30,396,640,42);_status.ForeColor=Color.FromArgb(75,98,120);_status.Text="填写任意网内 IP 和子网掩码后点击全量搜索。/16 最多扫描 65534 个地址。";Controls.Add(_status);
@@ -56,7 +59,15 @@ internal sealed class SsdpServerIpSetupForm : Form
         BackgroundWorker worker=new BackgroundWorker();worker.DoWork+=delegate(object sender,DoWorkEventArgs e){e.Result=RunScanChild(scanIp,mask,wait);};worker.RunWorkerCompleted+=delegate(object sender,RunWorkerCompletedEventArgs e)
         {
             worker.Dispose();if(IsDisposed)return;SetBusy(false,"");if(e.Error!=null){ShowError(e.Error.Message);return;}ScanResult result=(ScanResult)e.Result;if(result.Error!=""){ShowError(result.Error);return;}
-            _allDevices.AddRange(result.Devices);ApplyFilter();
+            _allDevices.AddRange(result.Devices);
+            _systemFilter.Items.Clear();_systemFilter.Items.Add("全部系统");
+            List<string> systems=new List<string>();
+            foreach(SsdpDevice device in _allDevices)
+                if(!systems.Exists(value=>String.Equals(value,device.SystemName(),StringComparison.OrdinalIgnoreCase)))
+                    systems.Add(device.SystemName());
+            systems.Sort(StringComparer.CurrentCultureIgnoreCase);
+            foreach(string system in systems)_systemFilter.Items.Add(system);
+            _systemFilter.SelectedIndex=0;ApplyFilter();
             _status.ForeColor=Color.FromArgb(75,98,120);_status.Text=_allDevices.Count==0?"没有收到带 SERVER 和 USN 的 SSDP 应答。请检查扫描范围和网络转发。":"找到 "+_allDevices.Count+" 个设备。可按 IP、系统、SERVER 或 USN 筛选。";
             UpdateProgress(100,100,"扫描完成");
         };worker.RunWorkerAsync();
@@ -90,7 +101,7 @@ internal sealed class SsdpServerIpSetupForm : Form
     }
     private void ApplyFilter()
     {
-        string query=_filter.Text.Trim();SsdpDevice selected=_devices.SelectedItem as SsdpDevice;_devices.BeginUpdate();try{_devices.Items.Clear();foreach(SsdpDevice device in _allDevices){string haystack=device.Ip+"\n"+device.SystemName()+"\n"+device.ShortId()+"\n"+device.Server+"\n"+device.Usn;if(query==""||haystack.IndexOf(query,StringComparison.OrdinalIgnoreCase)>=0)_devices.Items.Add(device);}if(selected!=null&&_devices.Items.Contains(selected))_devices.SelectedItem=selected;else if(_devices.Items.Count>0)_devices.SelectedIndex=0;}finally{_devices.EndUpdate();}_save.Enabled=_devices.Items.Count>0;if(_allDevices.Count>0)_status.Text="显示 "+_devices.Items.Count+" / "+_allDevices.Count+" 个设备";
+        string query=_filter.Text.Trim(),system=_systemFilter.SelectedItem as string??"全部系统";SsdpDevice selected=_devices.SelectedItem as SsdpDevice;_devices.BeginUpdate();try{_devices.Items.Clear();foreach(SsdpDevice device in _allDevices){string haystack=device.Ip+"\n"+device.SystemName()+"\n"+device.ShortId()+"\n"+device.Server+"\n"+device.Usn;if((system=="全部系统"||String.Equals(system,device.SystemName(),StringComparison.OrdinalIgnoreCase))&&(query==""||haystack.IndexOf(query,StringComparison.OrdinalIgnoreCase)>=0))_devices.Items.Add(device);}if(selected!=null&&_devices.Items.Contains(selected))_devices.SelectedItem=selected;else if(_devices.Items.Count>0)_devices.SelectedIndex=0;}finally{_devices.EndUpdate();}_save.Enabled=_devices.Items.Count>0;if(_allDevices.Count>0)_status.Text="显示 "+_devices.Items.Count+" / "+_allDevices.Count+" 个设备";
     }
     private void ShowSelectedDetails()
     {
@@ -104,7 +115,7 @@ internal sealed class SsdpServerIpSetupForm : Form
         Payload=new Dictionary<string,object>{{"summary","已选择 SSDP 服务器："+choice.Ip},{"values",new Dictionary<string,object>{{"server_ip",choice.Ip},{"server",choice.Server},{"usn",choice.Usn},{"location",choice.Location}}},{"ttl",ttl},{"config_updates",new Dictionary<string,object>{{"scan_ip",_scanIp.Text.Trim()},{"subnet_mask",_mask.Text.Trim()},{"selected_usn",choice.Usn},{"selected_server",choice.Server},{"last_ip",choice.Ip},{"probe_timeout_ms",SsdpServerIpPlugin.Int(_config,"probe_timeout_ms",800)},{"scan_wait_ms",SsdpServerIpPlugin.Int(_config,"scan_wait_ms",1500)},{"ttl",ttl}}}};
         MessageBox.Show(this,"已锁定设备：\r\n"+choice.Ip+" · "+choice.SystemName()+" · "+choice.ShortId()+"\r\n\r\n当前 IP："+choice.Ip,"SSDP 服务器已保存",MessageBoxButtons.OK,MessageBoxIcon.Information);DialogResult=DialogResult.OK;Close();
     }
-    private void SetBusy(bool busy,string message){UseWaitCursor=false;_search.Enabled=!busy;_save.Enabled=!busy&&_devices.Items.Count>0;_scanIp.Enabled=_mask.Enabled=!busy;_filter.Enabled=!busy;_progress.Visible=_progressText.Visible=busy||_progress.Value>0;if(message!=""){_status.ForeColor=Color.FromArgb(75,98,120);_status.Text=message;}}
+    private void SetBusy(bool busy,string message){UseWaitCursor=false;_search.Enabled=!busy;_save.Enabled=!busy&&_devices.Items.Count>0;_scanIp.Enabled=_mask.Enabled=!busy;_filter.Enabled=_systemFilter.Enabled=!busy;_progress.Visible=_progressText.Visible=busy||_progress.Value>0;if(message!=""){_status.ForeColor=Color.FromArgb(75,98,120);_status.Text=message;}}
     private void ShowError(string message){UseWaitCursor=false;_status.ForeColor=Color.FromArgb(198,52,60);_status.Text=message;MessageBox.Show(this,message,"SSDP 搜索",MessageBoxButtons.OK,MessageBoxIcon.Warning);}
     private static Label NewLabel(string text,int x,int y,int width,int height,float size,FontStyle style){return new Label{Text=text,Left=x,Top=y,Width=width,Height=height,Font=new Font("Microsoft YaHei UI",size,style),ForeColor=Color.FromArgb(18,46,73),BackColor=Color.Transparent};}
     private static void StyleButton(Button b){b.FlatStyle=FlatStyle.Flat;b.FlatAppearance.BorderColor=Color.FromArgb(184,207,226);b.BackColor=Color.White;b.ForeColor=Color.FromArgb(18,46,73);b.Cursor=Cursors.Hand;}

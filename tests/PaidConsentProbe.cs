@@ -158,8 +158,8 @@ internal static class PaidConsentProbe
         RunTodo("Render");
         generated = ReadGenerated();
         Expect(!generated.Contains("AttentionButton"), "同日已拒绝 ⇒ 不再显示醒目横幅");
-        Expect(generated.Contains("DeclinedAiEntry") && MeterBlock(generated, "DeclinedAiEntry").Contains("今天已跳过"), "页脚保留弱化的可点入口");
-        Expect(generated.Contains("\"PluginConfirmAttention\" \"" + Source + "\""), "弱入口指向同一个确认流程");
+        Expect(!generated.Contains("DeclinedAiEntry"), "今天不再提醒后磁贴不显示二次入口");
+        Expect(!generated.Contains("\"PluginConfirmAttention\" \"" + Source + "\""), "今天不再提醒后不再从磁贴询问");
 
         // §11-#25：cancelled 的文案不得是「失败：…」
         WriteText(Path.Combine(root, "PluginJobs", Arxiv + ".json"),

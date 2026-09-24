@@ -81,6 +81,7 @@ internal static partial class TodoApp
         if (action == "UiPluginConfigModel") return UiPluginConfigModel(id, pluginAction);
         if (action == "UiPluginConfigSave") return UiPluginConfigSave(id, pluginAction, args.Length > 3 ? args[3] : "");
         if(action=="PluginAction"){if(id==""||pluginAction=="")return 2;StartPluginCommand("PluginAction",id+" "+pluginAction);return 0;}
+        if(action=="PluginRescore")return RunExplicitPaperRescore(id);
         // 规格 §5.2：磁贴上的【使用 DeepSeek AI】按钮与插件管理里的「处理待确认…」都走这里。
         if(action=="PluginConfirmAttention")return ConfirmPaidAttention(id);
         using (Mutex mutex = new Mutex(false, @"Global\RainmeterTodoState"))
@@ -109,7 +110,7 @@ internal static partial class TodoApp
                         break;
                     case "Rollover": refresh |= Render(state); break;
                     case "Refresh":
-                        Save(state); Render(state); StartPluginCommand("SyncAll", "manual");StartPluginCommand("ValuesAll","manual"); refresh = true; break;
+                        Save(state); Render(state); StartTilePluginSync();StartPluginCommand("ValuesAll","manual"); refresh = true; break;
                     case "Render": Render(state); break;
                     case "Delete": Delete(state, id, ref refresh); break;
                     case "Toggle": Toggle(state, id, ref refresh); break;
@@ -164,6 +165,71 @@ internal static partial class TodoApp
         StartPluginCommand(action,pluginId,"","","",false);
     }
 
+    private static void StartTilePluginSync()
+    {
+        if(!File.Exists(PluginHostPath))return;
+        Process sync=Process.Start(new ProcessStartInfo(PluginHostPath,"SyncAll tile_refresh"){
+            UseShellExecute=false,CreateNoWindow=true,WindowStyle=ProcessWindowStyle.Hidden});
+        if(sync==null)return;
+        ThreadPool.QueueUserWorkItem(delegate{
+            try
+            {
+                if(!sync.WaitForExit(1800000))return;
+                using(Mutex gate=new Mutex(false,@"Global\RainmeterTileAiPrompt"))
+                {
+                    bool held=false;
+                    try
+                    {
+                        try{held=gate.WaitOne(TimeSpan.FromSeconds(35));}catch(AbandonedMutexException){held=true;}
+                        if(!held)return;
+                        string id="io.github.kevendai.arxiv";
+                        string path=Path.Combine(RainmeterBackend.PluginPaths.Jobs,id+".json");
+                        if(!File.Exists(path))return;
+                        Dictionary<string,object> job=JsonUtil.LoadObject(path);
+                        if(JsonUtil.String(job,"state","")!="attention"||
+                            !JsonUtil.Bool(JsonUtil.Object(JsonUtil.Get(job,"attention")),"allow_snooze",false))return;
+                        using(Process prompt=Process.Start(new ProcessStartInfo(Path.Combine(ResourceDir,"TodoHost.exe"),
+                            "PluginConfirmAttention "+id){UseShellExecute=false,CreateNoWindow=true,WindowStyle=ProcessWindowStyle.Hidden}))
+                            if(prompt!=null)prompt.WaitForExit();
+                    }
+                    finally{if(held)gate.ReleaseMutex();}
+                }
+            }
+            catch(Exception ex){try{Console.Error.WriteLine("论文确认未能打开："+ex.Message);}catch{}}
+            finally{sync.Dispose();}
+        });
+    }
+
+    // An explicit click on “重新爬取并打分” authorizes this one paid AI run.
+    // The consent marker is scoped to this child only and never reaches plugins.
+    private static int RunExplicitPaperRescore(string id)
+    {
+        if(id!="io.github.kevendai.arxiv"||!Environment.UserInteractive)return 2;
+        string input=Path.Combine(Path.GetTempPath(),"RainmeterPaperRescore-"+Guid.NewGuid().ToString("N")+".json");
+        string output=input+".result.json";
+        try
+        {
+            JsonUtil.SaveAtomic(input,new Dictionary<string,object>{{"allow_paid_ai",true}});
+            ProcessStartInfo info=new ProcessStartInfo(PluginHostPath,
+                "PluginAction "+id+" rescore \""+input+"\" \""+output+"\""){
+                UseShellExecute=false,CreateNoWindow=true,WindowStyle=ProcessWindowStyle.Hidden};
+            info.EnvironmentVariables[RainmeterBackend.PluginRuntime.PaidConsentVariable]="1";
+            using(Process process=Process.Start(info))
+            {
+                if(process==null)return 1;
+                if(!process.WaitForExit(1800000))return 1;
+                Refresh();
+                return process.ExitCode;
+            }
+        }
+        catch(Exception ex){LightUi.Error("重新爬取并打分未能启动："+ex.Message);return 1;}
+        finally
+        {
+            try{if(File.Exists(input))File.Delete(input);}catch{}
+            try{if(File.Exists(output))File.Delete(output);}catch{}
+        }
+    }
+
     // 规格 §5.3 第 3 行：宿主侧早就支持 `PluginAction <id> <actionId> <inputPath> <outputPath>`，
     // 但 TodoApp 原来只能传前两个参数 —— 付费确认就没法把 resume_input 送进去。
     // consent=true 时给自己启动的这个 PluginHost 打上一次性同意标记：**只有这条路径**能产生它，
@@ -206,9 +272,23 @@ internal static partial class TodoApp
         string name=pluginId;try{name=RainmeterBackend.PluginRuntime.Resolve(pluginId,false).Name;}catch{}
         string message=JsonUtil.String(job,"message","");
         string text=(message==""?"这个任务需要用 AI 继续。":message)+"\r\n\r\n继续会用你填好的 API Key 调用一次模型，费用记在你的账号上；取消则本轮什么都不同步，也不会产生任何调用。";
-        if(!LightUi.ConfirmRisk(text,name+" 需要你的确认","需要你的确认","使用 AI 评分"))
+        bool allowSnooze=JsonUtil.Bool(JsonUtil.Object(JsonUtil.Get(job,"attention")),"allow_snooze",false);
+        DialogResult choice=allowSnooze
+            ? LightUi.ConfirmPaidWithSnooze(text,name+" 需要你的确认","需要你的确认")
+            : LightUi.ConfirmRisk(text,name+" 需要你的确认","需要你的确认","使用 AI 评分")
+                ? DialogResult.Yes : DialogResult.No;
+        if(choice!=DialogResult.Yes)
         {
-            StartPluginCommand("Cancel",pluginId+" user_declined");
+            string reason=choice==DialogResult.Ignore?"user_declined":"user_cancelled";
+            try
+            {
+                using(Process cancelled=Process.Start(new ProcessStartInfo(PluginHostPath,
+                    "Cancel "+pluginId+" "+reason){UseShellExecute=false,CreateNoWindow=true,
+                        WindowStyle=ProcessWindowStyle.Hidden}))
+                    if(cancelled==null||!cancelled.WaitForExit(10000)||cancelled.ExitCode!=0)
+                        throw new Exception("未能保存本次选择。");
+            }
+            catch(Exception ex){LightUi.Error(ex.Message);return 1;}
             Refresh();
             return 0;
         }

@@ -130,15 +130,23 @@ try {
         $paidSourceId='io.github.test.todo-source';$paidJobPath=Join-Path $env:RAINMETER_PLUGIN_ROOT ('PluginJobs\'+$paidSourceId+'.json');$paidCalls=Join-Path $env:RAINMETER_PLUGIN_ROOT ('PluginData\'+$paidSourceId+'\calls.log')
         @{job_id='smoke';plugin_id=$paidSourceId;state='attention';current=0;total=0;resume_action='sync_with_ai';resume_input=@{allow_paid_ai=$true};message='远端论文同步失败，是否使用 DeepSeek AI 重新评分？'}|ConvertTo-Json -Depth 6|Set-Content -LiteralPath $paidJobPath -Encoding UTF8
         $callsBefore=@(Get-Content -LiteralPath $paidCalls -Encoding UTF8 -ErrorAction SilentlyContinue).Count
-        $env:RAINMETER_UI_SMOKE='1';& $todo PluginConfirmAttention $paidSourceId;$confirmExit=$LASTEXITCODE;Remove-Item Env:RAINMETER_UI_SMOKE
+        $env:RAINMETER_UI_SMOKE='1';$confirmProcess=Start-Process -FilePath $todo -ArgumentList @('PluginConfirmAttention',$paidSourceId) -Wait -PassThru -WindowStyle Hidden;$confirmExit=$confirmProcess.ExitCode;Remove-Item Env:RAINMETER_UI_SMOKE
         if($confirmExit -ne 0){throw ('Confirm dialog path failed with exit code '+$confirmExit)}
         $paidJob=$null
         for($attempt=0;$attempt -lt 40;$attempt++){try{$paidJob=Get-Content -LiteralPath $paidJobPath -Raw -Encoding UTF8|ConvertFrom-Json;if($paidJob.state -eq 'cancelled'){break}}catch [IO.IOException]{$paidJob=$null};Start-Sleep -Milliseconds 100}
         if($null-eq $paidJob-or $paidJob.state -ne 'cancelled'){throw ('Declining the confirmation did not record a cancelled job: '+$paidJob.state)}
-        if($paidJob.cancel_reason -ne 'user_declined'){throw ('Decline reason was not recorded: '+$paidJob.cancel_reason)}
+        if($paidJob.cancel_reason -ne 'user_cancelled'){throw ('Cancel reason was not recorded: '+$paidJob.cancel_reason)}
+        if($paidJob.paid_declined_date){throw 'A plain cancel must not set today-do-not-remind'}
         $callsAfter=@(Get-Content -LiteralPath $paidCalls -Encoding UTF8 -ErrorAction SilentlyContinue).Count
         if($callsAfter -ne $callsBefore){throw 'Declining still called the plugin'}
-        Write-Host 'Confirm dialog decline path records user_declined with zero plugin calls passed'
+        Write-Host 'Confirm dialog plain cancel records user_cancelled with zero plugin calls passed'
+        @{job_id='snooze-smoke';plugin_id=$paidSourceId;state='attention';current=0;total=0;resume_action='sync_with_ai';resume_input=@{allow_paid_ai=$true};attention=@{allow_snooze=$true};message='本轮是否使用 AI 评分？'}|ConvertTo-Json -Depth 6|Set-Content -LiteralPath $paidJobPath -Encoding UTF8
+        $env:RAINMETER_UI_SMOKE='1';$env:RAINMETER_UI_SMOKE_CHOICE='snooze';$snoozeProcess=Start-Process -FilePath $todo -ArgumentList @('PluginConfirmAttention',$paidSourceId) -Wait -PassThru -WindowStyle Hidden;$snoozeExit=$snoozeProcess.ExitCode;Remove-Item Env:RAINMETER_UI_SMOKE;Remove-Item Env:RAINMETER_UI_SMOKE_CHOICE
+        if($snoozeExit -ne 0){throw ('Snooze dialog path failed with exit code '+$snoozeExit)}
+        $paidJob=Get-Content -LiteralPath $paidJobPath -Raw -Encoding UTF8|ConvertFrom-Json
+        if($paidJob.cancel_reason -ne 'user_declined' -or -not $paidJob.paid_declined_date){throw ('Today-do-not-remind was not recorded: state='+$paidJob.state+' reason='+$paidJob.cancel_reason+' date='+$paidJob.paid_declined_date)}
+        if(@(Get-Content -LiteralPath $paidCalls -Encoding UTF8 -ErrorAction SilentlyContinue).Count -ne $callsAfter){throw 'Snoozing still called the plugin'}
+        Write-Host 'Confirm dialog today-do-not-remind records user_declined without AI calls passed'
         @{version=3;meta=@{};tasks=@()} | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path $build 'tasks.json') -Encoding UTF8
         $eventPath=Join-Path $build 'calendar-event.json';$firstResult=Join-Path $build 'calendar-result-1.json';$secondResult=Join-Path $build 'calendar-result-2.json'
         @{uid='meeting';occurrence_key='meeting#one';title='组会';start_at='2026-09-13T09:00:00+08:00';end_at='2026-09-13T10:00:00+08:00';reminder_at='2026-09-13T08:45:00+08:00';source='caldav';all_day=$false}|ConvertTo-Json -Depth 5|Set-Content -LiteralPath $eventPath -Encoding UTF8

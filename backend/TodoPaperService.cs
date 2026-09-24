@@ -480,27 +480,23 @@ internal static partial class TodoApp
         }
         Directory.CreateDirectory(PaperCache);
         CleanupPaperCache(settings);
-        // `rescore`（"重新爬取并打分"）的语义 = 强制重新生成今天的推荐结果：先扔掉本地缓存，
-        // 再让导入路径替换掉今天由 arxiv 建的那批待办。AI 路径的替换由下面那个 rescore 记号
-        // 在 RunPaperWorker 里完成（那里还要照顾事务回滚）。
-        if (replaceToday)
-        {
-            string cached = Path.Combine(PaperCache, today + "_papers.json");
-            if (File.Exists(cached)) { try { File.Delete(cached); } catch { } }
-        }
+        // 强制重评分不提前删旧缓存；直到 AI 真正开始并成功产出新结果，
+        // 旧论文仍可保留。下方的 rescore 记号负责在 worker 中替换。
 
-        // ① 本地有效缓存：命中就一个外部调用都不发。
+        // 普通同步（磁贴刷新和插件执行）先看本地缓存，再看远端快照。
+        // 明确选择“重新爬取并打分”时两者都跳过，直接使用 AI。
         List<Dictionary<string, object>> papers;
-        if (TryUseLocalCache(today, settings, out papers))
+        if (!replaceToday && TryUseLocalCache(today, settings, out papers))
         {
             ImportPapers(state, papers, today, settings, replaceToday);
             result.Summary = JsonUtil.String(Meta(state), "status", "已导入本地缓存的今日论文");
             return result;
         }
 
-        // ② 远端快照：命中直接导入，**0 次 AI 调用**（计划 §九：不得因为装了 AI Provider 再评分一次）。
+        // ② 远端快照：命中直接导入，0 次 AI 调用。
         string remoteError;
-        if (SnapshotAvailable(settings))
+        if (replaceToday) remoteError = "已选择重新爬取并打分";
+        else if (SnapshotAvailable(settings))
         {
             SnapshotResult snapshot = FetchSnapshot(settings, today);
             if (snapshot.Found)
@@ -519,13 +515,25 @@ internal static partial class TodoApp
         //    绝不自行生成"最新 N 篇"。
         if (!AiAvailable(settings))
         {
+            if (replaceToday)
+            {
+                result.Ok = false;
+                result.Error = "没有可用且已启用的 AI 评分插件，无法重新爬取并打分。";
+                return result;
+            }
             Meta(state)["status"] = "今天没有可用的论文推荐结果";
             result.Summary = "今天没有可用的论文推荐结果。\r\n\r\n你可以：\r\n• 安装论文同步插件，从远端获取已经生成的推荐结果；\r\n• 安装 AI Provider，在需要时手动生成推荐结果。";
             return result;
         }
         if (!PaidAiAllowed)
         {
-            if (!manual && DeclinedToday)
+            if (replaceToday)
+            {
+                result.Ok = false;
+                result.Error = "重新爬取并打分必须从插件界面明确启动。";
+                return result;
+            }
+            if (DeclinedToday)
             {
                 Meta(state)["status"] = remoteError + "；今天已拒绝过 AI 评分";
                 result.Summary = JsonUtil.String(Meta(state), "status", "论文推荐需要确认");
@@ -533,6 +541,7 @@ internal static partial class TodoApp
             }
             result.Attention = new Dictionary<string, object> {
                 {"type", "paid_service_confirmation"},
+                {"allow_snooze", true},
                 {"service", AiService},
                 {"message", remoteError + "。\r\n\r\n是否使用「" + ProviderLabel(Services.AiName, "AI Provider") + "」重新获取并评分今日 arXiv 论文？\r\n\r\n此操作将调用外部 AI API，可能产生费用。"},
                 {"resume_action", ResumeAction},
@@ -549,7 +558,7 @@ internal static partial class TodoApp
         try { File.WriteAllText(PaperRescorePath(today), RuntimeUtil.Iso(DateTimeOffset.Now), RuntimeUtil.Utf8NoBom); }
         catch { }
         WritePaperJob("queued", "正在准备 " + today + " 的论文", 0, 0);
-        int code = RunPaperWorker(today);
+        int code = RunPaperWorker(today, replaceToday);
         if (code != 0)
         {
             result.Ok = false;
@@ -568,7 +577,7 @@ internal static partial class TodoApp
         return true;
     }
 
-    private static int RunPaperWorker(string date)
+    private static int RunPaperWorker(string date, bool forceFetch)
     {
         using (Mutex mutex = new Mutex(false, PaperWorkerMutexName))
         {
@@ -585,7 +594,7 @@ internal static partial class TodoApp
                 string finalPath = Path.Combine(PaperCache, date + "_papers.json");
                 string partialPath = Path.Combine(PaperCache, date + "_papers.partial.json");
                 List<Dictionary<string, object>> papers;
-                if (!TryLoadPapers(partialPath, out papers))
+                if (forceFetch || !TryLoadPapers(partialPath, out papers))
                 {
                     WritePaperJob("fetching", "正在从 arXiv 获取 " + date + " 的论文", 0, 0);
                     papers = FetchArxivPapers(settings, date);

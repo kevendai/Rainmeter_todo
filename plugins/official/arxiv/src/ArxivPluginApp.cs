@@ -186,8 +186,14 @@ internal static partial class TodoApp
             ApplyJobContext(context,empty);
             if(!DeclinedToday)return 82;
             if(RunPaperSyncFlow(PluginState,false,date,false).Attention!=null)return 83;
-            // 84：用户主动点 —— 任何时段、任何拒绝记录都必须照样问（拒绝只影响"打扰"，不影响"入口"）。
-            if(RunPaperSyncFlow(PluginState,true,date,false).Attention==null)return 84;
+            // 84：磁贴刷新和插件执行共用当天免打扰状态。
+            if(RunPaperSyncFlow(PluginState,true,date,false).Attention!=null)return 84;
+            // 90：显式重评分不显示普通的 AI 询问，也不提前删除旧缓存。
+            string cached=Path.Combine(PaperCache,date+"_papers.json");
+            File.WriteAllText(cached,"old-cache");
+            PaperSyncResult forced=RunPaperSyncFlow(PluginState,true,date,true);
+            if(forced.Attention!=null||forced.Ok||!File.Exists(cached))return 90;
+            File.Delete(cached);
             // 85：跨天重置 —— 宿主把该变量置 0 之后，后台同步恢复询问。
             Environment.SetEnvironmentVariable(ServiceClient.DeclinedTodayVariable,null);
             ApplyJobContext(context,empty);

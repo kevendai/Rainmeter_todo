@@ -17,7 +17,7 @@
     {"service": "paper_snapshot_provider@1", "binding_key": "paper_snapshot_provider", "optional": true, "role": "远端快照"}
   ],
   "actions": [
-    {"id": "sync_with_ai", "name": "使用 AI 评分", "confirm": false, "long_running": true, "imports_tasks": true},
-    {"id": "rescore", "name": "重新爬取并打分", "confirm": true, "risk": "可能调用付费 API，并替换当天论文缓存。", "long_running": true, "imports_tasks": true}
+    {"id": "sync_with_ai", "name": "按需同步（缓存优先）", "confirm": false, "long_running": true, "imports_tasks": true},
+    {"id": "rescore", "name": "重新爬取并打分（直接使用 AI）", "confirm": false, "long_running": true, "imports_tasks": true}
   ]
 }

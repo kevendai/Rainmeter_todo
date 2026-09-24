@@ -80,22 +80,37 @@ public sealed partial class MainWindow
 
     private void ConfigurePlugin(string id) => _ = ShowPluginConfigAsync(id);
 
-    private void RunInstalledPlugin(string id, string capability)
+    private async void RunInstalledPlugin(string id, string capability)
     {
         var verb = capability == "value_provider" ? "Values" :
             capability == "todo_source" ? "Sync" : "";
         if (verb == "") { ShowMessage("此插件由日历按需调用，无需手动执行。"); return; }
         try
         {
-            Process.Start(new ProcessStartInfo(Path.Combine(todoRoot, "PluginHost.exe"))
+            using var process = Process.Start(new ProcessStartInfo(Path.Combine(todoRoot, "PluginHost.exe"))
             {
                 UseShellExecute = false,
                 CreateNoWindow = true,
                 ArgumentList = { verb, id }
-            });
+            }) ?? throw new InvalidOperationException("无法启动插件。");
+            await process.WaitForExitAsync();
+            if (capability == "todo_source") await ShowPendingPluginConfirmationAsync(id);
             Render();
         }
         catch (Exception ex) { ShowMessage("插件未启动：" + ex.Message); }
+    }
+
+    private async Task ShowPendingPluginConfirmationAsync(string id)
+    {
+        using var job = ReadJson(Path.Combine(pluginDataRoot, "PluginJobs", id + ".json"));
+        if (job is null || Value(job.RootElement, "state") != "attention" ||
+            Value(job.RootElement, "resume_action") == "") return;
+        using var prompt = Process.Start(new ProcessStartInfo(Path.Combine(todoRoot, "TodoHost.exe"))
+        {
+            UseShellExecute = false, CreateNoWindow = true,
+            ArgumentList = { "PluginConfirmAttention", id }
+        }) ?? throw new InvalidOperationException("无法打开 AI 评分确认。");
+        await prompt.WaitForExitAsync();
     }
 
     private string InstalledPluginStatus(string id, bool enabled)
@@ -141,7 +156,29 @@ public sealed partial class MainWindow
         }
         if (actionId != "test_connection")
         {
-            StartPluginUtility("TodoHost.exe", "PluginAction", id, actionId);
+            if (id == "io.github.kevendai.arxiv" &&
+                (actionId == "sync_with_ai" || actionId == "rescore"))
+            {
+                try
+                {
+                    var rescore = actionId == "rescore";
+                    var start = new ProcessStartInfo(
+                        Path.Combine(todoRoot, rescore ? "TodoHost.exe" : "PluginHost.exe"))
+                    {
+                        UseShellExecute = false, CreateNoWindow = true
+                    };
+                    start.ArgumentList.Add(rescore ? "PluginRescore" : "PluginAction");
+                    start.ArgumentList.Add(id);
+                    if (!rescore) start.ArgumentList.Add(actionId);
+                    using var process = Process.Start(start)
+                        ?? throw new InvalidOperationException("无法启动论文推荐。");
+                    await process.WaitForExitAsync();
+                    if (!rescore) await ShowPendingPluginConfirmationAsync(id);
+                    Render();
+                }
+                catch (Exception ex) { ShowMessage("论文推荐未完成：" + ex.Message); }
+            }
+            else StartPluginUtility("TodoHost.exe", "PluginAction", id, actionId);
             return;
         }
         var resultPath = Path.Combine(Path.GetTempPath(), "rw-plugin-test-" +

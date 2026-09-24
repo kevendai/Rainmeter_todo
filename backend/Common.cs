@@ -1148,6 +1148,29 @@ namespace RainmeterBackend
             return ConfirmRisk(text, title, note, confirmText, false);
         }
 
+        // Only tile refresh offers a day-long snooze. A plugin-center run uses
+        // ConfirmRisk instead and always asks again on its next explicit run.
+        public static DialogResult ConfirmPaidWithSnooze(string text, string title, string note)
+        {
+            if(Environment.GetEnvironmentVariable("RAINMETER_UI_SMOKE")=="1"&&
+                Environment.GetEnvironmentVariable("RAINMETER_UI_SMOKE_CHOICE")=="snooze")
+                return DialogResult.Ignore;
+            Font bodyFont=UiFont(10F);
+            Size measured=TextRenderer.MeasureText(text??"",bodyFont,new Size(400,Int32.MaxValue),TextFormatFlags.WordBreak);
+            int messageHeight=Math.Max(72,measured.Height+34),formHeight=270+(messageHeight-72);
+            Form form=Form(title,520,formHeight);Heading(form,title,note);
+            Label message=new Label{Text=text,Left=26,Top=98,Width=468,Height=messageHeight,
+                ForeColor=Text,BackColor=Surface,Padding=new Padding(14,14,14,8),Font=bodyFont};
+            Round(message,10);form.Controls.Add(message);
+            int top=formHeight-66;
+            Button snooze=Button("今天不再提醒",26,top,142,DialogResult.Ignore);
+            Button cancel=Button("暂不使用",284,top,96,DialogResult.No);
+            Button confirm=PrimaryButton("使用 AI 评分",388,top,106,DialogResult.Yes);
+            form.Controls.AddRange(new Control[]{snooze,cancel,confirm});
+            form.CancelButton=cancel;
+            return form.ShowDialog();
+        }
+
         private static bool ConfirmRisk(string text, string title, string note, string confirmText, bool danger)
         {
             Font bodyFont = UiFont(10F), buttonFont = UiFont(9F);
