@@ -64,6 +64,7 @@ public sealed partial class MainWindow
         content.AddHandler(UIElement.PointerWheelChangedEvent,
             new PointerEventHandler((_, args) =>
             {
+                if (args.Handled) return;
                 if (scroller.ScrollableHeight <= 0) return;
                 var delta = args.GetCurrentPoint(scroller).Properties.MouseWheelDelta;
                 if (delta == 0) return;

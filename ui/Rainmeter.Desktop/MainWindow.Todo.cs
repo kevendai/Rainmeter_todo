@@ -5,6 +5,7 @@ using System.Text.Json.Nodes;
 using Microsoft.UI.Composition.SystemBackdrops;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media;
 using Microsoft.UI.Xaml.Media.Animation;
 using Windows.Graphics;
@@ -83,6 +84,15 @@ public sealed partial class MainWindow
             var box = EditorControl(new ComboBox { MinWidth = 78 });
             for (var value = 0; value < count; value++) box.Items.Add(value.ToString("00"));
             box.SelectedIndex = selected;
+            box.AddHandler(UIElement.PointerWheelChangedEvent,
+                new PointerEventHandler((_, args) =>
+                {
+                    if (box.IsDropDownOpen) return;
+                    var delta = args.GetCurrentPoint(box).Properties.MouseWheelDelta;
+                    if (delta == 0) return;
+                    box.SelectedIndex = Math.Clamp(box.SelectedIndex - Math.Sign(delta), 0, count - 1);
+                    args.Handled = true;
+                }), true);
             return box;
         }
         var availableHour = TimePart(24, initialStart?.Hour ?? 9);
