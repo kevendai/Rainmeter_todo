@@ -72,7 +72,7 @@ public sealed partial class MainWindow
             var fieldRows = Items(model.RootElement, "fields").ToArray();
             var edits = new Dictionary<string, Func<object?>>();
             var clearSecrets = new Dictionary<string, CheckBox>();
-            var sections = new StackPanel { Width = 530, Spacing = 16 };
+            var sections = new StackPanel { Spacing = 16, HorizontalAlignment = HorizontalAlignment.Stretch };
             sections.Children.Add(Text("调整“" + name + "”的运行设置。敏感项只在保存时提交，留空保持原值。", 13, muted: true));
             var grouped = fieldRows.GroupBy(field => Value(field, "section"));
             foreach (var group in grouped)
@@ -166,7 +166,7 @@ public sealed partial class MainWindow
             var error = Text("", 12, muted: true);
             sections.Children.Add(error);
             var dialog = EditorDialog(name + " · 配置", sections, "保存配置");
-            dialog.Width = 710;
+            dialog.Width = 760;
             if (dialog.Content is ScrollViewer scroller) scroller.MaxHeight = 640;
             dialog.PrimaryButtonClick += async (_, args) =>
             {

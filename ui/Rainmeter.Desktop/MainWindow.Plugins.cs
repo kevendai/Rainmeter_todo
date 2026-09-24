@@ -139,7 +139,42 @@ public sealed partial class MainWindow
                 Text(warning == "" ? "确定执行此插件操作？" : warning, 14), "继续执行");
             if (await dialog.ShowAsync() != ContentDialogResult.Primary) return;
         }
-        StartPluginUtility("TodoHost.exe", "PluginAction", id, actionId);
+        if (actionId != "test_connection")
+        {
+            StartPluginUtility("TodoHost.exe", "PluginAction", id, actionId);
+            return;
+        }
+        var resultPath = Path.Combine(Path.GetTempPath(), "rw-plugin-test-" +
+            Guid.NewGuid().ToString("N") + ".json");
+        string message;
+        try
+        {
+            using var process = Process.Start(new ProcessStartInfo(Path.Combine(todoRoot, "PluginHost.exe"))
+            {
+                UseShellExecute = false,
+                CreateNoWindow = true,
+                ArgumentList = { "PluginAction", id, actionId, "", resultPath }
+            }) ?? throw new InvalidOperationException("无法启动插件测试。");
+            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(60));
+            try { await process.WaitForExitAsync(timeout.Token); }
+            catch (OperationCanceledException)
+            {
+                if (!process.HasExited) process.Kill();
+                throw;
+            }
+            using var result = ReadJson(resultPath);
+            if (result is null)
+                throw new InvalidOperationException("插件未返回测试结果。");
+            var ok = Value(result.RootElement, "ok") == "True";
+            var detail = ok && result.RootElement.TryGetProperty("payload", out var payload)
+                ? Value(payload, "summary") : Value(result.RootElement, "error");
+            message = (ok ? "连接测试成功" : "连接测试失败") +
+                (string.IsNullOrWhiteSpace(detail) ? "。" : "：" + detail);
+        }
+        catch (OperationCanceledException) { message = "连接测试超时，请检查网络或插件配置。"; }
+        catch (Exception ex) { message = "连接测试未完成：" + ex.Message; }
+        finally { if (File.Exists(resultPath)) File.Delete(resultPath); }
+        await EditorDialog("测试连接", Text(message, 14), "确定").ShowAsync();
     }
 
     private Button PluginMoreActions(string id, JsonElement? manifest)

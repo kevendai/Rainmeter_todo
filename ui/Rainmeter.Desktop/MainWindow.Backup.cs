@@ -38,7 +38,7 @@ public sealed partial class MainWindow
         var full = new CheckBox { Content = "同时备份待办和本地日程", IsChecked = false };
         var hint = Text("留空则不设密码，备份文件不具备保密性；设置密码时至少 10 个字符。", 12, muted: true);
         var error = Text("", 12, muted: true);
-        var fields = new StackPanel { Width = 420, Spacing = 14 };
+        var fields = new StackPanel { Spacing = 14, HorizontalAlignment = HorizontalAlignment.Stretch };
         fields.Children.Add(Text(exporting ? "选择备份内容，并决定是否用密码保护。" : "输入备份密码；如果导出时未设置密码，这里保持空白。", 13, muted: true));
         fields.Children.Add(BackupPasswordRow(password));
         if (exporting)
@@ -129,7 +129,7 @@ public sealed partial class MainWindow
             var configuration = new CheckBox { Content = "配置与凭据", IsChecked = true };
             var data = new CheckBox { Content = "待办和本地日程", IsChecked = hasData, IsEnabled = hasData };
             var warning = Text("所选内容会覆盖本机对应数据。导入前会建立临时回滚副本。", 12, muted: true);
-            var fields = new StackPanel { Width = 420, Spacing = 12 };
+            var fields = new StackPanel { Spacing = 12, HorizontalAlignment = HorizontalAlignment.Stretch };
             fields.Children.Add(Text("备份来自版本 " + Value(preview, "app_version", "未知"), 13));
             fields.Children.Add(configuration);
             fields.Children.Add(data);

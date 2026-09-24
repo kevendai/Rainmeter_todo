@@ -122,7 +122,7 @@ public sealed partial class MainWindow
             extras.Visibility = extras.Visibility == Visibility.Visible
                 ? Visibility.Collapsed : Visibility.Visible);
         moreToggle.HorizontalAlignment = HorizontalAlignment.Left;
-        var fields = new StackPanel { Spacing = 16, Width = 420 };
+        var fields = new StackPanel { Spacing = 16, HorizontalAlignment = HorizontalAlignment.Stretch };
         fields.Children.Add(Text(id is null ? "为这一天留一段时间。桌面日程磁贴会同步显示。" : "修改日程信息并同步到原来的日历来源。", 13, muted: true));
         fields.Children.Add(source);
         fields.Children.Add(title);

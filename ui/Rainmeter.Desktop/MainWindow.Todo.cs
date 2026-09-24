@@ -93,7 +93,7 @@ public sealed partial class MainWindow
             schedule.Visibility = schedule.Visibility == Visibility.Visible
                 ? Visibility.Collapsed : Visibility.Visible);
         timeToggle.HorizontalAlignment = HorizontalAlignment.Left;
-        var fields = new StackPanel { Spacing = 16, Width = 420 };
+        var fields = new StackPanel { Spacing = 16, HorizontalAlignment = HorizontalAlignment.Stretch };
         fields.Children.Add(Text(id is null ? "把想做的事记下来，之后仍会显示在桌面磁贴。" : "调整内容与时间，桌面磁贴会同步更新。", 13, muted: true));
         fields.Children.Add(title);
         fields.Children.Add(targetRow);

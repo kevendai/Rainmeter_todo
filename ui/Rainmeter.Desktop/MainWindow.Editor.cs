@@ -19,6 +19,17 @@ public sealed partial class MainWindow
         control.BorderThickness = new Thickness(1);
         control.CornerRadius = new CornerRadius(9);
         control.Foreground = Ink;
+        control.HorizontalAlignment = HorizontalAlignment.Stretch;
+        if (control is TextBox text)
+        {
+            text.VerticalContentAlignment = text.AcceptsReturn ? VerticalAlignment.Top : VerticalAlignment.Center;
+            text.Padding = text.AcceptsReturn ? new Thickness(12, 10, 12, 10) : new Thickness(12, 8, 12, 8);
+        }
+        else if (control is PasswordBox password)
+        {
+            password.VerticalContentAlignment = VerticalAlignment.Center;
+            password.Padding = new Thickness(12, 8, 12, 8);
+        }
         control.Resources["TextControlBorderBrushFocused"] = PrimaryFill;
         return control;
     }
@@ -52,9 +63,10 @@ public sealed partial class MainWindow
                 Content = content,
                 MaxHeight = 560,
                 VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
-                HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled
+                HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
+                HorizontalContentAlignment = HorizontalAlignment.Stretch
             },
-            Width = 600,
+            Width = 680,
             PrimaryButtonText = primaryText,
             PrimaryButtonStyle = primaryStyle,
             CloseButtonText = "取消",
@@ -64,7 +76,7 @@ public sealed partial class MainWindow
         dialog.Resources["AccentFillColorDefaultBrush"] = PrimaryFill;
         dialog.Resources["AccentFillColorSecondaryBrush"] = PrimaryFill;
         if (dialog.Content is ScrollViewer scroller)
-            ForwardHandledWheel(scroller, scroller);
+            ForwardHandledWheel(content, scroller);
         return dialog;
     }
 
@@ -85,11 +97,19 @@ public sealed partial class MainWindow
                     }
                     return;
                 }
-                if (scroller.ScrollableHeight <= 0) return;
+                // Unhandled wheel events belong to the native ScrollViewer. Forward only
+                // events consumed by child controls, otherwise scrolling is applied twice.
+                if (!args.Handled || scroller.ScrollableHeight <= 0) return;
                 var delta = args.GetCurrentPoint(scroller).Properties.MouseWheelDelta;
                 if (delta == 0) return;
-                scroller.ChangeView(null, Math.Clamp(scroller.VerticalOffset - delta / 2.0,
-                    0, scroller.ScrollableHeight), null, true);
+                var next = Math.Clamp(scroller.VerticalOffset - delta / 2.0,
+                    0, scroller.ScrollableHeight);
+                if (Math.Abs(next - scroller.VerticalOffset) < 0.5)
+                {
+                    args.Handled = false;
+                    return;
+                }
+                scroller.ChangeView(null, next, null, true);
                 args.Handled = true;
             }), true);
     }
