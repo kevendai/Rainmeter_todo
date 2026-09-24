@@ -503,6 +503,19 @@ internal static class TranslateTencentProbe
         Expect(RunHost("PluginAction " + PluginId + " test_connection \"" + input + "\" \"" + output + "\"") == 0, "test_connection 第二次也成功");
         Expect(server.Requests - before == 2, "test_connection 不走缓存（第二次仍然真的打了接口）");
 
+        // Match the current settings UI: Secret ID is a regular config field,
+        // while Secret Key is stored only in the DPAPI-protected secret file.
+        Dictionary<string, object> uiConfig = JsonUtil.LoadObject(Path.Combine(dataRoot, "config.json"));
+        uiConfig["secret_id"] = SecretId;
+        JsonUtil.SaveAtomic(Path.Combine(dataRoot, "config.json"), uiConfig);
+        JsonUtil.WriteDpapiJson(Path.Combine(dataRoot, "secret.dat"),
+            new Dictionary<string, object>{{"secret_key", SecretKey}});
+        output = Path.Combine(dir, "ui-settings.json");
+        Expect(RunHost("PluginAction " + PluginId + " test_connection \"" + input + "\" \"" + output + "\"") == 0,
+            "配置界面保存的 Secret ID 与 Secret Key 可用于测试连接");
+        WriteConfig(server.Url, "en", "zh-CN", true, 200);
+        WriteSecret(true);
+
         // 额度用完时 [测试连接] 必须如实报错，不能假装成功。
         server.ErrorCode = "FailedOperation.NoFreeAmount";
         server.Mode = "error_code";

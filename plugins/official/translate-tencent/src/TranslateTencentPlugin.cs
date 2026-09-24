@@ -347,7 +347,10 @@ internal static class TranslateTencentPlugin
         client.TargetLanguage=JsonUtil.String(config,"target_language",DefaultTargetLanguage).Trim();
         if(client.TargetLanguage=="")client.TargetLanguage=DefaultTargetLanguage;
         client.UseCache=JsonUtil.Bool(config,"use_local_cache",true);
-        client.SecretId=JsonUtil.String(secret,"secret_id","").Trim();
+        // The settings schema stores Secret ID in config.json; older installs
+        // may still have it in secret.dat. Prefer the value shown by the UI.
+        client.SecretId=FirstNonEmpty(JsonUtil.String(config,"secret_id",""),
+            JsonUtil.String(secret,"secret_id","")).Trim();
         client.SecretKey=JsonUtil.String(secret,"secret_key","").Trim();
         client.TimeoutSeconds=Clamp(JsonUtil.Int(config,"timeout_seconds",DefaultTimeoutSeconds),10,600);
         client.MaxTexts=Clamp(JsonUtil.Int(config,"max_texts_per_call",DefaultMaxTexts),1,MaxTextsHardLimit);
@@ -917,6 +920,9 @@ internal static class TranslateTencentPlugin
         if(BuildClient(new Dictionary<string,object>{{"use_local_cache",false}},new Dictionary<string,object>()).UseCache)return 76;
         if(NormalizeHttpUrl("tmt.tencentcloudapi.com")!="https://tmt.tencentcloudapi.com")return 76;
         if(BuildClient(new Dictionary<string,object>(),new Dictionary<string,object>{{"secret_id","id"},{"secret_key","key"}}).SecretKey!="key")return 76;
+        Client uiCredentials=BuildClient(new Dictionary<string,object>{{"secret_id","ui-id"}},
+            new Dictionary<string,object>{{"secret_id","legacy-id"},{"secret_key","key"}});
+        if(uiCredentials.SecretId!="ui-id"||uiCredentials.SecretKey!="key")return 76;
         if(SafeText("a\r\nb").IndexOf('\n')>=0)return 76;
         // 密钥绝不能出现在错误文案里（错误文案会进 service-call.log 之外的插件日志与界面）。
         Client keyed=BuildClient(new Dictionary<string,object>(),new Dictionary<string,object>{{"secret_id","AKID1234567890"},{"secret_key","topsecret"}});
