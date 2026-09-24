@@ -97,19 +97,16 @@ public sealed partial class MainWindow
                     }
                     return;
                 }
-                // Unhandled wheel events belong to the native ScrollViewer. Forward only
-                // events consumed by child controls, otherwise scrolling is applied twice.
-                if (!args.Handled || scroller.ScrollableHeight <= 0) return;
+                // Handle the wheel on the content before the parent ScrollViewer sees it.
+                // Cards, text fields and pickers do not consistently let WinUI's native
+                // wheel handling run, particularly after reaching the top edge.
+                if (scroller.ScrollableHeight <= 0) return;
                 var delta = args.GetCurrentPoint(scroller).Properties.MouseWheelDelta;
                 if (delta == 0) return;
                 var next = Math.Clamp(scroller.VerticalOffset - delta / 2.0,
                     0, scroller.ScrollableHeight);
-                if (Math.Abs(next - scroller.VerticalOffset) < 0.5)
-                {
-                    args.Handled = false;
-                    return;
-                }
-                scroller.ChangeView(null, next, null, true);
+                if (Math.Abs(next - scroller.VerticalOffset) >= 0.5)
+                    scroller.ChangeView(null, next, null, true);
                 args.Handled = true;
             }), true);
     }
