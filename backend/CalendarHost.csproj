@@ -33,6 +33,7 @@
     <Compile Include="CalendarRecurrence.cs" />
     <Compile Include="CalendarRules.cs" />
     <Compile Include="CalendarService.cs" />
+    <Compile Include="CalendarServerUi.cs" />
     <Compile Include="CalendarStore.cs" />
   </ItemGroup>
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />

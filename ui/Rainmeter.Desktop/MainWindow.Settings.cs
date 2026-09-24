@@ -38,6 +38,10 @@ public sealed partial class MainWindow
         PageContent.Children.Add(SettingsRow(Symbol.AllApps, "桌面磁贴大小",
             "只调整待办和日程磁贴；管理窗口可直接拖动边缘改变大小。", Row(scale,
                 Action("应用", () => Todo("UiTileScale", (scale.SelectedItem as ComboBoxItem)?.Tag?.ToString() ?? "auto"), true))));
+        PageContent.Children.Add(Text("同步与服务", 18, true));
+        PageContent.Children.Add(SettingsRow(Symbol.Calendar, "日程同步服务器",
+            "配置 CalDAV 的服务器地址、端口和账号；可选用 SSDP 自动发现的 IP。",
+            Action("配置服务器", () => _ = ShowCalendarServerAsync())));
         PageContent.Children.Add(Text("数据与维护", 18, true));
         PageContent.Children.Add(SettingsRow(Symbol.Save, "用户配置备份",
             "可选择是否设置密码；导入前预览并选择覆盖范围。", Row(

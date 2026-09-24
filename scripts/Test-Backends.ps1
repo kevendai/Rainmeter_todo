@@ -19,6 +19,7 @@ try {
     $todoLayout = Join-Path $build 'TodoLayoutProbe.exe'
     $calendarLayout = Join-Path $build 'CalendarLayoutProbe.exe'
     $calendarRecurrence = Join-Path $build 'CalendarRecurrenceProbe.exe'
+    $calendarServerUi = Join-Path $build 'CalendarServerUiProbe.exe'
     $addressProviderProbe = Join-Path $build 'AddressProviderProbe.exe'
     $pluginInstallerProbe = Join-Path $build 'PluginInstallerProbe.exe'
     $pluginEnvironmentProbe = Join-Path $build 'PluginEnvironmentProbe.exe'
@@ -66,6 +67,10 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'Calendar layout probe compilation failed' }
     & $csc /nologo /target:exe /main:CalendarRecurrenceProbe /optimize+ @refs "/out:$calendarRecurrence" @calendarSources (Join-Path $tests 'CalendarRecurrenceProbe.cs')
     if ($LASTEXITCODE -ne 0) { throw 'Calendar recurrence probe compilation failed' }
+    & $csc /nologo /target:exe /main:CalendarServerUiProbe /optimize+ @refs "/out:$calendarServerUi" @calendarSources (Join-Path $tests 'CalendarServerUiProbe.cs')
+    if ($LASTEXITCODE -ne 0) { throw 'Calendar server UI probe compilation failed' }
+    & $calendarServerUi
+    if ($LASTEXITCODE -ne 0) { throw 'Calendar server UI probe failed' }
     & $csc /nologo /target:exe /main:AddressProviderProbe /optimize+ @refs "/out:$addressProviderProbe" @calendarSources (Join-Path $tests 'AddressProviderProbe.cs')
     if ($LASTEXITCODE -ne 0) { throw 'Address provider probe compilation failed' }
     & $csc /nologo /target:exe /optimize+ /r:System.Web.Extensions.dll "/out:$fakePlugin" (Join-Path $tests 'FakePlugin.cs')
