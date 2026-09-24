@@ -42,6 +42,9 @@ public sealed partial class MainWindow
         var target = EditorControl(new TextBox { Header = "打开目标", PlaceholderText = "输入链接或选择本地文件", Text = existing?.Target ?? "" });
         var browse = Action("浏览文件…", () => _ = PickTodoTargetAsync(target));
         browse.VerticalAlignment = VerticalAlignment.Bottom;
+        browse.MinHeight = 36;
+        browse.Height = 36;
+        browse.Padding = new Thickness(10, 4, 10, 4);
         var targetRow = new Grid { ColumnSpacing = 10 };
         targetRow.ColumnDefinitions.Add(new ColumnDefinition());
         targetRow.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
@@ -74,13 +77,22 @@ public sealed partial class MainWindow
         var initialStart = ExistingLocalDate(existing?.AvailableFrom);
         var initialDue = ExistingLocalDate(existing?.DueAt);
         var availableDate = new CalendarDatePicker { Date = initialStart is null ? null : LocalPickerDate(initialStart.Value.DateTime) };
-        var availableTime = new TimePicker { Time = initialStart?.TimeOfDay ?? new TimeSpan(9, 0, 0) };
         var dueDate = new CalendarDatePicker { Date = initialDue is null ? null : LocalPickerDate(initialDue.Value.DateTime) };
-        var dueTime = new TimePicker { Time = initialDue?.TimeOfDay ?? new TimeSpan(18, 0, 0) };
+        ComboBox TimePart(int count, int selected)
+        {
+            var box = EditorControl(new ComboBox { MinWidth = 78 });
+            for (var value = 0; value < count; value++) box.Items.Add(value.ToString("00"));
+            box.SelectedIndex = selected;
+            return box;
+        }
+        var availableHour = TimePart(24, initialStart?.Hour ?? 9);
+        var availableMinute = TimePart(60, initialStart?.Minute ?? 0);
+        var dueHour = TimePart(24, initialDue?.Hour ?? 18);
+        var dueMinute = TimePart(60, initialDue?.Minute ?? 0);
         var error = Text("", 12, muted: true);
         var schedule = new StackPanel { Spacing = 12 };
-        schedule.Children.Add(EditorDateTimeRow("开始", availableDate, availableTime));
-        schedule.Children.Add(EditorDateTimeRow("截止", dueDate, dueTime));
+        schedule.Children.Add(CompactTodoTimeRow("开始", availableDate, availableHour, availableMinute));
+        schedule.Children.Add(CompactTodoTimeRow("截止", dueDate, dueHour, dueMinute));
         schedule.Children.Add(Text("日期留空表示不限定时间。", 12, muted: true));
         schedule.Visibility = initialStart is not null || initialDue is not null
             ? Visibility.Visible : Visibility.Collapsed;
@@ -107,7 +119,8 @@ public sealed partial class MainWindow
                 var draft = new TodoDraft(id, title.Text, target.Text, note.Text,
                     labelChoices.Where(choice => choice.IsChecked == true)
                         .Select(choice => choice.Content?.ToString() ?? "").Where(value => value != "").ToArray(),
-                    PickerIso(availableDate, availableTime), PickerIso(dueDate, dueTime));
+                    PickerIso(availableDate, availableHour, availableMinute),
+                    PickerIso(dueDate, dueHour, dueMinute));
                 todoRepository.Save(draft);
                 saved = true;
             }

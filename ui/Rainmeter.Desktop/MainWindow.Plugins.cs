@@ -46,20 +46,27 @@ public sealed partial class MainWindow
         catch (Exception ex) { ShowMessage("远端刷新失败，仍显示本地市场：" + ex.Message); }
     }
 
-    private async void InstallMarketPlugin(string id, string name)
+    private async void InstallMarketPlugin(string id, string name, bool installed, Button button)
     {
         var dialog = new ContentDialog
         {
             XamlRoot = Shell.XamlRoot,
-            Title = "安装插件？",
-            Content = Text("将从官方发布地址安装“" + name + "”。插件是可执行程序，请确认你信任它。", 14),
-            PrimaryButtonText = "安装",
+            Title = installed ? "更新插件？" : "安装插件？",
+            Content = Text("将从官方发布地址" + (installed ? "更新" : "安装") + "“" + name + "”。插件是可执行程序，请确认你信任它。", 14),
+            PrimaryButtonText = installed ? "更新" : "安装",
             CloseButtonText = "取消",
             DefaultButton = ContentDialogButton.Close
         };
         if (await dialog.ShowAsync() != ContentDialogResult.Primary) return;
+        button.IsEnabled = false;
+        button.Content = installed ? "更新中…" : "安装中…";
         try { await RunMarketCommandAsync("UiMarketInstall", id); Render(); }
-        catch (Exception ex) { ShowMessage("安装未完成：" + ex.Message); }
+        catch (Exception ex)
+        {
+            button.IsEnabled = true;
+            button.Content = installed ? "更新" : "安装插件";
+            ShowMessage((installed ? "更新" : "安装") + "未完成：" + ex.Message);
+        }
     }
 
     private void RenderPlugins()
@@ -85,7 +92,10 @@ public sealed partial class MainWindow
             toolbar.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
             toolbar.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
             var search = EditorControl(new TextBox { PlaceholderText = "搜索插件名称或用途",
-                HorizontalAlignment = HorizontalAlignment.Stretch });
+                HorizontalAlignment = HorizontalAlignment.Stretch,
+                VerticalContentAlignment = VerticalAlignment.Center,
+                Height = 40,
+                Padding = new Thickness(12, 0, 12, 0) });
             toolbar.Children.Add(search);
             var refresh = Action("刷新市场", RefreshMarket);
             Grid.SetColumn(refresh, 1);
@@ -98,6 +108,7 @@ public sealed partial class MainWindow
             PageContent.Children.Add(toolbar);
             if (records.Length == 0) { Empty("本地市场暂无插件。点击“刷新市场”获取索引。"); return; }
             var board = TileBoard();
+            board.ItemWidth = 280;
             board.ItemHeight = 262;
             var filter = new List<(FrameworkElement Card, string Keywords)>();
             foreach (var record in records)
@@ -117,10 +128,12 @@ public sealed partial class MainWindow
                 desc.TextTrimming = TextTrimming.CharacterEllipsis;
                 stack.Children.Add(desc);
                 stack.Children.Add(Text(installed ? "已安装" : "可安装", 12, true, !installed));
-                stack.Children.Add(Action(installed ? "查看已安装" : "安装插件",
-                    installed ? () => { pluginMarketSelected = false; Render(); } : () => InstallMarketPlugin(id, name), !installed));
+                Button installButton = null!;
+                installButton = Action(installed ? "更新" : "安装插件",
+                    () => InstallMarketPlugin(id, name, installed, installButton), true);
+                stack.Children.Add(installButton);
                 var tile = Card(stack, 18);
-                tile.Width = 314;
+                tile.Width = 265;
                 tile.Height = 246;
                 board.Children.Add(tile);
                 filter.Add((tile, (name + " " + description).ToLowerInvariant()));
@@ -140,6 +153,7 @@ public sealed partial class MainWindow
             PageContent.Children.Add(Text("已安装 · " + directories.Length, 16, true));
             if (directories.Length == 0) { Empty("还没有安装插件。前往插件市场探索扩展。"); return; }
             var board = TileBoard();
+            board.ItemWidth = 280;
             board.ItemHeight = 220;
             foreach (var directory in directories)
             {
@@ -157,7 +171,7 @@ public sealed partial class MainWindow
                 stack.Children.Add(Text("已安装到本机，可随时调整状态。", 12, muted: true));
                 stack.Children.Add(Action(enabled ? "禁用插件" : "启用插件", () => TogglePlugin(id), true));
                 var tile = Card(stack, 18);
-                tile.Width = 314;
+                tile.Width = 265;
                 tile.Height = 204;
                 board.Children.Add(tile);
             }

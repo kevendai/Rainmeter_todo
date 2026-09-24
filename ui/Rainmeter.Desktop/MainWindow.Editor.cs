@@ -64,10 +64,12 @@ public sealed partial class MainWindow
         content.AddHandler(UIElement.PointerWheelChangedEvent,
             new PointerEventHandler((_, args) =>
             {
-                if (!args.Handled || scroller.ScrollableHeight <= 0) return;
+                if (scroller.ScrollableHeight <= 0) return;
                 var delta = args.GetCurrentPoint(scroller).Properties.MouseWheelDelta;
+                if (delta == 0) return;
                 scroller.ChangeView(null, Math.Clamp(scroller.VerticalOffset - delta / 2.0,
                     0, scroller.ScrollableHeight), null, true);
+                args.Handled = true;
             }), true);
     }
 
@@ -82,6 +84,41 @@ public sealed partial class MainWindow
         if (date.Date is null) return null;
         var local = date.Date.Value.LocalDateTime.Date.Add(time.Time);
         return new DateTimeOffset(local, TimeZoneInfo.Local.GetUtcOffset(local)).ToString("O");
+    }
+
+    private static string? PickerIso(CalendarDatePicker date, ComboBox hour, ComboBox minute)
+    {
+        if (date.Date is null) return null;
+        var local = date.Date.Value.LocalDateTime.Date
+            .AddHours(hour.SelectedIndex).AddMinutes(minute.SelectedIndex);
+        return new DateTimeOffset(local, TimeZoneInfo.Local.GetUtcOffset(local)).ToString("O");
+    }
+
+    private StackPanel CompactTodoTimeRow(string label, CalendarDatePicker date,
+        ComboBox hour, ComboBox minute)
+    {
+        var row = new Grid { ColumnSpacing = 8 };
+        row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(145) });
+        row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(82) });
+        row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(82) });
+        row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(85) });
+        date.PlaceholderText = "选择日期";
+        date.HorizontalAlignment = HorizontalAlignment.Stretch;
+        row.Children.Add(date);
+        hour.HorizontalAlignment = HorizontalAlignment.Stretch;
+        Grid.SetColumn(hour, 1);
+        row.Children.Add(hour);
+        minute.HorizontalAlignment = HorizontalAlignment.Stretch;
+        Grid.SetColumn(minute, 2);
+        row.Children.Add(minute);
+        var clear = Action("清除日期", () => date.Date = null);
+        clear.MinHeight = 38;
+        Grid.SetColumn(clear, 3);
+        row.Children.Add(clear);
+        var section = new StackPanel { Spacing = 5 };
+        section.Children.Add(Text(label, 13, true));
+        section.Children.Add(row);
+        return section;
     }
 
     private StackPanel EditorDateTimeRow(string label, CalendarDatePicker date, TimePicker time)
