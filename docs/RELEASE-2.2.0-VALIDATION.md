@@ -9,6 +9,8 @@
 
 ## 可重复验证
 
+2026-09-26 的兼容包修补：实际 1.3.5 升级日志显示下载后 `Get-FileHash` 不可用，安装未开始。`tests/LegacyCompatHashProbe.ps1` 在 Windows PowerShell 5.1 中故意屏蔽该命令，验证打包后的兼容更新器仍能校验完整包、升级隔离安装并逐字节保留任务数据。发布时须更新 `v2.2.0` 标签下的 raw 兼容包，同时替换 Release 中 full/lite 兼容包及校验文件；旧客户端读取 raw 标签目录，仅替换 Release 资产不足以修复。
+
 1. 运行 `pwsh -File scripts/Test-Backends.ps1`。
 2. 运行 `.winui-tools/dotnet/dotnet.exe run --project ui/Rainmeter.Desktop.Tests/Rainmeter.Desktop.Tests.csproj -c Release`。
 3. 运行 `pwsh -File scripts/Build-ReleasePackages.ps1`。

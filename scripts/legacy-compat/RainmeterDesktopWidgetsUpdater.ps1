@@ -128,6 +128,14 @@ function Get-BytesSha256 {
     finally { $sha.Dispose() }
 }
 
+function Get-FileSha256 {
+    param([string]$Path)
+    $stream = [IO.File]::OpenRead($Path)
+    $sha = [Security.Cryptography.SHA256]::Create()
+    try { return ([BitConverter]::ToString($sha.ComputeHash($stream)) -replace '-', '').ToLowerInvariant() }
+    finally { $sha.Dispose(); $stream.Dispose() }
+}
+
 function Get-SkinsRoot {
     param([string]$Root)
     $value = if ($null -eq $Root) { '' } else { $Root.Trim().Trim('"') }
@@ -247,7 +255,7 @@ function Get-CanonicalPackage {
         throw ('Downloading ' + $asset + ' failed: ' + $_.Exception.Message)
     }
     if (-not (Test-Path -LiteralPath $zip -PathType Leaf)) { throw "Downloaded package is missing: $zip" }
-    $actual = (Get-FileHash -LiteralPath $zip -Algorithm SHA256).Hash.ToLowerInvariant()
+    $actual = Get-FileSha256 -Path $zip
     if ($actual -ne $expected) { throw 'Update package SHA256 verification failed.' }
     Write-Step "Verified SHA256 $actual"
     Unblock-File -LiteralPath $zip -ErrorAction SilentlyContinue
@@ -371,7 +379,7 @@ function Install-Skin {
     foreach ($name in $preservedBytes.Keys) {
         $destination = Join-Path $targetResources $name
         [IO.File]::WriteAllBytes($destination, $preservedBytes[$name])
-        $restored = (Get-FileHash -LiteralPath $destination -Algorithm SHA256).Hash.ToLowerInvariant()
+        $restored = Get-FileSha256 -Path $destination
         if ($restored -ne $preservedHashes[$name]) { throw "Restoring user data failed: $name" }
     }
 }
