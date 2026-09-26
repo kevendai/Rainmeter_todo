@@ -37,7 +37,7 @@ public sealed partial class MainWindow
         if (scale.SelectedIndex < 0) scale.SelectedIndex = 0;
         PageContent.Children.Add(SettingsRow(Symbol.AllApps, "桌面磁贴大小",
             "只调整待办和日程磁贴；管理窗口可直接拖动边缘改变大小。", Row(scale,
-                Action("应用", () => Todo("UiTileScale", (scale.SelectedItem as ComboBoxItem)?.Tag?.ToString() ?? "auto"), true))));
+                Action("应用", () => _ = ApplyTileScaleAsync((scale.SelectedItem as ComboBoxItem)?.Tag?.ToString() ?? "auto"), true))));
         PageContent.Children.Add(Text("同步与服务", 18, true));
         PageContent.Children.Add(SettingsRow(Symbol.Calendar, "日程同步服务器",
             "配置 CalDAV 的服务器地址、端口和账号；可选用 SSDP 自动发现的 IP。",
@@ -47,9 +47,64 @@ public sealed partial class MainWindow
             "可选择是否设置密码；导入前预览并选择覆盖范围。", Row(
                 Action("导出配置", () => _ = ExportBackupAsync()),
                 Action("导入配置", () => _ = ImportBackupAsync()))));
-        PageContent.Children.Add(SettingsRow(Symbol.Download, "检查更新",
-            "检查主程序的新版本；安装前会再次询问。", Action("检查更新", () => Todo("UiCheckUpdate"))));
+        var versionPath = Path.Combine(todoRoot, "app-version.txt");
+        var currentVersion = File.Exists(versionPath) ? File.ReadAllText(versionPath).Trim() : "未知";
+        PageContent.Children.Add(SettingsRow(Symbol.Download, "版本更新",
+            "当前版本 v" + currentVersion + " · 检查主程序新版本。", Action("检查更新", () => _ = CheckUpdateAsync())));
         PageContent.Children.Add(Text("数据目录  " + skinsRoot, 12, muted: true));
+    }
+
+    private async Task<int> RunTodoHostAsync(string action, string argument)
+    {
+        var exe = Path.Combine(todoRoot, "TodoHost.exe");
+        if (!File.Exists(exe)) throw new FileNotFoundException("待办宿主不存在。", exe);
+        using var process = Process.Start(new ProcessStartInfo(exe)
+        {
+            UseShellExecute = false,
+            CreateNoWindow = true,
+            ArgumentList = { action, argument }
+        }) ?? throw new InvalidOperationException("无法启动待办宿主。");
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        await process.WaitForExitAsync(timeout.Token);
+        return process.ExitCode;
+    }
+
+    private async Task ApplyTileScaleAsync(string value)
+    {
+        try
+        {
+            if (await RunTodoHostAsync("UiApplyTileScale", value) != 0)
+                throw new InvalidOperationException("磁贴大小未能应用。");
+            await ShowNoticeAsync("磁贴大小", "桌面磁贴大小已更新。");
+        }
+        catch (Exception ex) { await ShowNoticeAsync("调整磁贴失败", ex.Message); }
+    }
+
+    private async Task CheckUpdateAsync()
+    {
+        var resultPath = Path.Combine(Path.GetTempPath(), "rainmeter-update-" + Guid.NewGuid().ToString("N") + ".json");
+        try
+        {
+            await RunTodoHostAsync("UiCheckUpdateModel", resultPath);
+            using var result = ReadJson(resultPath);
+            if (result is null) throw new InvalidOperationException("未收到检查更新结果。");
+            var root = result.RootElement;
+            if (Value(root, "ok") != "True") throw new InvalidOperationException(Value(root, "error", "检查更新失败。"));
+            var tag = Value(root, "tag");
+            if (Value(root, "is_newer") != "True") { await ShowNoticeAsync("检查更新", "当前已是最新版本：" + tag); return; }
+            var content = new StackPanel { Spacing = 10 };
+            content.Children.Add(Text("发现新版本 " + tag, 17, true));
+            content.Children.Add(Text("是否启动升级程序？现有数据会在升级前保留。", 13, muted: true));
+            var dialog = EditorDialog("检查更新", content, "启动升级");
+            if (await dialog.ShowAsync() == ContentDialogResult.Primary)
+            {
+                if (await RunTodoHostAsync("UiStartUpdate", "") != 0)
+                    throw new InvalidOperationException("更新器未能启动，请查看程序日志。");
+                await ShowNoticeAsync("检查更新", "已启动升级程序，请按后续提示完成更新。");
+            }
+        }
+        catch (Exception ex) { await ShowNoticeAsync("检查更新失败", ex.Message); }
+        finally { try { File.Delete(resultPath); } catch { } }
     }
 
     private Border SettingsRow(Symbol icon, string title, string subtitle, FrameworkElement trailing)
@@ -100,6 +155,15 @@ public sealed partial class MainWindow
     {
         if (Content is FrameworkElement root) root.RequestedTheme = DarkTheme ? ElementTheme.Dark : ElementTheme.Light;
         Shell.Background = Canvas;
+        if (Microsoft.UI.Windowing.AppWindowTitleBar.IsCustomizationSupported())
+        {
+            AppWindow.TitleBar.ButtonBackgroundColor = Microsoft.UI.Colors.Transparent;
+            AppWindow.TitleBar.ButtonInactiveBackgroundColor = Microsoft.UI.Colors.Transparent;
+            AppWindow.TitleBar.ButtonForegroundColor = DarkTheme
+                ? Color.FromArgb(255, 244, 239, 249) : Color.FromArgb(255, 38, 30, 48);
+            AppWindow.TitleBar.ButtonHoverBackgroundColor = DarkTheme
+                ? Color.FromArgb(255, 75, 57, 91) : Color.FromArgb(255, 226, 215, 239);
+        }
         Sidebar.Background = DarkTheme
             ? studioStyle ? Brush(24, 16, 32, 192) : Brush(24, 16, 32, 235)
             : Brush(241, 235, 247, studioStyle ? 220 : 245);

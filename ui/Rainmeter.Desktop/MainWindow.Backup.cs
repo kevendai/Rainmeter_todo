@@ -108,9 +108,9 @@ public sealed partial class MainWindow
             var file = await picker.PickSaveFileAsync();
             if (file is null) return;
             await RunBackupCommandAsync("UiBackupExport", new { path = file.Path, password = choice.Password, full = choice.Full });
-            ShowMessage("配置已导出到 " + file.Path);
+            await ShowNoticeAsync("配置已导出", file.Path);
         }
-        catch (Exception ex) { ShowMessage("导出未完成：" + ex.Message); }
+        catch (Exception ex) { await ShowNoticeAsync("导出未完成", ex.Message); }
     }
 
     private async Task ImportBackupAsync()
@@ -150,8 +150,8 @@ public sealed partial class MainWindow
             await RunBackupCommandAsync("UiBackupApply", new { path = file.Path, password = choice.Password,
                 configuration = configuration.IsChecked == true, data = data.IsChecked == true });
             Render();
-            ShowMessage("备份已导入。敏感配置已重新绑定到当前 Windows 用户。 ");
+            await ShowNoticeAsync("配置已导入", "备份已导入。敏感配置已重新绑定到当前 Windows 用户。");
         }
-        catch (Exception ex) { ShowMessage("导入未完成：" + ex.Message); }
+        catch (Exception ex) { await ShowNoticeAsync("导入未完成", ex.Message); }
     }
 }

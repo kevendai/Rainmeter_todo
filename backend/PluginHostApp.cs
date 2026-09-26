@@ -93,7 +93,7 @@ internal static class PluginHostApp
             }
             else
             {
-                if (action == "Values" || (custom && pluginAction == "configure_discovery" && JsonUtil.Object(JsonUtil.Get(result.Payload,"values")).Count>0)) { UpdateValues(baseDir, id, result); if(result.Ok&&custom&&pluginAction=="configure_discovery")SetPluginEnabled(id,true); }
+                if (action == "Values") UpdateValues(baseDir, id, result);
                 bool importsTasks=sync||ActionImportsTasks(id,pluginAction);
                 if (result.Ok && !JobHasState(id,"cancelled") && (importsTasks || action == "Transform"))
                 {
@@ -133,7 +133,6 @@ internal static class PluginHostApp
         return attention;
     }
 
-    private static void SetPluginEnabled(string id,bool enabled){Dictionary<string,object> current=PluginRuntime.Current(id);current["enabled"]=enabled;JsonUtil.SaveAtomic(Path.Combine(PluginPaths.PluginRoot(id),"current.json"),current);}
 
     private static PluginCallResult RefreshAddressProvider(string baseDir,AddressProviderBinding provider)
     {
@@ -177,9 +176,9 @@ internal static class PluginHostApp
 
     private static int QueryTasks(string baseDir,string[] args)
     {
-        if(args.Length<3)throw new ArgumentException("QueryTasks 缺少输入或输出路径");Dictionary<string,object> request=JsonUtil.LoadObject(args[1]);HashSet<string> wanted=new HashSet<string>(JsonUtil.Array(JsonUtil.Get(request,"task_ids")).Select(Convert.ToString),StringComparer.OrdinalIgnoreCase);List<object> existing=new List<object>();
-        using(System.Threading.Mutex mutex=new System.Threading.Mutex(false,@"Global\RainmeterTodoState")){bool held=false;try{try{held=mutex.WaitOne(TimeSpan.FromSeconds(15));}catch(System.Threading.AbandonedMutexException){held=true;}if(!held)throw new TimeoutException("待办数据正忙");string path=Path.Combine(baseDir,"tasks.json");if(File.Exists(path)){Dictionary<string,object> state=JsonUtil.LoadObject(path);foreach(object raw in JsonUtil.Array(JsonUtil.Get(state,"tasks"))){string id=JsonUtil.String(JsonUtil.Object(raw),"id","");if(wanted.Contains(id))existing.Add(id);}}}finally{if(held)mutex.ReleaseMutex();}}
-        JsonUtil.SaveAtomic(args[2],new Dictionary<string,object>{{"ok",true},{"task_ids",existing}});return 0;
+        if(args.Length<3)throw new ArgumentException("QueryTasks 缺少输入或输出路径");Dictionary<string,object> request=JsonUtil.LoadObject(args[1]);HashSet<string> wanted=new HashSet<string>(JsonUtil.Array(JsonUtil.Get(request,"task_ids")).Select(Convert.ToString),StringComparer.OrdinalIgnoreCase);List<object> existing=new List<object>(),details=new List<object>();
+        using(System.Threading.Mutex mutex=new System.Threading.Mutex(false,@"Global\RainmeterTodoState")){bool held=false;try{try{held=mutex.WaitOne(TimeSpan.FromSeconds(15));}catch(System.Threading.AbandonedMutexException){held=true;}if(!held)throw new TimeoutException("待办数据正忙");string path=Path.Combine(baseDir,"tasks.json");if(File.Exists(path)){Dictionary<string,object> state=JsonUtil.LoadObject(path);foreach(object raw in JsonUtil.Array(JsonUtil.Get(state,"tasks"))){Dictionary<string,object> task=JsonUtil.Object(raw);string id=JsonUtil.String(task,"id","");if(wanted.Contains(id)){existing.Add(id);details.Add(new Dictionary<string,object>{{"id",id},{"title",JsonUtil.String(task,"title","")},{"note",JsonUtil.String(task,"note","")},{"available_from",JsonUtil.String(task,"available_from","")},{"due_at",JsonUtil.String(task,"due_at","")}});}}}}finally{if(held)mutex.ReleaseMutex();}}
+        JsonUtil.SaveAtomic(args[2],new Dictionary<string,object>{{"ok",true},{"task_ids",existing},{"tasks",details}});return 0;
     }
 
     private static PluginCallResult InvokeLocked(string id,string action,object input,string trigger,int timeout,bool exclusive,Action<Dictionary<string,object>> progress,Action onStart)
@@ -477,6 +476,22 @@ internal static class PluginHostApp
 
     private static void UpdateValues(string baseDir,string pluginId,PluginCallResult result)
     {
+        using(Mutex mutex=new Mutex(false,@"Global\RainmeterPluginValues"))
+        {
+            bool held=false;
+            try
+            {
+                try{held=mutex.WaitOne(TimeSpan.FromSeconds(15));}
+                catch(AbandonedMutexException){held=true;}
+                if(!held)throw new TimeoutException("插件动态值正忙");
+                UpdateValuesCore(baseDir,pluginId,result);
+            }
+            finally{if(held)mutex.ReleaseMutex();}
+        }
+    }
+
+    private static void UpdateValuesCore(string baseDir,string pluginId,PluginCallResult result)
+    {
         Dictionary<string,object> root=File.Exists(PluginPaths.Values)?JsonUtil.LoadObject(PluginPaths.Values):new Dictionary<string,object>();
         Dictionary<string,object> entries=JsonUtil.Object(JsonUtil.Get(root,"entries"));root["entries"]=entries;
         Dictionary<string,object> providers=JsonUtil.Object(JsonUtil.Get(root,"providers"));root["providers"]=providers;
@@ -512,6 +527,12 @@ internal static class PluginHostApp
         Dictionary<string, object> origin = JsonUtil.Object(JsonUtil.Get(task, "origin"));
         if (JsonUtil.Int(state, "version", 0) != 3 || JsonUtil.String(origin, "external_id", "") != "2609.01234") return 20;
 
+        Dictionary<string,object> english=new Dictionary<string,object>{{"title","(42) A paper title"}};
+        Dictionary<string,object> translated=new Dictionary<string,object>{{"title","(42) 一篇论文"},{"note","论文原标题：A paper title\r\narXiv ID：2609.01234"}};
+        if(!TodoExternalImport.TryRefreshPaperTranslation(english,translated)||JsonUtil.String(english,"title","")!="(42) 一篇论文")return 21;
+        Dictionary<string,object> customized=new Dictionary<string,object>{{"title","(42) 我的自定义标题"}};
+        if(TodoExternalImport.TryRefreshPaperTranslation(customized,translated)||JsonUtil.String(customized,"title","")!="(42) 我的自定义标题")return 22;
+
         string testDir = Path.Combine(Path.GetTempPath(), "RainmeterPluginHostSelfTest-" + Guid.NewGuid().ToString("N"));
         string include = Path.Combine(testDir, "Generated.inc");
         string first = "[MeterA]\r\nMeter=String\r\nText=" + new String('A', 32768) + "\r\n";
@@ -538,6 +559,17 @@ internal static class PluginHostApp
             one.Join();
             if (writerError != null) return 22;
             if (Directory.GetFiles(testDir, "*.tmp-*").Length != 0) return 23;
+            string shared=Path.Combine(testDir,"shared.json");
+            Exception atomicError=null;
+            Thread[] writers=new Thread[2];
+            for(int worker=0;worker<writers.Length;worker++)
+            {
+                int number=worker;
+                writers[worker]=new Thread(delegate(){try{for(int i=0;i<60;i++)JsonUtil.SaveAtomic(shared,new Dictionary<string,object>{{"worker",number},{"iteration",i}});}catch(Exception ex){atomicError=ex;}});
+                writers[worker].Start();
+            }
+            foreach(Thread writer in writers)writer.Join();
+            if(atomicError!=null||JsonUtil.LoadObject(shared).Count==0||Directory.GetFiles(testDir,"*.tmp-*").Length!=0)return 24;
             return 0;
         }
         finally

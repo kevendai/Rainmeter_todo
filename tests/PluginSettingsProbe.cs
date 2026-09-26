@@ -4,17 +4,12 @@ using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Reflection;
-using System.Windows.Forms;
 using RainmeterBackend;
 
 // Phase 7 离线探针：设置页的分组/高级项（规格 §7.4）、服务绑定的选择规则（§8）、
 // 以及「启用标题翻译」这类依赖行在无 provider 时必须置灰且**不改存储值**（§11-#7/#8）。
 //
-// 两段覆盖：
-//   1) 纯模型层：Parse / Group / Inspect / RequiresSatisfied / ApplyBindings；
-//   2) 真对话框：用反射调 TodoApp.ShowPluginConfig，靠一个 Timer 在窗体上做断言，
-//      最后直接把 DialogResult 置成 OK，让**保存路径**也在无人值守下真跑一遍。
-//      （宿主保存后会用本进程的副本当插件的 validate_settings 桩，所以 Main 带参时必须立即返回 0。）
+// 覆盖设置模型、服务绑定、配置读回及本地市场缓存；不依赖已删除的旧窗体。
 internal static class PluginSettingsProbe
 {
     private const string ConsumerId = "io.github.test.consumer";
@@ -38,16 +33,14 @@ internal static class PluginSettingsProbe
         Environment.SetEnvironmentVariable("RAINMETER_PLUGIN_ROOT", root);
         try
         {
-            Application.EnableVisualStyles();
             Fixture();
             PluginManifest manifest = PluginManifest.Load(PluginPaths.VersionRoot(ConsumerId, "1.0.0"));
             LayoutSection(manifest);
             ServiceSection(manifest);
             BindingSection(manifest);
-            UiSection(manifest);
+            ConfigApiSection();
             AddressSection();
             MarketSection();
-            StatusSection();
         }
         catch (Exception ex)
         {
@@ -302,6 +295,29 @@ internal static class PluginSettingsProbe
         Expect(!File.Exists(cache),"损坏缓存已清理");
     }
 
+    private static void ConfigApiSection()
+    {
+        string resultPath=Path.Combine(root,"config-model.json");
+        MethodInfo method=typeof(TodoApp).GetMethod("UiPluginConfigModel",BindingFlags.Static|BindingFlags.NonPublic);
+        Expect(method!=null,"新设置模型接口存在");
+        if(method==null)return;
+        Expect((int)method.Invoke(null,new object[]{ConsumerId,resultPath})==0,"新设置模型加载成功");
+        Dictionary<string,object> model=JsonUtil.LoadObject(resultPath);
+        Expect(JsonUtil.Bool(model,"ok",false),"新设置模型返回 ok");
+        List<Dictionary<string,object>> fields=JsonUtil.Array(JsonUtil.Get(model,"fields")).Select(JsonUtil.Object).ToList();
+        Dictionary<string,object> address=fields.FirstOrDefault(f=>JsonUtil.String(f,"key","")=="file_url");
+        Expect(address!=null&&JsonUtil.Bool(address,"address",false),"文件服务器地址仍是可编辑的地址字段");
+        Dictionary<string,object> translation=fields.FirstOrDefault(f=>JsonUtil.String(f,"key","")=="translate_enabled");
+        Expect(translation!=null&&JsonUtil.Bool(translation,"value",false),"依赖不可用时保留用户已存的翻译开关值");
+        MethodInfo settingValue=typeof(TodoApp).GetMethod("PluginSettingValue",BindingFlags.Static|BindingFlags.NonPublic);
+        Dictionary<string,object> legacySecret=new Dictionary<string,object>{{"paper_settings",new Dictionary<string,object>{{"TranslateEnabled",true},{"Scoring",new Dictionary<string,object>()}}}};
+        Expect(settingValue!=null&&(bool)settingValue.Invoke(null,new object[]{"io.github.kevendai.arxiv","translate_enabled",new Dictionary<string,object>(),legacySecret,new Dictionary<string,object>{{"default",false}}}),"旧论文配置根节点的翻译开关可正确回显");
+        Dictionary<string,object> prompt=fields.FirstOrDefault(f=>JsonUtil.String(f,"key","")=="title_prompt");
+        Expect(prompt!=null&&JsonUtil.Bool(prompt,"advanced",false),"标题提示词仍标记为高级设置");
+        Dictionary<string,object> service=fields.FirstOrDefault(f=>JsonUtil.String(f,"key","")=="translation_service");
+        Expect(service!=null&&JsonUtil.Array(JsonUtil.Get(service,"options")).Count>=2,"翻译服务候选由模型接口提供");
+    }
+
     private static void StatusSection()
     {
         Directory.CreateDirectory(PluginPaths.Jobs);
@@ -331,154 +347,4 @@ internal static class PluginSettingsProbe
         Expect((bool)remember.Invoke(null,new object[]{refreshed,AddressProviderId,completedJob}),"下一次任务完成仍会重建列表");
     }
 
-    // ---------- 4) 真对话框（含保存路径与置灰行） ----------
-
-    private static void UiSection(PluginManifest manifest)
-    {
-        Exception failure = RunDialog(manifest, delegate(Form form)
-        {
-            Label translateLabel = Labels(form).First(x => x.Text.StartsWith("启用标题翻译", StringComparison.Ordinal));
-            Expect(translateLabel.Text.Contains("翻译服务") && translateLabel.Text.Contains("点此"), "置灰行的标题写明缺哪个服务、点哪里修");
-            CheckBox translateBox = RowControl<CheckBox>(form, translateLabel);
-            Expect(translateBox != null && !translateBox.Enabled, "没有可用 provider 时「启用标题翻译」置灰（§11-#7）");
-            Expect(translateBox != null && translateBox.Checked, "置灰不改值：仍然是用户存过的 true（§11-#8）");
-            Expect(Labels(form).Count(x => x.Text == "基本") == 1 && Labels(form).Count(x => x.Text == "评分") == 1, "多组时渲染分组标题（§7.4）");
-
-            Label addressLabel=Labels(form).First(x=>x.Text.StartsWith("文件服务器地址",StringComparison.Ordinal));
-            TextBox addressBox=RowControl<TextBox>(form,addressLabel);
-            Expect(addressBox!=null&&addressBox.Enabled&&!addressBox.ReadOnly,"SSDP 接管主机时端口输入仍可编辑");
-            Equal("http://203.0.113.7:8080/dav",addressBox.Text,"设置页显示已接管 IP 和当前端口");
-            addressBox.Text="http://203.0.113.7:9800/dav";
-
-            ComboBox translation = RowControl<ComboBox>(form, Labels(form).First(x => x.Text == "翻译服务"));
-            Expect(translation != null && translation.Items.Count == 3, "候选与「不使用」都在下拉里");
-            Expect(translation != null && translation.Items.Cast<object>().Any(x => Convert.ToString(x) == "Provider A（可能收费）"), "收费 provider 在下拉里标出费用（§6.4）");
-            Expect(translation != null && translation.SelectedIndex == 0, "多候选且用户没选 ⇒ 下拉停在「不使用」（§8/#15）");
-
-            Button enable = Buttons(form).First(x => x.Visible && x.Text == "启用");
-            Label aiLabel = Labels(form).First(x => x.Text == "AI 服务");
-            enable.PerformClick();
-            ComboBox ai = RowControl<ComboBox>(form, aiLabel);
-            Expect(ai != null && Convert.ToString(ai.SelectedItem) == "Provider OFF", "点「启用」后就地刷新并选中该 provider");
-            Button aiFix = RowFixButton(form, aiLabel);
-            Expect(aiFix == null || !aiFix.Visible, "这一行可用了就不再显示修复入口");
-
-            Label advanced = Labels(form).First(x => x.Text.StartsWith("\u25B8 " + PluginSettingsLayout.AdvancedSection, StringComparison.Ordinal));
-            Label prompt = Labels(form).First(x => x.Text == "标题提示词");
-            Expect(!prompt.Visible, "高级项默认收起（§7.4）");
-            ControlOnClick(advanced);
-            Expect(prompt.Visible, "点开「高级设置」后高级项出现");
-            ControlOnClick(advanced);
-            Expect(!prompt.Visible, "再点一次收回去");
-        });
-        Expect(failure == null, "第一轮配置对话框：" + (failure == null ? "" : failure.Message));
-
-        Dictionary<string, object> config = JsonUtil.LoadObject(Path.Combine(PluginPaths.DataRoot(ConsumerId), "config.json"));
-        Expect(JsonUtil.Bool(config, "translate_enabled", false), "保存后开关仍是 true：置灰逻辑没有改写存储值（§11-#8）");
-        Expect(JsonUtil.Int(config, "title_threshold", -1) == 7, "保存真的落盘");
-        Equal("http://198.51.100.20:9800/dav",JsonUtil.String(config,"file_url",""),"设置保存用户修改的端口但不把 SSDP IP 写死");
-        Equal("http://203.0.113.7:9800/dav",DynamicPluginValues.BindForTarget(JsonUtil.String(config,"file_url",""),"test.file_server"),"运行时继续用 SSDP IP 和新端口");
-        Equal("", ServiceRegistry.BoundProvider(ConsumerId, "translation_provider@1"), "多候选且未选 ⇒ 一个字节都不写（§8/#15）");
-        Equal(ProviderOff, ServiceRegistry.BoundProvider(ConsumerId, "ai_provider@1"), "界面上启用的 provider 被记进绑定表");
-
-        // 第二轮：只留一个候选 ⇒ 自动绑定，且**设置页明确显示**（§8 第 1 行）。
-        SetEnabled(ProviderB, false);
-        failure = RunDialog(manifest, delegate(Form form)
-        {
-            CheckBox translateBox = RowControl<CheckBox>(form, Labels(form).First(x => x.Text.StartsWith("启用标题翻译", StringComparison.Ordinal)));
-            Expect(translateBox != null && translateBox.Enabled, "有可用 provider 时开关可用（§11-#7）");
-            Expect(translateBox != null && translateBox.Checked, "值仍然没被改过");
-            ComboBox translation = RowControl<ComboBox>(form, Labels(form).First(x => x.Text == "翻译服务"));
-            Expect(translation != null && translation.Items.Count == 2 && Convert.ToString(translation.SelectedItem) == "Provider A（可能收费）", "唯一候选自动绑定并在界面上显示出来（§8 第 1 行）");
-            Expect(Labels(form).Any(x => x.Text == "已启用"), "状态提示写明已启用");
-        });
-        Expect(failure == null, "第二轮配置对话框：" + (failure == null ? "" : failure.Message));
-        Equal(ProviderA, ServiceRegistry.BoundProvider(ConsumerId, "translation_provider@1"), "设置页把绑定写进 plugin-bindings.json");
-        Expect(File.ReadAllText(Path.Combine(PluginPaths.Logs, "service-call.log"), RuntimeUtil.Utf8NoBom)
-            .Contains("settings-bind " + ConsumerId + " translation_provider@1 -> " + ProviderA), "设置页写入也记进 service-call.log");
-    }
-
-    // ---------- 驱动配置对话框 ----------
-
-    private static Exception RunDialog(PluginManifest manifest, Action<Form> inspect)
-    {
-        Exception failure = null;
-        bool reached = false;
-        Timer timer = new Timer { Interval = 100 };
-        timer.Tick += delegate
-        {
-            Form form = null;
-            foreach (Form open in Application.OpenForms) if (open.Text == manifest.Name + " 设置") form = open;
-            if (form == null) return;
-            reached = true;
-            timer.Stop();
-            try { inspect(form); }
-            catch (Exception ex) { failure = ex; }
-            finally { form.DialogResult = DialogResult.OK; }
-        };
-        timer.Start();
-        try
-        {
-            Method("ShowPluginConfig").Invoke(null, new object[] { manifest });
-        }
-        catch (TargetInvocationException ex) { failure = ex.InnerException == null ? ex : ex.InnerException; }
-        finally { timer.Stop(); timer.Dispose(); }
-        if (!reached && failure == null) failure = new Exception("设置对话框没有出现");
-        return failure;
-    }
-
-    private static MethodInfo Method(string name)
-    {
-        return typeof(TodoApp).GetMethods(BindingFlags.NonPublic | BindingFlags.Static).First(x => x.Name == name);
-    }
-
-    private static IEnumerable<Control> Descendants(Control parent)
-    {
-        foreach (Control child in parent.Controls)
-        {
-            yield return child;
-            foreach (Control descendant in Descendants(child)) yield return descendant;
-        }
-    }
-
-    private static List<Label> Labels(Form form) { return Descendants(form).OfType<Label>().ToList(); }
-    private static List<Button> Buttons(Form form) { return Descendants(form).OfType<Button>().ToList(); }
-
-    // 一行里的控件：同一个容器里、与标题左对齐、且位置在标题下方的第一个该类型控件。
-    // 不比对精确 Top —— 窗体 Shown 时 UiScale 会按 DPI 重排（28 会被缩放取整），精确匹配在缩放机器上必挂。
-    private static T RowControl<T>(Form form, Label label) where T : Control
-    {
-        if (label == null || label.Parent == null) return null;
-        T best = null;
-        int bestTop = Int32.MaxValue;
-        foreach (Control child in label.Parent.Controls)
-        {
-            if (!(child is T) || child.Left > label.Left + 40 || child.Top <= label.Top) continue;
-            if (child.Top >= bestTop) continue;
-            best = (T)child; bestTop = child.Top;
-        }
-        return best;
-    }
-
-    // 服务行右侧的修复按钮（Left 靠右，不能按左对齐规则找）。
-    private static Button RowFixButton(Form form, Label label)
-    {
-        if (label == null || label.Parent == null) return null;
-        Button best = null;
-        int bestTop = Int32.MaxValue;
-        foreach (Control child in label.Parent.Controls)
-        {
-            if (!(child is Button) || child.Left <= label.Left + 40) continue;
-            if (child.Top <= label.Top || child.Top > label.Top + 80) continue;
-            if (child.Top >= bestTop) continue;
-            best = (Button)child; bestTop = child.Top;
-        }
-        return best;
-    }
-
-    // Label 没有 PerformClick，用 OnClick 直接触发它挂的处理器。
-    private static void ControlOnClick(Control control)
-    {
-        typeof(Control).GetMethod("OnClick", BindingFlags.NonPublic | BindingFlags.Instance).Invoke(control, new object[] { EventArgs.Empty });
-    }
 }

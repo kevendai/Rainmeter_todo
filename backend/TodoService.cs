@@ -1,7 +1,6 @@
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
-using System.Drawing;
 using System.Globalization;
 using System.IO;
 using System.Linq;
@@ -9,67 +8,26 @@ using System.Net;
 using System.Text;
 using System.Text.RegularExpressions;
 using System.Threading;
-using System.Windows.Forms;
 using RainmeterBackend;
 
 
 internal static partial class TodoApp
 {
-    private static int AddInteractive()
+    private static void RenderUiScaleSkins()
     {
-        EditorResult e = ShowEditor(null);
-        if (e == null) return 0;
-        return WithLockedState(delegate(Dictionary<string, object> state, ref bool refresh) {
-            int rolled = Normalize(state);
-            if (rolled > 0) Meta(state)["status"] = "已按任务策略自动归档 " + rolled + " 项";
-            Tasks(state).Add(NewTask(e, "manual"));
-            Meta(state)["status"] = "已新增待办";
-            Commit(state);
-            refresh = true;
-        });
-    }
-
-    private static int EditInteractive(string id)
-    {
-        Dictionary<string, object> snapshot = null;
-        int loaded = WithLockedState(delegate(Dictionary<string, object> state, ref bool refresh) {
-            Dictionary<string, object> task = Find(state, id);
-            if (task != null) snapshot = new Dictionary<string, object>(task);
-        });
-        if (loaded != 0 || snapshot == null) return loaded;
-        EditorResult e = ShowEditor(snapshot);
-        if (e == null) return 0;
-        return WithLockedState(delegate(Dictionary<string, object> state, ref bool refresh) {
-            Dictionary<string, object> task = Find(state, id);
-            if (task == null) return;
-            task["title"] = e.Title; task["target"] = e.Target; task["note"] = e.Note; task["labels"] = e.Labels.Cast<object>().ToList(); task["available_from"] = e.Available == "" ? null : (object)e.Available; task["due_at"] = e.Due == "" ? null : (object)e.Due;
-            Meta(state)["status"] = "已修改待办";
-            Commit(state);
-            refresh = true;
-        });
-    }
-
-    private static int ManageInteractive()
-    {
-        Dictionary<string, object> state = null;
-        int loaded = WithLockedState(delegate(Dictionary<string, object> current, ref bool refresh) { state = current; });
-        if (loaded != 0 || state == null) return loaded;
-        bool refreshAfter = false;
-        try { Manage(state, ref refreshAfter); if (refreshAfter) Refresh(); return 0; }
-        catch (Exception ex)
+        string todoExe=Path.Combine(ResourceDir,"TodoHost.exe");
+        using(Process todo=Process.Start(new ProcessStartInfo(todoExe,"Render"){UseShellExecute=false,CreateNoWindow=true}))
         {
-            return WithLockedState(delegate(Dictionary<string, object> current, ref bool refresh) {
-                Meta(current)["status"] = "操作失败：" + ex.Message;
-                Commit(current);
-                refresh = true;
-            });
+            if(todo!=null&&!todo.WaitForExit(15000))throw new Exception("待办磁贴刷新超时");
+            if(todo!=null&&todo.ExitCode!=0)throw new Exception("待办磁贴刷新失败");
         }
-    }
-
-    private static int SettingsInteractive()
-    {
-        try { ShowSettings(); return 0; }
-        catch (Exception ex) { if (Environment.GetEnvironmentVariable("RAINMETER_UI_SMOKE") == "1") Console.Error.WriteLine("Settings failed: " + ex.GetType().FullName + ": " + ex.Message); else LightUi.Error("设置失败：" + ex.Message); return 1; }
+        string calendarExe=Path.GetFullPath(Path.Combine(ResourceDir,"..","..","Calendar","@Resources","CalendarHost.exe"));
+        if(File.Exists(calendarExe))using(Process calendar=Process.Start(new ProcessStartInfo(calendarExe,"Render"){UseShellExecute=false,CreateNoWindow=true}))
+        {
+            if(calendar!=null&&!calendar.WaitForExit(15000))throw new Exception("日程磁贴刷新超时");
+            if(calendar!=null&&calendar.ExitCode!=0)throw new Exception("日程磁贴刷新失败");
+        }
+        RuntimeUtil.RefreshAll();
     }
 
     private delegate void LockedStateAction(Dictionary<string, object> state, ref bool refresh);

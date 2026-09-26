@@ -75,6 +75,8 @@ public sealed partial class MainWindow
             Action<string>? refreshAddress = null;
             var sections = new StackPanel { Spacing = 16, HorizontalAlignment = HorizontalAlignment.Stretch };
             sections.Children.Add(Text("调整“" + name + "”的运行设置。敏感项只在保存时提交，留空保持原值。", 13, muted: true));
+            if (Value(model.RootElement, "conversion_management") == "True")
+                sections.Children.Add(BuildCalendarConversionManager(id, model.RootElement));
             var grouped = fieldRows.GroupBy(field => Value(field, "section"));
             foreach (var group in grouped)
             {
@@ -220,7 +222,7 @@ public sealed partial class MainWindow
             var error = Text("", 12, muted: true);
             sections.Children.Add(error);
             var dialog = EditorDialog(name + " · 配置", sections, "保存配置");
-            dialog.Width = 760;
+            dialog.Width = Math.Min(680, Math.Max(360, Shell.ActualWidth - 80));
             if (dialog.Content is ScrollViewer scroller) scroller.MaxHeight = 640;
             dialog.PrimaryButtonClick += async (_, args) =>
             {
@@ -237,8 +239,17 @@ public sealed partial class MainWindow
                         .Select(entry => entry.Key).ToArray();
                     using var result = await PluginConfigCommandAsync("UiPluginConfigSave", id,
                         new { values, clear_secrets });
+                    using var saved = await PluginConfigCommandAsync("UiPluginConfigModel", id);
+                    foreach (var field in Items(saved.RootElement, "fields"))
+                    {
+                        var key = Value(field, "key");
+                        if (Value(field, "type") != "boolean" ||
+                            !values.TryGetValue(key, out var requested) || requested is not bool expected) continue;
+                        if ((ConfigFieldValue(field) == "True") != expected)
+                            throw new InvalidOperationException("“" + Value(field, "title") + "”未能保存，请重试。");
+                    }
                 }
-                catch (Exception ex) { error.Text = ex.Message; args.Cancel = true; }
+                catch (Exception ex) { error.Text = ex.Message; error.StartBringIntoView(); args.Cancel = true; }
                 finally { deferral.Complete(); }
             };
             DispatcherTimer? addressTimer = null;
@@ -265,6 +276,141 @@ public sealed partial class MainWindow
           }
         }
         catch (Exception ex) { ShowMessage("插件配置界面未能打开：" + ex.Message); }
+    }
+
+    private Border BuildCalendarConversionManager(string pluginId, JsonElement model)
+    {
+        var content = new StackPanel { Spacing = 12, HorizontalAlignment = HorizontalAlignment.Stretch };
+        content.Children.Add(Text("已转入待办的日程", 17, true));
+        content.Children.Add(Text("历史实例不再逐条显示；周期日程仅显示最近日期。仅取消下次会顺延日期，停止以后会从列表移除；已有待办会保留。", 12, muted: true));
+        var rows = new StackPanel { Spacing = 8, HorizontalAlignment = HorizontalAlignment.Stretch };
+        var status = Text("", 12, muted: true);
+        content.Children.Add(rows);
+        content.Children.Add(status);
+
+        void Populate(JsonElement source)
+        {
+            rows.Children.Clear();
+            var conversions = Items(source, "conversions").ToArray();
+            if (conversions.Length == 0)
+            {
+                rows.Children.Add(Text("目前没有日程转待办记录。", 13, muted: true));
+                return;
+            }
+            foreach (var conversion in conversions)
+            {
+                var occurrenceKey = Value(conversion, "occurrence_key");
+                var details = new StackPanel { Spacing = 3, VerticalAlignment = VerticalAlignment.Center };
+                details.Children.Add(Text(Value(conversion, "title", "未命名日程"), 14, true));
+                var date = Value(conversion, "date");
+                var isSeries = Value(conversion, "series") == "True";
+                var mode = isSeries ? "周期自动转入" : "仅本次";
+                var visibility = Value(conversion, "hide_event") == "True" ? "当前已隐藏" : "日程仍显示";
+                details.Children.Add(Text(string.Join(" · ", new[] { date, mode, visibility }.Where(x => x != "")), 12, muted: true));
+                var cancel = new Button
+                {
+                    Content = "取消转入",
+                    MinWidth = 84,
+                    MinHeight = 38,
+                    Padding = new Thickness(10, 0, 10, 0),
+                    CornerRadius = new CornerRadius(10),
+                    Background = EditorField,
+                    BorderBrush = EditorStroke,
+                    BorderThickness = new Thickness(1),
+                    Foreground = Ink,
+                    VerticalAlignment = VerticalAlignment.Center
+                };
+                var row = new Grid { ColumnSpacing = 12, HorizontalAlignment = HorizontalAlignment.Stretch };
+                row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+                row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+                row.Children.Add(details);
+                Grid.SetColumn(cancel, 1);
+                row.Children.Add(cancel);
+                var choices = new StackPanel
+                {
+                    Orientation = Orientation.Horizontal,
+                    Spacing = 8,
+                    Visibility = Visibility.Collapsed
+                };
+                Button ChoiceButton(string label)
+                {
+                    return new Button
+                    {
+                        Content = label, MinHeight = 34, Padding = new Thickness(10, 0, 10, 0),
+                        CornerRadius = new CornerRadius(9), Background = EditorField,
+                        BorderBrush = EditorStroke, BorderThickness = new Thickness(1), Foreground = Ink
+                    };
+                }
+                var skipNext = ChoiceButton("仅取消下次");
+                var stopFuture = ChoiceButton("停止以后自动转入");
+                var returnButton = ChoiceButton("返回");
+                choices.Children.Add(skipNext);
+                choices.Children.Add(stopFuture);
+                choices.Children.Add(returnButton);
+                void SetChoiceButtonsEnabled(bool enabled)
+                {
+                    skipNext.IsEnabled = enabled;
+                    stopFuture.IsEnabled = enabled;
+                    returnButton.IsEnabled = enabled;
+                }
+                var cardContent = new StackPanel { Spacing = 10 };
+                cardContent.Children.Add(row);
+                cardContent.Children.Add(choices);
+                async Task ExecuteCancelAsync(string cancelMode)
+                {
+                    SetChoiceButtonsEnabled(false);
+                    status.Text = "正在取消…";
+                    try
+                    {
+                        using var result = await PluginConfigCommandAsync("UiPluginConfigCancel", pluginId,
+                            new { occurrence_key = occurrenceKey, cancel_mode = cancelMode });
+                        using var latest = await PluginConfigCommandAsync("UiPluginConfigModel", pluginId);
+                        Populate(latest.RootElement);
+                        status.Text = cancelMode == "future" ? "已停止今后的自动转入，已有待办会保留。" : "已取消本次转入，日期已顺延。";
+                    }
+                    catch (Exception ex)
+                    {
+                        status.Text = "取消失败：" + ex.Message;
+                        cancel.IsEnabled = true;
+                        SetChoiceButtonsEnabled(true);
+                    }
+                }
+                skipNext.Click += async (_, _) => await ExecuteCancelAsync("once");
+                stopFuture.Click += async (_, _) => await ExecuteCancelAsync("future");
+                returnButton.Click += (_, _) =>
+                {
+                    choices.Visibility = Visibility.Collapsed;
+                    cancel.IsEnabled = true;
+                    status.Text = "";
+                };
+                cancel.Click += async (_, _) =>
+                {
+                    if (isSeries)
+                    {
+                        choices.Visibility = Visibility.Visible;
+                        cancel.IsEnabled = false;
+                        status.Text = "选择取消下次转入，或停止今后的自动转入；已有待办会保留。";
+                        return;
+                    }
+                    cancel.IsEnabled = false;
+                    await ExecuteCancelAsync("once");
+                };
+                var surface = new Border
+                {
+                    Background = EditorField,
+                    BorderBrush = EditorStroke,
+                    BorderThickness = new Thickness(1),
+                    CornerRadius = new CornerRadius(14),
+                    Padding = new Thickness(12, 10, 12, 10),
+                    HorizontalAlignment = HorizontalAlignment.Stretch,
+                    Child = cardContent
+                };
+                rows.Children.Add(surface);
+            }
+        }
+
+        Populate(model);
+        return Card(content, 16);
     }
 
     private Border BuildSsdpScanner(string id, Dictionary<string, Func<object?>> edits)

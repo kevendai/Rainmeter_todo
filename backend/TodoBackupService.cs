@@ -1,6 +1,5 @@
 using System;
 using System.Collections.Generic;
-using System.Drawing;
 using System.Globalization;
 using System.IO;
 using System.IO.Compression;
@@ -8,7 +7,6 @@ using System.Linq;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.RegularExpressions;
-using System.Windows.Forms;
 using RainmeterBackend;
 
 internal static partial class TodoApp
@@ -20,17 +18,6 @@ internal static partial class TodoApp
     private const int MaxBackupPlainBytes = 32 * 1024 * 1024;
     private static readonly byte[] BackupMagic = Encoding.ASCII.GetBytes("RWBACKUP");
 
-    private sealed class BackupPasswordResult
-    {
-        public string Password;
-        public bool FullBackup;
-    }
-
-    private sealed class BackupImportChoice
-    {
-        public bool Configuration;
-        public bool Data;
-    }
 
     private static string CalendarResourceDir
     {
@@ -62,44 +49,6 @@ internal static partial class TodoApp
         get { return Path.Combine(ResourceDir, "ui-theme.txt"); }
     }
 
-    private static string ExportUserBackupInteractive()
-    {
-        BackupPasswordResult request = ShowBackupPasswordDialog(true);
-        if (request == null) return "";
-        SaveFileDialog save = new SaveFileDialog {
-            Title = "导出 Rainmeter 用户配置",
-            Filter = "Rainmeter 加密备份 (*.rwbackup)|*.rwbackup",
-            DefaultExt = "rwbackup",
-            AddExtension = true,
-            FileName = "Rainmeter-用户备份-" + DateTime.Now.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture) + ".rwbackup"
-        };
-        if (save.ShowDialog() != DialogResult.OK) return "";
-        Dictionary<string, object> payload = BuildBackupPayload(request.FullBackup);
-        byte[] encrypted = EncryptBackup(JsonUtil.Serialize(payload), request.Password, BackupKdfIterations);
-        WriteBytesAtomic(save.FileName, encrypted);
-        return save.FileName;
-    }
-
-    private static string ImportUserBackupInteractive()
-    {
-        OpenFileDialog open = new OpenFileDialog {
-            Title = "导入 Rainmeter 用户配置",
-            Filter = "Rainmeter 加密备份 (*.rwbackup)|*.rwbackup|所有文件 (*.*)|*.*",
-            CheckFileExists = true,
-            Multiselect = false
-        };
-        if (open.ShowDialog() != DialogResult.OK) return "";
-        BackupPasswordResult password = ShowBackupPasswordDialog(false);
-        if (password == null) return "";
-        byte[] encrypted = File.ReadAllBytes(open.FileName);
-        Dictionary<string, object> payload = JsonUtil.Object(JsonUtil.Deserialize(DecryptBackup(encrypted, password.Password)));
-        UpgradeBackupPayload(payload);
-        ValidateBackupPayload(payload);
-        BackupImportChoice choice = ShowBackupImportPreview(payload);
-        if (choice == null || (!choice.Configuration && !choice.Data)) return "";
-        WithGlobalStateLocks(delegate { ApplyBackupPayload(payload, choice.Configuration, choice.Data); });
-        return "备份导入成功。\r\n\r\n敏感配置已使用当前 Windows 用户的 DPAPI 重新加密。";
-    }
 
     private static Dictionary<string, object> BuildBackupPayload(bool fullBackup)
     {
@@ -445,70 +394,6 @@ internal static partial class TodoApp
         return parsed.ToString("0.00", CultureInfo.InvariantCulture);
     }
 
-    private static BackupPasswordResult ShowBackupPasswordDialog(bool exporting)
-    {
-        Form form = LightUi.Form(exporting ? "导出加密备份" : "打开加密备份", 520, exporting ? 390 : 310);
-        LightUi.Heading(form, exporting ? "设置备份密码" : "输入备份密码", exporting ? "该密码用于在其他电脑上解密，无法找回。" : "密码只用于解密此备份，不会保存。");
-        TextBox password = PasswordField(form, "备份密码", 28, 104, 464, "");
-        TextBox confirm = null;
-        CheckBox full = null;
-        int buttonTop;
-        if (exporting)
-        {
-            confirm = PasswordField(form, "确认密码", 28, 198, 464, "");
-            full = new CheckBox { Left = 28, Top = 292, Width = 360, Height = 28, Text = "完整备份：同时包含待办和本地日程", ForeColor = LightUi.Text, BackColor = Color.Transparent, Font = new Font("Microsoft YaHei UI", 9.5F) };
-            form.Controls.Add(full);
-            buttonTop = 330;
-        }
-        else buttonTop = 250;
-        Button cancel = LightUi.Button("取消", 294, buttonTop, 92, DialogResult.Cancel);
-        Button ok = LightUi.PrimaryButton(exporting ? "继续导出" : "打开备份", 398, buttonTop, 94, DialogResult.None);
-        form.Controls.AddRange(new Control[] { cancel, ok });
-        form.CancelButton = cancel;
-        BackupPasswordResult result = null;
-        ok.Click += delegate {
-            if (password.Text.Length > 0 && password.Text.Length < 10) { LightUi.Error("设置密码时至少需要 10 个字符；也可以留空。"); return; }
-            if (exporting && password.Text != confirm.Text) { LightUi.Error("两次输入的备份密码不一致。"); return; }
-            result = new BackupPasswordResult { Password = password.Text, FullBackup = exporting && full.Checked };
-            form.DialogResult = DialogResult.OK;
-            form.Close();
-        };
-        form.ShowDialog();
-        return result;
-    }
-
-    private static BackupImportChoice ShowBackupImportPreview(Dictionary<string, object> payload)
-    {
-        Dictionary<string, object> components = JsonUtil.Object(JsonUtil.Get(payload, "components"));
-        bool hasData = JsonUtil.Get(components, "tasks") != null && JsonUtil.Get(components, "calendar_state") != null;
-        int taskCount = hasData ? JsonUtil.Array(JsonUtil.Get(JsonUtil.Object(JsonUtil.Get(components, "tasks")), "tasks")).Count : 0;
-        Dictionary<string, object> calendar = hasData ? JsonUtil.Object(JsonUtil.Get(components, "calendar_state")) : new Dictionary<string, object>();
-        int eventCount = hasData ? JsonUtil.Array(JsonUtil.Get(calendar, "local_events")).Count : 0;
-        int ruleCount = JsonUtil.Array(JsonUtil.Get(components, "calendar_rules")).Count;
-        string sourceVersion = JsonUtil.String(payload, "app_version", "未知");
-        string configVersion = JsonUtil.String(payload, "config_version", "未知");
-
-        Form form = LightUi.Form("确认导入内容", 560, 360);
-        LightUi.Heading(form, "确认导入内容", "应用版本 " + sourceVersion + "；配置版本 " + configVersion + "；导入前会建立临时回滚副本。");
-        CheckBox configuration = new CheckBox { Left = 32, Top = 112, Width = 490, Height = 54, Checked = true, Text = "配置与凭据\r\nCalDAV、论文、翻译、缩放和 " + ruleCount + " 条自动转入规则", ForeColor = LightUi.Text, BackColor = Color.Transparent, Font = new Font("Microsoft YaHei UI", 9.5F) };
-        CheckBox data = new CheckBox { Left = 32, Top = 180, Width = 490, Height = 54, Checked = hasData, Enabled = hasData, Text = hasData ? "完整用户数据\r\n" + taskCount + " 条待办、" + eventCount + " 条本地日程及转换记录（覆盖现有数据）" : "此备份不包含待办和本地日程", ForeColor = LightUi.Text, BackColor = Color.Transparent, Font = new Font("Microsoft YaHei UI", 9.5F) };
-        Label warning = LightUi.Label("导入的类别会覆盖当前对应内容；未勾选的类别保持不变。", 32, 246, 490);
-        Button cancel = LightUi.Button("取消", 326, 300, 96, DialogResult.Cancel);
-        Button import = LightUi.PrimaryButton("确认导入", 434, 300, 98, DialogResult.None);
-        form.Controls.AddRange(new Control[] { configuration, data, warning, cancel, import });
-        form.CancelButton = cancel;
-        BackupImportChoice result = null;
-        import.Click += delegate {
-            if (!configuration.Checked && !data.Checked) { LightUi.Error("请至少选择一类要导入的内容。"); return; }
-            string text = data.Checked ? "完整用户数据将覆盖当前待办和本地日程。确定继续吗？" : "所选配置将覆盖当前对应设置。确定继续吗？";
-            if (MessageBox.Show(text, "确认导入", MessageBoxButtons.YesNo, MessageBoxIcon.Warning) != DialogResult.Yes) return;
-            result = new BackupImportChoice { Configuration = configuration.Checked, Data = data.Checked };
-            form.DialogResult = DialogResult.OK;
-            form.Close();
-        };
-        form.ShowDialog();
-        return result;
-    }
 
     private static byte[] EncryptBackup(string json, string password, int iterations)
     {

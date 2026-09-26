@@ -16,10 +16,8 @@
     <Reference Include="mscorlib"><HintPath>$(MSBuildToolsPath)\mscorlib.dll</HintPath><Private>False</Private></Reference>
     <Reference Include="System" />
     <Reference Include="System.Core" />
-    <Reference Include="System.Drawing" />
     <Reference Include="System.Security" />
     <Reference Include="System.Web.Extensions" />
-    <Reference Include="System.Windows.Forms" />
     <Reference Include="System.Xml" />
   </ItemGroup>
   <ItemGroup>
@@ -31,11 +29,10 @@
     <Compile Include="ProviderMigration.cs" />
     <Compile Include="PluginSettingsLayout.cs" />
     <Compile Include="PluginPackageInstaller.cs" />
-    <Compile Include="PluginManagerForms.cs" />
+    <Compile Include="PluginServices.cs" />
     <Compile Include="PluginConfigUi.cs" />
     <Compile Include="TodoApp.cs" />
     <Compile Include="TodoBackupService.cs" />
-    <Compile Include="TodoForms.cs" />
     <Compile Include="TodoRainmeterRenderer.cs" />
     <Compile Include="TodoRules.cs" />
     <Compile Include="TodoService.cs" />

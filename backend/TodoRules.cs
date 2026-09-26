@@ -1,7 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Diagnostics;
-using System.Drawing;
 using System.Globalization;
 using System.IO;
 using System.Linq;
@@ -9,11 +8,19 @@ using System.Net;
 using System.Text;
 using System.Text.RegularExpressions;
 using System.Threading;
-using System.Windows.Forms;
 using RainmeterBackend;
 
 internal static partial class TodoApp
 {
+    private sealed class EditorResult
+    {
+        public string Title { get; set; }
+        public string Target { get; set; }
+        public string Note { get; set; }
+        public string Available { get; set; }
+        public string Due { get; set; }
+        public List<string> Labels { get; set; }
+    }
     private static int Normalize(Dictionary<string, object> state)
     {
         List<Dictionary<string, object>> tasks = Tasks(state);
@@ -56,27 +63,11 @@ internal static partial class TodoApp
 
     private static DateTimeOffset CompletionWindow(DateTimeOffset now) { return PolicyWindow(now, "06:00"); }
 
-    private static void Add(Dictionary<string, object> state, ref bool refresh)
-    {
-        EditorResult e = ShowEditor(null); if (e == null) return;
-        Tasks(state).Add(NewTask(e, "manual")); Meta(state)["status"] = "已新增待办"; Commit(state); refresh = true;
-    }
     private static Dictionary<string, object> NewTask(EditorResult e, string source)
     {
         return new Dictionary<string, object>{{"id", Guid.NewGuid().ToString("N")}, {"title", e.Title}, {"target", e.Target}, {"note", e.Note}, {"labels", e.Labels.Cast<object>().ToList()}, {"completed", false}, {"source", source}, {"created_at", RuntimeUtil.Iso(DateTimeOffset.Now)}, {"completed_at", null}, {"available_from", String.IsNullOrEmpty(e.Available) ? null : (object)e.Available}, {"due_at", String.IsNullOrEmpty(e.Due) ? null : (object)e.Due}};
     }
     private static Dictionary<string, object> Find(Dictionary<string, object> state, string id) { return Tasks(state).FirstOrDefault(t => S(t, "id") == id); }
-    private static void Edit(Dictionary<string, object> state, string id, ref bool refresh)
-    {
-        Dictionary<string, object> task = Find(state, id); if (task == null) return; EditorResult e = ShowEditor(task); if (e == null) return;
-        task["title"] = e.Title; task["target"] = e.Target; task["note"] = e.Note; task["labels"] = e.Labels.Cast<object>().ToList(); task["available_from"] = e.Available == "" ? null : (object)e.Available; task["due_at"] = e.Due == "" ? null : (object)e.Due;
-        Meta(state)["status"] = "已修改待办"; Commit(state); refresh = true;
-    }
-    private static void Delete(Dictionary<string, object> state, string id, ref bool refresh)
-    {
-        Dictionary<string, object> task = Find(state, id); if (task == null || !LightUi.Confirm("确定删除“" + S(task, "title") + "”？", "删除待办")) return;
-        Tasks(state).RemoveAll(t => S(t, "id") == id); Meta(state)["status"] = "已删除"; Commit(state); refresh = true;
-    }
     private static void Toggle(Dictionary<string, object> state, string id, ref bool refresh)
     {
         Dictionary<string, object> task = Find(state, id); if (task == null) return;

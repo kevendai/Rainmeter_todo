@@ -170,7 +170,8 @@ internal static partial class TodoApp
             string date=DateTime.Now.ToString("yyyy-MM-dd",CultureInfo.InvariantCulture);
             // 75：无 AI 无快照 ⇒ 老实说"今天没有可用的论文推荐结果"，不是 attention、更不是自行造结果。
             PaperSyncResult none=RunPaperSyncFlow(PluginState,true,date,false);
-            if(!none.Ok||none.Attention!=null||none.Summary.IndexOf("今天没有可用的论文推荐结果",StringComparison.Ordinal)<0)return 75;
+            if(!none.Ok||none.Attention!=null||none.Summary.IndexOf("今日论文未更新",StringComparison.Ordinal)<0
+                ||none.Summary.IndexOf("AI 评分插件未启用或不可用",StringComparison.Ordinal)<0)return 75;
             // 76-81：装了快照插件但没命中（这里连 Broker 都没有 ⇒ 走"请求失败"分支）+ 有 AI ⇒ attention。
             ApplyJobContext(context,empty);
             PaperSyncResult ask=RunPaperSyncFlow(PluginState,true,date,false);

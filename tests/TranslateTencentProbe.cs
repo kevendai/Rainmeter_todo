@@ -26,7 +26,6 @@ using RainmeterBackend;
 internal static class TranslateTencentProbe
 {
     private const string PluginId = "io.github.kevendai.translate-tencent";
-    private const string PluginVersion = "1.0.0";
     private const string Service = "translation_provider@1";
     private const string Consumer = "io.github.test.translation-consumer";
     private const string SecretId = "AKIDprobe000000000000000000";
@@ -73,7 +72,7 @@ internal static class TranslateTencentProbe
     // ── manifest：真实 plugin.json 按 v2.1 语义加载 ───────────────────────────
     private static void ManifestSection()
     {
-        PluginManifest manifest = PluginManifest.Load(PluginPaths.VersionRoot(PluginId, PluginVersion));
+        PluginManifest manifest = PluginRuntime.Resolve(PluginId, false);
         Expect(manifest.Provides.Count == 1 && manifest.Provides[0] == Service, "manifest 声明 provides=translation_provider@1");
         Expect(manifest.Billing == "may_charge", "billing=may_charge（可能收费，确认框要据此提示）");
         Expect(manifest.Capabilities.Count == 0, "纯 Provider：capabilities 为空也能加载");

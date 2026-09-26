@@ -60,7 +60,7 @@ internal static class AiDeepSeekProbe
     // ── manifest：真实 plugin.json 按 v2.1 语义加载 ───────────────────────────
     private static void ManifestSection()
     {
-        PluginManifest manifest = PluginManifest.Load(PluginPaths.VersionRoot(PluginId, "1.0.0"));
+        PluginManifest manifest = PluginRuntime.Resolve(PluginId, false);
         Expect(manifest.Provides.Count == 1 && manifest.Provides[0] == Service, "manifest 声明 provides=ai_provider@1");
         Expect(manifest.Billing == "may_charge", "billing=may_charge（可能收费，确认框要据此提示）");
         Expect(manifest.Capabilities.Count == 0, "纯 Provider：capabilities 为空也能加载");

@@ -1,7 +1,6 @@
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
-using System.Drawing;
 using System.Globalization;
 using System.IO;
 using System.Linq;
@@ -9,7 +8,6 @@ using System.Net;
 using System.Text;
 using System.Text.RegularExpressions;
 using System.Threading;
-using System.Windows.Forms;
 using RainmeterBackend;
 
 internal static partial class TodoApp
@@ -40,7 +38,7 @@ internal static partial class TodoApp
             string hint = pendingAttention.Message == "" ? "这个任务需要你确认后才能继续。" : RuntimeUtil.CleanRainmeter(pendingAttention.Message);
             if (attention.Count > 1) hint += "（另有 " + (attention.Count - 1) + " 个插件也在等待确认）";
             Meter(lines, "AttentionSurface", "Meter=Shape", "X=16", "Y=" + y, "Shape=Rectangle 0,0,488,56,14 | Fill Color 253,246,227,246 | Stroke Color 232,196,106,255 | StrokeWidth 1");
-            Meter(lines, "AttentionIcon", "Meter=String", "X=40", "Y=" + (y + 30), "FontFace=" + LightUi.IconFontName, "FontSize=12", "FontColor=176,124,26,255", "StringAlign=CenterCenter", "AntiAlias=1", "Text=\xE7BA");
+            Meter(lines, "AttentionIcon", "Meter=String", "X=40", "Y=" + (y + 30), "FontFace=" + TileIconFont.Name, "FontSize=12", "FontColor=176,124,26,255", "StringAlign=CenterCenter", "AntiAlias=1", "Text=\xE7BA");
             Meter(lines, "AttentionTitle", "Meter=String", "MeterStyle=StyleText", "X=64", "Y=" + (y + 9), "W=262", "H=20", "FontSize=10", "FontColor=122,84,20,255", "ClipString=2", "Text=需要确认：" + hint);
             Meter(lines, "AttentionHint", "Meter=String", "MeterStyle=StyleText", "X=64", "Y=" + (y + 32), "W=262", "H=16", "FontSize=9", "FontColor=150,116,58,255", "Text=继续会用你的 API Key 调用一次模型并计费");
             Meter(lines, "AttentionButton", "Meter=Shape", "X=340", "Y=" + (y + 14), "Shape=Rectangle 0,0,150,28,9 | Fill Color 217,144,20,255 | Stroke Color 217,144,20,255 | StrokeWidth 1", Action("PluginConfirmAttention", pendingAttention.PluginId), "ToolTipText=" + pendingAttention.Name + " · 点这里确认是否使用 AI");
@@ -65,8 +63,8 @@ internal static partial class TodoApp
                 Meter(lines, "PendingToggle" + row, "Meter=Shape", "X=30", "Y=" + (y + rowHeight / 2 - 11), "W=22", "H=22", "Shape=Ellipse 11,11,6 | Fill Color 0,0,0,0 | Stroke Color " + toggle + " | StrokeWidth 1.8", Action("Toggle", S(task, "id")), "ToolTipText=标记完成");
                 Meter(lines, "PendingTitle" + row, "Meter=String", "MeterStyle=StyleText", "X=60", "Y=" + (y + 9), "W=352", "H=22", "FontColor=" + color, "Text=" + title, Action("Open", S(task, "id")));
                 if (!String.IsNullOrEmpty(time)) Meter(lines, "PendingTime" + row, "Meter=String", "MeterStyle=StyleText", "X=60", "Y=" + (y + 30), "W=352", "H=18", "FontSize=9", "FontColor=" + (overdue ? "#DangerColor#" : "#MutedColor#"), "Text=" + time, Action("Open", S(task, "id")));
-                Meter(lines, "PendingEdit" + row, "Meter=String", "X=443", "Y=" + (y + (rowHeight / 2)), "Padding=10,10,10,10", "FontFace=" + LightUi.IconFontName, "FontSize=10", "FontColor=#SubtleColor#", "StringAlign=CenterCenter", "AntiAlias=1", "Text=\xE70F", "MouseOverAction=[!SetOption PendingEdit" + row + " FontColor \"#AccentColor#\"][!UpdateMeter PendingEdit" + row + "][!Redraw]", "MouseLeaveAction=[!SetOption PendingEdit" + row + " FontColor \"#SubtleColor#\"][!UpdateMeter PendingEdit" + row + "][!Redraw]", Action("Edit", S(task, "id")), "ToolTipText=修改");
-                Meter(lines, "PendingDelete" + row, "Meter=String", "X=479", "Y=" + (y + (rowHeight / 2)), "Padding=10,10,10,10", "FontFace=" + LightUi.IconFontName, "FontSize=10", "FontColor=#SubtleColor#", "StringAlign=CenterCenter", "AntiAlias=1", "Text=\xE74D", "MouseOverAction=[!SetOption PendingDelete" + row + " FontColor \"#DangerColor#\"][!UpdateMeter PendingDelete" + row + "][!Redraw]", "MouseLeaveAction=[!SetOption PendingDelete" + row + " FontColor \"#SubtleColor#\"][!UpdateMeter PendingDelete" + row + "][!Redraw]", Action("Delete", S(task, "id")), "ToolTipText=删除");
+                Meter(lines, "PendingEdit" + row, "Meter=String", "X=443", "Y=" + (y + (rowHeight / 2)), "Padding=10,10,10,10", "FontFace=" + TileIconFont.Name, "FontSize=10", "FontColor=#SubtleColor#", "StringAlign=CenterCenter", "AntiAlias=1", "Text=\xE70F", "MouseOverAction=[!SetOption PendingEdit" + row + " FontColor \"#AccentColor#\"][!UpdateMeter PendingEdit" + row + "][!Redraw]", "MouseLeaveAction=[!SetOption PendingEdit" + row + " FontColor \"#SubtleColor#\"][!UpdateMeter PendingEdit" + row + "][!Redraw]", Action("Edit", S(task, "id")), "ToolTipText=修改");
+                Meter(lines, "PendingDelete" + row, "Meter=String", "X=479", "Y=" + (y + (rowHeight / 2)), "Padding=10,10,10,10", "FontFace=" + TileIconFont.Name, "FontSize=10", "FontColor=#SubtleColor#", "StringAlign=CenterCenter", "AntiAlias=1", "Text=\xE74D", "MouseOverAction=[!SetOption PendingDelete" + row + " FontColor \"#DangerColor#\"][!UpdateMeter PendingDelete" + row + "][!Redraw]", "MouseLeaveAction=[!SetOption PendingDelete" + row + " FontColor \"#SubtleColor#\"][!UpdateMeter PendingDelete" + row + "][!Redraw]", Action("Delete", S(task, "id")), "ToolTipText=删除");
                 if (row < pending.Count) Meter(lines, "PendingDivider" + row, "Meter=Shape", "X=60", "Y=" + (y + rowHeight - 1), "Shape=Rectangle 0,0,428,1 | Fill Color #DividerColor# | StrokeWidth 0");
                 y += rowHeight;
             }
@@ -79,9 +77,9 @@ internal static partial class TodoApp
         foreach (Dictionary<string, object> task in shownDone)
         {
             row++; string title = RuntimeUtil.CleanRainmeter(S(task, "title"));
-            Meter(lines, "DoneToggle" + row, "Meter=String", "X=42", "Y=" + (y + 21), "Padding=10,10,10,10", "FontFace=" + LightUi.IconFontName, "FontSize=10", "FontColor=#DoneColor#", "StringAlign=CenterCenter", "AntiAlias=1", "Text=\xE7A7", Action("Toggle", S(task, "id")), "ToolTipText=恢复到待办");
+            Meter(lines, "DoneToggle" + row, "Meter=String", "X=42", "Y=" + (y + 21), "Padding=10,10,10,10", "FontFace=" + TileIconFont.Name, "FontSize=10", "FontColor=#DoneColor#", "StringAlign=CenterCenter", "AntiAlias=1", "Text=\xE7A7", Action("Toggle", S(task, "id")), "ToolTipText=恢复到待办");
             Meter(lines, "DoneTitle" + row, "Meter=String", "MeterStyle=StyleText", "X=60", "Y=" + (y + 10), "W=390", "H=22", "FontColor=#MutedColor#", "Text=" + title, Action("Open", S(task, "id")));
-            Meter(lines, "DoneDelete" + row, "Meter=String", "X=479", "Y=" + (y + 21), "Padding=10,10,10,10", "FontFace=" + LightUi.IconFontName, "FontSize=9", "FontColor=#SubtleColor#", "StringAlign=CenterCenter", "AntiAlias=1", "Text=\xE74D", "MouseOverAction=[!SetOption DoneDelete" + row + " FontColor \"#DangerColor#\"][!UpdateMeter DoneDelete" + row + "][!Redraw]", "MouseLeaveAction=[!SetOption DoneDelete" + row + " FontColor \"#SubtleColor#\"][!UpdateMeter DoneDelete" + row + "][!Redraw]", Action("Delete", S(task, "id")), "ToolTipText=删除");
+            Meter(lines, "DoneDelete" + row, "Meter=String", "X=479", "Y=" + (y + 21), "Padding=10,10,10,10", "FontFace=" + TileIconFont.Name, "FontSize=9", "FontColor=#SubtleColor#", "StringAlign=CenterCenter", "AntiAlias=1", "Text=\xE74D", "MouseOverAction=[!SetOption DoneDelete" + row + " FontColor \"#DangerColor#\"][!UpdateMeter DoneDelete" + row + "][!Redraw]", "MouseLeaveAction=[!SetOption DoneDelete" + row + " FontColor \"#SubtleColor#\"][!UpdateMeter DoneDelete" + row + "][!Redraw]", Action("Delete", S(task, "id")), "ToolTipText=删除");
             if (row < shownDone.Count) Meter(lines, "DoneDivider" + row, "Meter=Shape", "X=60", "Y=" + (y + 41), "Shape=Rectangle 0,0,428,1 | Fill Color 202,218,232,145 | StrokeWidth 0");
             y += 42;
         }
@@ -109,10 +107,10 @@ internal static partial class TodoApp
         Meter(output, "ManageBackground", "Meter=Shape", "X=382", "Y=22", "Shape=Rectangle 0,0,36,36,10 | Fill Color #CardColor# | Stroke Color #BorderColor# | StrokeWidth 1", "MouseOverAction=[!SetOption Manage FontColor \"#TextColor#\"][!UpdateMeter Manage][!Redraw]", "MouseLeaveAction=[!SetOption Manage FontColor \"#MutedColor#\"][!UpdateMeter Manage][!Redraw]", "LeftMouseUpAction=[\"#@#TodoHost.exe\" \"Manage\"]");
         Meter(output, "AddBackground", "Meter=Shape", "X=423", "Y=22", "Shape=Rectangle 0,0,36,36,10 | Fill Color #AccentFill# | Stroke Color #AccentColor# | StrokeWidth 1", "MouseOverAction=[!SetOption Add FontColor \"255,255,255,255\"][!UpdateMeter Add][!Redraw]", "MouseLeaveAction=[!SetOption Add FontColor \"225,242,255,255\"][!UpdateMeter Add][!Redraw]", "LeftMouseUpAction=[\"#@#TodoHost.exe\" \"Add\"]");
         Meter(output, "SyncBackground", "Meter=Shape", "X=464", "Y=22", "Shape=Rectangle 0,0,36,36,10 | Fill Color #CardColor# | Stroke Color #BorderColor# | StrokeWidth 1", "MouseOverAction=[!SetOption Sync FontColor \"#TextColor#\"][!UpdateMeter Sync][!Redraw]", "MouseLeaveAction=[!SetOption Sync FontColor \"#MutedColor#\"][!UpdateMeter Sync][!Redraw]", "LeftMouseUpAction=[!SetOption Sync FontColor \"#AccentColor#\"][!UpdateMeter Sync][!Redraw][\"#@#TodoHost.exe\" \"Refresh\"]");
-        Meter(output, "Settings", "Meter=String", "X=359", "Y=40", "FontFace=" + LightUi.IconFontName, "FontSize=12", "FontColor=225,242,255,255", "StringAlign=CenterCenter", "AntiAlias=1", "Text=\xE713", "ToolTipText=待办设置");
-        Meter(output, "Manage", "Meter=String", "X=400", "Y=40", "FontFace=" + LightUi.IconFontName, "FontSize=12", "FontColor=#MutedColor#", "StringAlign=CenterCenter", "AntiAlias=1", "Text=\xE700", "ToolTipText=管理全部任务");
-        Meter(output, "Add", "Meter=String", "X=441", "Y=40", "FontFace=" + LightUi.IconFontName, "FontSize=12", "FontColor=225,242,255,255", "StringAlign=CenterCenter", "AntiAlias=1", "Text=\xE710", "ToolTipText=新增待办");
-        Meter(output, "Sync", "Meter=String", "X=482", "Y=40", "FontFace=" + LightUi.IconFontName, "FontSize=12", "FontColor=#MutedColor#", "StringAlign=CenterCenter", "AntiAlias=1", "Text=\xE72C", "ToolTipText=刷新待办");
+        Meter(output, "Settings", "Meter=String", "X=359", "Y=40", "FontFace=" + TileIconFont.Name, "FontSize=12", "FontColor=225,242,255,255", "StringAlign=CenterCenter", "AntiAlias=1", "Text=\xE713", "ToolTipText=待办设置");
+        Meter(output, "Manage", "Meter=String", "X=400", "Y=40", "FontFace=" + TileIconFont.Name, "FontSize=12", "FontColor=#MutedColor#", "StringAlign=CenterCenter", "AntiAlias=1", "Text=\xE700", "ToolTipText=管理全部任务");
+        Meter(output, "Add", "Meter=String", "X=441", "Y=40", "FontFace=" + TileIconFont.Name, "FontSize=12", "FontColor=225,242,255,255", "StringAlign=CenterCenter", "AntiAlias=1", "Text=\xE710", "ToolTipText=新增待办");
+        Meter(output, "Sync", "Meter=String", "X=482", "Y=40", "FontFace=" + TileIconFont.Name, "FontSize=12", "FontColor=#MutedColor#", "StringAlign=CenterCenter", "AntiAlias=1", "Text=\xE72C", "ToolTipText=刷新待办");
     }
 
     private static void Meter(List<string> lines, string name, params string[] body) { lines.Add("[" + name + "]"); lines.AddRange(body.Select(option => UiScale.RainmeterOption(option, RainmeterRenderScale))); lines.Add(""); }

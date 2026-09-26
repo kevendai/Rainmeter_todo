@@ -8,7 +8,6 @@ using System.Linq;
 using System.Reflection;
 using System.Security.Cryptography;
 using System.Text;
-using System.Windows.Forms;
 using RainmeterBackend;
 
 // Phase 8 探针：v2.1 配置迁移（migration-v2.1.json）+ min_host_version 不满足的可见提示。
@@ -564,39 +563,15 @@ internal static class ProviderMigrationProbe
         PluginManifest resolved = PluginRuntime.ResolveForStatus(id);
         Check(resolved.HostTooOld, "ResolveForStatus 应返回 HostTooOld 的 manifest");
 
-        // UI：插件列表必须**看得见**这个插件并说明原因，而不是静默算成"安装损坏"。
-        Type todoApp = typeof(TodoApp);
-        Type listType = todoApp.GetNestedType("PluginListControl", BindingFlags.NonPublic);
-        Type rowType = todoApp.GetNestedType("PluginRow", BindingFlags.NonPublic);
-        Check(listType != null && rowType != null, "应能通过反射拿到 PluginListControl / PluginRow");
-        object view = Activator.CreateInstance(listType, true);
-        Label label = new Label();
-        MethodInfo reload = todoApp.GetMethod("ReloadPlugins", BindingFlags.NonPublic | BindingFlags.Static);
-        Check(reload != null, "应能通过反射拿到 TodoApp.ReloadPlugins");
-        reload.Invoke(null, new object[] { view, label });
-
-        IList rows = (IList)listType.GetField("Rows").GetValue(view);
-        string title = "", subtitle = "", badge = "";
-        foreach (object row in rows)
-        {
-            if (Text(rowType.GetField("Title").GetValue(row)) != "需要新宿主") continue;
-            title = Text(rowType.GetField("Title").GetValue(row));
-            subtitle = Text(rowType.GetField("Subtitle").GetValue(row));
-            badge = Text(rowType.GetField("Badge").GetValue(row));
-        }
-        Equal("需要新宿主", title, "版本不匹配的插件必须出现在列表里（不得静默）");
-        Check(subtitle.IndexOf("需要主程序 " + required + " 或更高版本", StringComparison.Ordinal) >= 0, "副标题应写明所需的宿主版本（实际 [" + subtitle + "]）");
-        Equal("版本不匹配", badge, "徽标应标明版本不匹配");
-        Check(label.Text.IndexOf("因主程序版本过低已暂停", StringComparison.Ordinal) >= 0, "底部状态行应显式提示（实际 [" + label.Text + "]）");
-
-        // 这类插件能被选中，但不允许被启用/配置/运行。
-        MethodInfo runnable = todoApp.GetMethod("SelectedRunnablePlugin", BindingFlags.NonPublic | BindingFlags.Static);
-        Check(runnable != null, "应能通过反射拿到 SelectedRunnablePlugin");
-        listType.GetField("SelectedIndex").SetValue(view, 0);
-        bool refused = false;
-        try { runnable.Invoke(null, new object[] { view }); }
-        catch (TargetInvocationException ex) { refused = ex.InnerException != null && ex.InnerException.Message.IndexOf("需要主程序", StringComparison.Ordinal) >= 0; }
-        Check(refused, "选中版本不匹配的插件时启用/配置/运行必须被明确拒绝");
+        // 旧 WinForms 列表已移除。新界面消费 ResolveForStatus 的同一标志；
+        // 可见性与禁止运行的业务边界在这里按 manifest 检查。
+        Check(resolved.Name == "需要新宿主" && resolved.HostTooOld,
+            "新界面状态模型仍包含版本不匹配的插件及名称");
+        Equal(required,resolved.MinHostVersion,"状态模型包含所需的宿主版本");
+        threw=false;
+        try { PluginRuntime.Resolve(id,true); }
+        catch (InvalidDataException) { threw=true; }
+        Check(threw,"版本不匹配的插件不能被正常执行");
         return 0;
     }
 }

@@ -51,6 +51,7 @@ public sealed partial class MainWindow
         secondaryStyle.Setters.Add(new Setter(Control.CornerRadiusProperty, new CornerRadius(10)));
         var dialog = new ContentDialog
         {
+            UseLayoutRounding = true,
             XamlRoot = Shell.XamlRoot,
             RequestedTheme = DarkTheme ? ElementTheme.Dark : ElementTheme.Light,
             Background = EditorSurface,
@@ -61,6 +62,7 @@ public sealed partial class MainWindow
             Title = Text(title, 23, true),
             Content = new ScrollViewer
             {
+                UseLayoutRounding = true,
                 Content = content,
                 MaxHeight = 560,
                 VerticalScrollBarVisibility = ScrollBarVisibility.Auto,

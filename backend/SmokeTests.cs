@@ -55,14 +55,6 @@ internal static class SmokeTests
             Run(Path.Combine(calendarDir,"CalendarHost.exe"),"Render");
             string generated=File.ReadAllText(Path.Combine(calendarDir,"Generated.inc"),Encoding.Unicode);
             Check(generated.Contains("测试日程") && generated.Contains("CalendarHost.exe\" \"Detail"),"Calendar render/action generation failed");
-            Environment.SetEnvironmentVariable("RAINMETER_UI_SMOKE","1");
-            try {
-                RunUi(Path.Combine(todoDir,"TodoHost.exe"),"Add");
-                RunUi(Path.Combine(todoDir,"TodoHost.exe"),"Manage");
-                RunUi(Path.Combine(todoDir,"TodoHost.exe"),"Settings");
-                RunUi(Path.Combine(calendarDir,"CalendarHost.exe"),"Manage");
-                RunUi(Path.Combine(calendarDir,"CalendarHost.exe"),"Detail aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
-            } finally { Environment.SetEnvironmentVariable("RAINMETER_UI_SMOKE",null); }
             Run(Path.Combine(todoDir,"TodoHost.exe"),"Refresh");
             string refreshedTodo=File.ReadAllText(Path.Combine(todoDir,"Generated.inc"),Encoding.Unicode);
             Check(!refreshedTodo.Contains("!SetOption Status Text"),"Todo refresh action can leave a transient status stuck");
@@ -78,12 +70,6 @@ internal static class SmokeTests
     private static void Run(string file,string arguments)
     {
         using(Process p=Process.Start(new ProcessStartInfo(file,arguments){UseShellExecute=false,CreateNoWindow=true})) { if(!p.WaitForExit(20000))throw new Exception("Timed out: "+file);if(p.ExitCode!=0)throw new Exception(Path.GetFileName(file)+" failed with "+p.ExitCode); }
-    }
-    private static void RunUi(string file,string arguments)
-    {
-        Console.WriteLine("UI: "+Path.GetFileName(file)+" "+arguments);
-        ProcessStartInfo info=new ProcessStartInfo(file,arguments){UseShellExecute=false,CreateNoWindow=true};
-        using(Process p=Process.Start(info)){if(!p.WaitForExit(20000))throw new Exception("UI timed out: "+arguments);Console.WriteLine("UI exit: "+p.ExitCode);if(p.ExitCode!=0)throw new Exception("UI failed: "+arguments+" ("+p.ExitCode+")");}
     }
     private static void Check(bool value,string message){if(!value)throw new Exception(message);}
 }

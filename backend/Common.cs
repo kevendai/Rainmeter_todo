@@ -3,18 +3,13 @@ using System.Collections;
 using System.Collections.Generic;
 using System.ComponentModel;
 using System.Diagnostics;
-using System.Drawing;
-using System.Drawing.Drawing2D;
 using System.Globalization;
 using System.IO;
 using System.Linq;
-using System.Reflection;
 using System.Net;
-using System.Runtime.CompilerServices;
 using System.Security.Cryptography;
 using System.Text;
 using System.Web.Script.Serialization;
-using System.Windows.Forms;
 using System.Runtime.InteropServices;
 
 namespace RainmeterBackend
@@ -23,21 +18,26 @@ namespace RainmeterBackend
     {
         private const float BaseWidth = 2560F;
         private const float BaseHeight = 1440F;
-        private const float DesignDpi = 120F;
         private const float MinimumScale = 0.70F;
         private const float MaximumScale = 1.25F;
         private const string AutoMode = "auto";
-        private sealed class FormScaleState { public float Scale = 1F; public bool Applied; }
-        private sealed class ControlScaleState { public bool Scaled; public bool Watching; }
-        private static readonly ConditionalWeakTable<Form, FormScaleState> FormScales = new ConditionalWeakTable<Form, FormScaleState>();
-        private static readonly ConditionalWeakTable<Control, ControlScaleState> ControlScales = new ConditionalWeakTable<Control, ControlScaleState>();
-        private static readonly Dictionary<string, Font> ScaledFonts = new Dictionary<string, Font>();
 
+        [StructLayout(LayoutKind.Sequential)]
+        private struct Point { public int X; public int Y; }
+        [StructLayout(LayoutKind.Sequential)]
+        private struct Rectangle { public int Left; public int Top; public int Right; public int Bottom; }
+        [StructLayout(LayoutKind.Sequential)]
+        private struct MonitorInfo { public int Size; public Rectangle Monitor; public Rectangle Work; public uint Flags; }
         [DllImport("user32.dll")]
         private static extern bool SetProcessDPIAware();
-
         [DllImport("user32.dll")]
-        private static extern uint GetDpiForWindow(IntPtr window);
+        private static extern bool GetCursorPos(out Point point);
+        [DllImport("user32.dll")]
+        private static extern IntPtr MonitorFromPoint(Point point, uint flags);
+        [DllImport("user32.dll")]
+        private static extern bool GetMonitorInfo(IntPtr monitor, ref MonitorInfo info);
+        [DllImport("user32.dll")]
+        private static extern int GetSystemMetrics(int index);
 
         public static void EnableDpiAwareness()
         {
@@ -125,9 +125,28 @@ namespace RainmeterBackend
 
         private static float AutoScale()
         {
-            Screen activeScreen = Screen.FromPoint(Cursor.Position);
-            Rectangle bounds = activeScreen == null ? new Rectangle(0, 0, 2560, 1440) : activeScreen.Bounds;
-            float scale = Math.Min(bounds.Width / BaseWidth, bounds.Height / BaseHeight);
+            int width = 2560, height = 1440;
+            try
+            {
+                Point cursor;
+                if (GetCursorPos(out cursor))
+                {
+                    IntPtr monitor = MonitorFromPoint(cursor, 2);
+                    MonitorInfo info = new MonitorInfo { Size = Marshal.SizeOf(typeof(MonitorInfo)) };
+                    if (monitor != IntPtr.Zero && GetMonitorInfo(monitor, ref info))
+                    {
+                        width = info.Monitor.Right - info.Monitor.Left;
+                        height = info.Monitor.Bottom - info.Monitor.Top;
+                    }
+                }
+                if (width <= 0 || height <= 0)
+                {
+                    width = GetSystemMetrics(0);
+                    height = GetSystemMetrics(1);
+                }
+            }
+            catch { }
+            float scale = Math.Min(width / BaseWidth, height / BaseHeight);
             scale = (float)Math.Round(scale * 20F, MidpointRounding.AwayFromZero) / 20F;
             return Clamp(scale);
         }
@@ -196,198 +215,6 @@ namespace RainmeterBackend
             return geometry + styling;
         }
 
-        public static void ApplyTo(Form form)
-        {
-            float scale = WindowScaleForDpi(Current, WindowDpi(form));
-            FormScaleState formState = FormScales.GetOrCreateValue(form);
-            if (formState.Applied) return;
-            formState.Scale = scale;
-            formState.Applied = true;
-            form.SuspendLayout();
-            if (Math.Abs(scale - 1F) >= 0.001F)
-                form.Scale(new SizeF(scale, scale));
-            form.Font = ScaleFont(form.Font, scale);
-            ScaleFontsAndSpecialControls(form, scale);
-            form.ResumeLayout(true);
-            MarkScaledTree(form);
-            InstallDynamicScaling(form);
-            Screen screen = Screen.FromControl(form);
-            Rectangle area = screen.WorkingArea;
-            form.Left = area.Left + Math.Max(0, (area.Width - form.Width) / 2);
-            form.Top = area.Top + Math.Max(0, (area.Height - form.Height) / 2);
-            if (form.Height > area.Height - 40)
-            {
-                form.Height = Math.Max(200, area.Height - 40);
-                form.AutoScroll = true;
-                form.Top = area.Top + 20;
-            }
-        }
-
-        internal static float WindowScaleForDpi(float interfaceScale, float dpi)
-        {
-            // The UI was designed on a 125% (120 DPI) desktop. Lower DPI
-            // displays keep the existing project scale; higher DPI displays
-            // need an extra geometry/font multiplier because WinForms
-            // autoscaling is intentionally disabled.
-            float dpiFactor = Math.Max(1F, dpi / DesignDpi);
-            return interfaceScale * dpiFactor;
-        }
-
-        private static float WindowDpi(Form form)
-        {
-            string overrideText = Environment.GetEnvironmentVariable("RAINMETER_UI_DPI_OVERRIDE");
-            float overrideDpi;
-            if (!String.IsNullOrWhiteSpace(overrideText) && Single.TryParse(overrideText, NumberStyles.Float, CultureInfo.InvariantCulture, out overrideDpi) && overrideDpi > 0F)
-                return overrideDpi;
-            try
-            {
-                uint dpi = GetDpiForWindow(form.Handle);
-                if (dpi > 0) return dpi;
-            }
-            catch { }
-            try
-            {
-                using (Graphics graphics = form.CreateGraphics())
-                    return graphics.DpiX > 0F ? graphics.DpiX : DesignDpi;
-            }
-            catch { return DesignDpi; }
-        }
-
-        public static float For(Control control)
-        {
-            if (control == null) return 1F;
-            Form form = control as Form ?? control.FindForm();
-            FormScaleState state;
-            return form != null && FormScales.TryGetValue(form, out state) && state.Applied ? state.Scale : 1F;
-        }
-
-        public static int Logical(Control control, int value)
-        {
-            return Math.Max(0, (int)Math.Round(value * For(control), MidpointRounding.AwayFromZero));
-        }
-
-        private static void ScaleAddedControl(Control control)
-        {
-            if (control == null) return;
-            ControlScaleState controlState = ControlScales.GetOrCreateValue(control);
-            if (controlState.Scaled) { InstallDynamicScaling(control); return; }
-            Form form = control.FindForm();
-            FormScaleState formState;
-            if (form == null || !FormScales.TryGetValue(form, out formState) || !formState.Applied) return;
-            if (Math.Abs(formState.Scale - 1F) >= 0.001F)
-                control.Scale(new SizeF(formState.Scale, formState.Scale));
-            ScaleControlTreeFontsAndSpecials(control, formState.Scale);
-            MarkScaledTree(control);
-            InstallDynamicScaling(control);
-        }
-
-        private static void MarkScaledTree(Control control)
-        {
-            ControlScales.GetOrCreateValue(control).Scaled = true;
-            foreach (Control child in control.Controls) MarkScaledTree(child);
-        }
-
-        private static void InstallDynamicScaling(Control parent)
-        {
-            ControlScaleState state = ControlScales.GetOrCreateValue(parent);
-            if (!state.Watching)
-            {
-                parent.ControlAdded += delegate(object sender, ControlEventArgs args) { ScaleAddedControl(args.Control); };
-                state.Watching = true;
-            }
-            foreach (Control child in parent.Controls) InstallDynamicScaling(child);
-        }
-
-        private static void ScaleFontsAndSpecialControls(Control parent, float scale)
-        {
-            foreach (Control control in parent.Controls)
-            {
-                ScaleFontAndSpecialControl(control, scale);
-                ScaleFontsAndSpecialControls(control, scale);
-            }
-        }
-
-        private static void ScaleControlTreeFontsAndSpecials(Control control, float scale)
-        {
-            ScaleFontAndSpecialControl(control, scale);
-            foreach (Control child in control.Controls) ScaleControlTreeFontsAndSpecials(child, scale);
-        }
-
-        private static void ScaleFontAndSpecialControl(Control control, float scale)
-        {
-            PropertyDescriptor fontProperty = TypeDescriptor.GetProperties(control)["Font"];
-            if (control.Font != null && fontProperty != null && fontProperty.ShouldSerializeValue(control))
-                control.Font = ScaleFont(control.Font, scale);
-            // Compact fixed-height labels can become one or two pixels shorter
-            // than Microsoft YaHei UI after deterministic point-to-pixel font
-            // conversion. Grow only single-line labels so glyph bottoms are not
-            // clipped; wrapped and explicitly constrained labels stay unchanged.
-            Label label = control as Label;
-            if (label != null && !label.AutoSize && label.Font != null && label.MaximumSize.Height == 0 && label.Text.IndexOf('\n') < 0)
-            {
-                int minimumLabelHeight = label.Font.Height + 4 + label.Padding.Vertical;
-                if (label.Height < minimumLabelHeight) label.Height = minimumLabelHeight;
-            }
-            ListView list = control as ListView;
-            if (list != null)
-                foreach (ColumnHeader column in list.Columns) column.Width = Math.Max(24, (int)Math.Round(column.Width * scale));
-            TabControl tabs = control as TabControl;
-            if (tabs != null && tabs.SizeMode == TabSizeMode.Fixed)
-                tabs.ItemSize = new Size(Math.Max(24, (int)Math.Round(tabs.ItemSize.Width * scale)), Math.Max(20, (int)Math.Round(tabs.ItemSize.Height * scale)));
-            ListBox listBox = control as ListBox;
-            if (listBox != null && listBox.DrawMode != DrawMode.Normal)
-                listBox.ItemHeight = Math.Max(16, (int)Math.Round(listBox.ItemHeight * scale));
-            ScrollableControl scrollable = control as ScrollableControl;
-            if (scrollable != null && scrollable.AutoScrollMinSize != Size.Empty)
-                scrollable.AutoScrollMinSize = new Size(Math.Max(0, (int)Math.Round(scrollable.AutoScrollMinSize.Width * scale)), Math.Max(0, (int)Math.Round(scrollable.AutoScrollMinSize.Height * scale)));
-            CheckBox check = control as CheckBox;
-            if (check != null)
-            {
-                int centerY = check.Top + check.Height / 2;
-                Size preferred = check.GetPreferredSize(Size.Empty);
-                Size glyph = Size.Empty;
-                try
-                {
-                    using (Graphics graphics = check.CreateGraphics())
-                        glyph = CheckBoxRenderer.GetGlyphSize(graphics, System.Windows.Forms.VisualStyles.CheckBoxState.UncheckedNormal);
-                }
-                catch { }
-                int minimumHeight = Math.Max(String.IsNullOrEmpty(check.Text) ? 18 : 20, Math.Max(preferred.Height, glyph.Height));
-                if (check.Height < minimumHeight)
-                {
-                    check.Height = minimumHeight;
-                    check.Top = centerY - check.Height / 2;
-                }
-                if (String.IsNullOrEmpty(check.Text))
-                {
-                    int minimumWidth = Math.Max(18, Math.Max(preferred.Width, glyph.Width));
-                    if (check.Width < minimumWidth) check.Width = minimumWidth;
-                }
-            }
-            ComboBox combo = control as ComboBox;
-            if (combo != null && combo.DropDownStyle == ComboBoxStyle.DropDownList)
-                combo.Height = combo.PreferredHeight;
-            DateTimePicker picker = control as DateTimePicker;
-            if (picker != null)
-                picker.Height = Math.Max(picker.Height, picker.GetPreferredSize(Size.Empty).Height);
-        }
-
-        private static Font ScaleFont(Font font, float scale)
-        {
-            // The UI was authored and visually tuned on the 2560x1440 / 125%
-            // reference display. Pixel fonts preserve that appearance while
-            // preventing Windows 150%-200% DPI from enlarging text without the
-            // fixed-pixel control bounds.
-            float logicalPixels = font.Unit == GraphicsUnit.Pixel ? font.Size : font.SizeInPoints * DesignDpi / 72F;
-            float pixels = Math.Max(8F, logicalPixels * scale);
-            string key = font.FontFamily.Name + ":" + pixels.ToString("0.###", CultureInfo.InvariantCulture) + ":" + ((int)font.Style).ToString(CultureInfo.InvariantCulture) + ":" + font.GdiCharSet.ToString(CultureInfo.InvariantCulture) + ":" + font.GdiVerticalFont.ToString(CultureInfo.InvariantCulture);
-            lock (ScaledFonts)
-            {
-                Font scaled;
-                if (!ScaledFonts.TryGetValue(key, out scaled)) { scaled = new Font(font.FontFamily, pixels, font.Style, GraphicsUnit.Pixel, font.GdiCharSet, font.GdiVerticalFont); ScaledFonts[key] = scaled; }
-                return scaled;
-            }
-        }
 
         private static float Clamp(float value)
         {
@@ -546,10 +373,43 @@ namespace RainmeterBackend
 
         public static void SaveAtomic(string path, object value)
         {
-            string temporary = path + ".tmp";
-            File.WriteAllText(temporary, Serialize(value), new UTF8Encoding(false));
-            if (File.Exists(path)) File.Replace(temporary, path, null);
-            else File.Move(temporary, path);
+            WriteAtomicText(path, Serialize(value));
+        }
+
+        private static void WriteAtomicText(string path, string content)
+        {
+            string fullPath = Path.GetFullPath(path);
+            string key;
+            using (SHA256 sha = SHA256.Create())
+                key = BitConverter.ToString(sha.ComputeHash(Encoding.UTF8.GetBytes(fullPath.ToUpperInvariant()))).Replace("-", "");
+            using (System.Threading.Mutex mutex = new System.Threading.Mutex(false, @"Global\RainmeterAtomic_" + key))
+            {
+                bool held = false;
+                try
+                {
+                    try { held = mutex.WaitOne(TimeSpan.FromSeconds(15)); }
+                    catch (System.Threading.AbandonedMutexException) { held = true; }
+                    if (!held) throw new TimeoutException("文件写入正忙：" + Path.GetFileName(path));
+                    WriteAtomicTextLocked(fullPath, content);
+                }
+                finally { if (held) mutex.ReleaseMutex(); }
+            }
+        }
+
+        private static void WriteAtomicTextLocked(string path, string content)
+        {
+            string temporary = path + ".tmp-" + Guid.NewGuid().ToString("N");
+            try
+            {
+                File.WriteAllText(temporary, content, new UTF8Encoding(false));
+                if (File.Exists(path)) File.Replace(temporary, path, null);
+                else
+                {
+                    try { File.Move(temporary, path); }
+                    catch (IOException) { if (!File.Exists(path)) throw; File.Replace(temporary, path, null); }
+                }
+            }
+            finally { try { if (File.Exists(temporary)) File.Delete(temporary); } catch { } }
         }
 
         public static Dictionary<string, object> ReadDpapiJson(string path)
@@ -565,10 +425,7 @@ namespace RainmeterBackend
             if (!System.String.IsNullOrEmpty(directory)) Directory.CreateDirectory(directory);
             byte[] plain = Encoding.UTF8.GetBytes(Serialize(value));
             byte[] cipher = ProtectedData.Protect(plain, null, DataProtectionScope.CurrentUser);
-            string temporary = path + ".tmp";
-            File.WriteAllText(temporary, Convert.ToBase64String(cipher), new UTF8Encoding(false));
-            if (File.Exists(path)) File.Replace(temporary, path, null);
-            else File.Move(temporary, path);
+            WriteAtomicText(path, Convert.ToBase64String(cipher));
         }
     }
 
@@ -797,412 +654,18 @@ namespace RainmeterBackend
         }
     }
 
-    internal static class LightUi
+    internal static class TileIconFont
     {
-        private static bool Dark { get { return UiTheme.Current != UiTheme.Classic; } }
-        private static bool Acrylic { get { return UiTheme.Current == UiTheme.Acrylic; } }
-        public static Color Back { get { return Dark ? (Acrylic ? Color.FromArgb(24, 29, 42) : Color.FromArgb(31, 32, 38)) : Color.FromArgb(230, 242, 252); } }
-        public static Color Panel { get { return Dark ? (Acrylic ? Color.FromArgb(45, 53, 72) : Color.FromArgb(45, 46, 54)) : Color.FromArgb(246, 251, 255); } }
-        public static Color Surface { get { return Dark ? (Acrylic ? Color.FromArgb(37, 45, 63) : Color.FromArgb(38, 39, 46)) : Color.FromArgb(238, 247, 254); } }
-        public static Color Border { get { return Dark ? Color.FromArgb(79, 83, 96) : Color.FromArgb(198, 216, 232); } }
-        public static Color Text { get { return Dark ? Color.FromArgb(244, 244, 247) : Color.FromArgb(21, 32, 48); } }
-        public static Color Muted { get { return Dark ? Color.FromArgb(177, 181, 193) : Color.FromArgb(92, 108, 130); } }
-        public static Color Accent { get { return Dark ? Color.FromArgb(220, 76, 178) : Color.FromArgb(25, 108, 212); } }
-        public static Color AccentFill { get { return Dark ? Color.FromArgb(143, 55, 130) : Color.FromArgb(32, 112, 214); } }
-        public static Color Danger { get { return Dark ? Color.FromArgb(255, 126, 135) : Color.FromArgb(198, 52, 60); } }
-        public static Color Done { get { return Dark ? Color.FromArgb(106, 211, 151) : Color.FromArgb(20, 118, 66); } }
-        public static Color Selected { get { return Dark ? Color.FromArgb(76, 58, 86) : Color.FromArgb(220, 238, 255); } }
-        public static readonly string IconFontName = HasFont("Segoe Fluent Icons") ? "Segoe Fluent Icons" : "Segoe MDL2 Assets";
+        public static readonly string Name = HasFont("Segoe Fluent Icons") ? "Segoe Fluent Icons" : "Segoe MDL2 Assets";
 
         private static bool HasFont(string name)
         {
-            try { using (FontFamily family = new FontFamily(name)) return family.Name.Length > 0; }
-            catch { return false; }
-        }
-
-        private static readonly Dictionary<string, Font> SharedFonts = new Dictionary<string, Font>();
-        private static Font SharedFont(string family, float size, FontStyle style, GraphicsUnit unit)
-        {
-            string key = family + ":" + size.ToString("0.###", CultureInfo.InvariantCulture) + ":" + ((int)style).ToString(CultureInfo.InvariantCulture) + ":" + ((int)unit).ToString(CultureInfo.InvariantCulture);
-            lock (SharedFonts)
-            {
-                Font font;
-                if (!SharedFonts.TryGetValue(key, out font)) { font = new Font(family, size, style, unit); SharedFonts[key] = font; }
-                return font;
-            }
-        }
-        public static Font UiFont(float size) { return UiFont(size, FontStyle.Regular); }
-        public static Font UiFont(float size, FontStyle style) { return SharedFont("Microsoft YaHei UI", size, style, GraphicsUnit.Point); }
-        public static Font IconFont(float size) { return SharedFont(IconFontName, size, FontStyle.Regular, GraphicsUnit.Point); }
-        public static Font RestyledFont(Font source, FontStyle style)
-        {
-            if (source == null) return UiFont(9F, style);
-            return SharedFont(source.FontFamily.Name, source.Size, style, source.Unit);
-        }
-
-        private sealed class StyledForm : Form
-        {
-            public StyledForm()
-            {
-                DoubleBuffered = true;
-                SetStyle(ControlStyles.ResizeRedraw | ControlStyles.AllPaintingInWmPaint | ControlStyles.UserPaint | ControlStyles.OptimizedDoubleBuffer, true);
-                UpdateStyles();
-            }
-
-            protected override CreateParams CreateParams
-            {
-                get { CreateParams value = base.CreateParams; value.ClassStyle |= 0x00020000; return value; }
-            }
-
-            protected override void OnMouseDown(MouseEventArgs e)
-            {
-                base.OnMouseDown(e);
-                if (e.Button == MouseButtons.Left) BeginDrag(this);
-            }
-        }
-
-        [DllImport("user32.dll")] private static extern bool ReleaseCapture();
-        [DllImport("user32.dll")] private static extern IntPtr SendMessage(IntPtr handle, int message, IntPtr wParam, IntPtr lParam);
-        [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern IntPtr SendMessage(IntPtr handle, int message, IntPtr wParam, string lParam);
-
-        public static void EnableDoubleBuffer(Control control)
-        {
-            if (control == null) return;
             try
             {
-                PropertyInfo property = typeof(Control).GetProperty("DoubleBuffered", BindingFlags.Instance | BindingFlags.NonPublic);
-                if (property != null) property.SetValue(control, true, null);
+                using (Microsoft.Win32.RegistryKey fonts = Microsoft.Win32.Registry.LocalMachine.OpenSubKey(@"SOFTWARE\Microsoft\Windows NT\CurrentVersion\Fonts"))
+                    return fonts != null && fonts.GetValueNames().Any(value => value.StartsWith(name, StringComparison.OrdinalIgnoreCase));
             }
-            catch { }
-        }
-
-        public static void SetCue(TextBox control, string text)
-        {
-            if (control == null) return;
-            SendMessage(control.Handle, 0x1501, new IntPtr(1), text ?? "");
-        }
-        private static void ApplyWindowPalette(Control root)
-        {
-            if (!Dark) return;
-            foreach (Control control in root.Controls)
-            {
-                if (control.BackColor.A > 0 && control.BackColor.GetBrightness() > 0.86F)
-                {
-                    if (control is TextBox || control is ComboBox || control is ListView || control is Button)
-                        control.BackColor = Panel;
-                    else if (control is Panel || control is FlowLayoutPanel || control is TabPage)
-                        control.BackColor = Surface;
-                }
-                if (control.ForeColor.GetBrightness() < 0.39F && control.ForeColor.R < 150 && control.ForeColor.G < 150)
-                    control.ForeColor = Text;
-                ComboBox combo = control as ComboBox;
-                if (combo != null)
-                {
-                    combo.FlatStyle = FlatStyle.Flat;
-                    combo.DrawMode = DrawMode.OwnerDrawFixed;
-                    combo.DrawItem += delegate(object sender, DrawItemEventArgs e) {
-                        Color fill = (e.State & DrawItemState.Selected) != 0 ? Selected : Panel;
-                        using (SolidBrush brush = new SolidBrush(fill)) e.Graphics.FillRectangle(brush, e.Bounds);
-                        if (e.Index >= 0 && e.Index < combo.Items.Count)
-                            TextRenderer.DrawText(e.Graphics, Convert.ToString(combo.Items[e.Index]), combo.Font, e.Bounds, Text,
-                                TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis);
-                        if ((e.State & DrawItemState.Focus) != 0) e.DrawFocusRectangle();
-                    };
-                }
-                ApplyWindowPalette(control);
-            }
-        }
-        public static void SetRedraw(Control control, bool enabled)
-        {
-            if (control == null || !control.IsHandleCreated) return;
-            SendMessage(control.Handle, 0x000B, enabled ? new IntPtr(1) : IntPtr.Zero, IntPtr.Zero);
-            if (enabled) control.Invalidate(true);
-        }
-
-        public static GraphicsPath RoundedPath(Rectangle bounds, int radius)
-        {
-            int safeRadius = Math.Max(1, Math.Min(radius, Math.Max(1, Math.Min(bounds.Width, bounds.Height) / 2)));
-            int diameter = safeRadius * 2;
-            GraphicsPath path = new GraphicsPath();
-            path.AddArc(bounds.Left, bounds.Top, diameter, diameter, 180, 90);
-            path.AddArc(bounds.Right - diameter, bounds.Top, diameter, diameter, 270, 90);
-            path.AddArc(bounds.Right - diameter, bounds.Bottom - diameter, diameter, diameter, 0, 90);
-            path.AddArc(bounds.Left, bounds.Bottom - diameter, diameter, diameter, 90, 90);
-            path.CloseFigure();
-            return path;
-        }
-
-        private static void ApplyRoundedRegion(Form form)
-        {
-            int radius = Math.Max(1, (int)Math.Round(18F * UiScale.For(form)));
-            using (GraphicsPath path = RoundedPath(new Rectangle(0, 0, form.Width, form.Height), radius))
-            {
-                Region previous = form.Region;
-                form.Region = new Region(path);
-                if (previous != null) previous.Dispose();
-            }
-        }
-
-        public static void Round(Control control, int radius)
-        {
-            Action apply = delegate {
-                if (control.Width <= 1 || control.Height <= 1) return;
-                int scaledRadius = Math.Max(1, (int)Math.Round(radius * UiScale.For(control), MidpointRounding.AwayFromZero));
-                using (GraphicsPath path = RoundedPath(new Rectangle(0, 0, control.Width, control.Height), scaledRadius))
-                {
-                    Region previous = control.Region;
-                    control.Region = new Region(path);
-                    if (previous != null) previous.Dispose();
-                }
-            };
-            control.HandleCreated += delegate { apply(); };
-            control.Resize += delegate { apply(); };
-            if (control.IsHandleCreated) apply();
-        }
-
-        public static void BeginDrag(Form form)
-        {
-            ReleaseCapture();
-            SendMessage(form.Handle, 0xA1, new IntPtr(2), IntPtr.Zero);
-        }
-
-        public static Form Form(string title, int width, int height)
-        {
-            Form form = new StyledForm();
-            form.Text = title;
-            form.Width = width;
-            form.Height = height;
-            form.StartPosition = FormStartPosition.CenterScreen;
-            form.BackColor = Back;
-            form.ForeColor = Text;
-            form.Font = UiFont(9F);
-            form.FormBorderStyle = FormBorderStyle.None;
-            form.MaximizeBox = false;
-            form.MinimizeBox = false;
-            form.ShowInTaskbar = true;
-            form.AutoScaleMode = AutoScaleMode.None;
-            form.Padding = new Padding(1);
-            form.Opacity = 0D;
-            form.Shown += delegate { ApplyWindowPalette(form); UiScale.ApplyTo(form); };
-            form.Shown += delegate {
-                form.BeginInvoke(new Action(delegate {
-                    if (form.IsDisposed) return;
-                    form.Refresh();
-                    form.Opacity = 1D;
-                }));
-            };
-            form.Shown += delegate { ApplyRoundedRegion(form); };
-            if (Environment.GetEnvironmentVariable("RAINMETER_UI_SMOKE") == "1")
-                form.Shown += delegate { form.BeginInvoke(new Action(form.Close)); };
-            form.Resize += delegate { ApplyRoundedRegion(form); };
-            form.Paint += delegate(object sender, PaintEventArgs e) {
-                e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
-                Rectangle bounds = new Rectangle(0, 0, form.Width - 1, form.Height - 1);
-                int radius = Math.Max(1, (int)Math.Round(18F * UiScale.For(form)));
-                using (GraphicsPath path = RoundedPath(bounds, radius))
-                using (LinearGradientBrush brush = new LinearGradientBrush(bounds, Back, Acrylic ? Color.FromArgb(38, 46, 65) : Back, LinearGradientMode.ForwardDiagonal))
-                using (Pen pen = new Pen(Border, 1F))
-                {
-                    e.Graphics.FillPath(brush, path);
-                    e.Graphics.DrawPath(pen, path);
-                }
-            };
-            return form;
-        }
-
-        private static Control SvgIcon(string iconFile, int x, int y, int size)
-        {
-            Panel box = new Panel { Left = x, Top = y, Width = size, Height = size, BackColor = Surface };
-            Round(box, 10);
-            string path = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "icons", iconFile ?? "");
-            if (File.Exists(path))
-            {
-                WebBrowser browser = new WebBrowser { Left = 7, Top = 7, Width = size - 14, Height = size - 14, ScrollBarsEnabled = false, IsWebBrowserContextMenuEnabled = false, AllowWebBrowserDrop = false, WebBrowserShortcutsEnabled = false };
-                browser.TabStop = false;
-                browser.DocumentText = "<html><head><meta http-equiv='X-UA-Compatible' content='IE=edge'></head><body style='margin:0;overflow:hidden;background:transparent;'><img src='file:///" + path.Replace("\\", "/") + "' style='width:100%;height:100%;display:block;'/></body></html>";
-                box.Controls.Add(browser);
-            }
-            else
-            {
-                Label fallback = new Label { Text = "□", Left = 0, Top = 0, Width = size, Height = size, BackColor = Color.Transparent, ForeColor = Accent, TextAlign = ContentAlignment.MiddleCenter, Font = UiFont(14F, FontStyle.Bold) };
-                box.Controls.Add(fallback);
-            }
-            return box;
-        }
-
-        public static void Heading(Form form, string title, string subtitle)
-        {
-            Heading(form, title, subtitle, null);
-        }
-
-        public static void Heading(Form form, string title, string subtitle, string iconFile)
-        {
-            Control icon;
-            if (!String.IsNullOrEmpty(iconFile)) icon = SvgIcon(iconFile, 24, 22, 34);
-            else
-            {
-                string glyph = HeadingGlyph(title, subtitle);
-                Font iconFont = glyph == "✓" ? UiFont(14F, FontStyle.Bold) : IconFont(12F);
-                icon = new Label { Text = glyph, Left = 24, Top = 22, Width = 34, Height = 34, ForeColor = Color.White, BackColor = AccentFill, Font = iconFont, TextAlign = ContentAlignment.MiddleCenter };
-                Round(icon, 9);
-            }
-            Label heading = new Label { Text = title, Left = 68, Top = 22, Width = form.ClientSize.Width - 140, Height = 38, ForeColor = Text, BackColor = Color.Transparent, Font = UiFont(16F, FontStyle.Bold) };
-            Label sub = new Label { Text = subtitle, Left = 25, Top = 62, Width = form.ClientSize.Width - 50, Height = 22, ForeColor = Muted, BackColor = Color.Transparent, Font = UiFont(9F) };
-            icon.MouseDown += delegate(object sender, MouseEventArgs e) { if (e.Button == MouseButtons.Left) BeginDrag(form); };
-            heading.MouseDown += delegate(object sender, MouseEventArgs e) { if (e.Button == MouseButtons.Left) BeginDrag(form); };
-            sub.MouseDown += delegate(object sender, MouseEventArgs e) { if (e.Button == MouseButtons.Left) BeginDrag(form); };
-            form.Controls.Add(icon); form.Controls.Add(heading); form.Controls.Add(sub);
-        }
-
-        private static string HeadingGlyph(string title, string subtitle)
-        {
-            string text = (title ?? "") + " " + (subtitle ?? "");
-            if (text.Contains("日程") || text.Contains("时间")) return "";
-            if (text.Contains("全部") || text.Contains("管理") || text.Contains("规则")) return "";
-            if (text.Contains("删除") || text.Contains("未完成")) return "";
-            if (text.Contains("待办") || text.Contains("任务")) return "✓";
-            return "";
-        }
-
-        public static Label Label(string text, int x, int y, int width)
-        {
-            return new Label { Text = text, Left = x, Top = y, Width = width, Height = 22, ForeColor = Muted, BackColor = Color.Transparent, Font = UiFont(9F) };
-        }
-
-        public static TextBox TextBox(int x, int y, int width, string text)
-        {
-            TextBox box = new TextBox { Left = x, Top = y, Width = width, Height = 36, AutoSize = false, Text = text ?? "", BackColor = Panel, ForeColor = Text, BorderStyle = BorderStyle.None, Font = UiFont(10F) };
-            Round(box, 9); return box;
-        }
-
-        public static Button Button(string text, int x, int y, int width, DialogResult result)
-        {
-            Button button = new Button { Text = text, Left = x, Top = y, Width = width, Height = 38, DialogResult = result, FlatStyle = FlatStyle.Flat, BackColor = Panel, ForeColor = Text, Cursor = Cursors.Hand, Font = UiFont(9F) };
-            button.FlatAppearance.BorderColor = Panel; button.FlatAppearance.BorderSize = 0;
-            button.FlatAppearance.MouseDownBackColor = Selected;
-            button.FlatAppearance.MouseOverBackColor = Surface;
-            button.MouseEnter += delegate { if (button.Enabled) button.BackColor = Surface; };
-            button.MouseLeave += delegate { button.BackColor = Panel; };
-            button.Paint += delegate(object sender, PaintEventArgs e) {
-                if (button.Enabled || !Dark) return;
-                e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
-                using (GraphicsPath path = RoundedPath(new Rectangle(0, 0, button.Width - 1, button.Height - 1), Math.Max(1, (int)Math.Round(9F * UiScale.For(button)))))
-                using (SolidBrush brush = new SolidBrush(Surface)) e.Graphics.FillPath(brush, path);
-                TextRenderer.DrawText(e.Graphics, button.Text, button.Font, button.ClientRectangle, Muted,
-                    TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis);
-            };
-            Round(button, 9);
-            return button;
-        }
-
-        public static Button PrimaryButton(string text, int x, int y, int width, DialogResult result)
-        {
-            Button button = Button(text, x, y, width, result);
-            button.BackColor = AccentFill; button.ForeColor = Color.White;
-            button.FlatAppearance.BorderColor = AccentFill;
-            button.FlatAppearance.MouseOverBackColor = Dark ? Color.FromArgb(169, 70, 154) : Color.FromArgb(38, 118, 222);
-            button.FlatAppearance.MouseDownBackColor = Dark ? Color.FromArgb(117, 45, 106) : Color.FromArgb(25, 94, 185);
-            button.MouseEnter += delegate { if (button.Enabled) button.BackColor = Dark ? Color.FromArgb(169, 70, 154) : Color.FromArgb(38, 118, 222); };
-            button.MouseLeave += delegate { button.BackColor = AccentFill; };
-            return button;
-        }
-
-        public static Button CloseButton(Form form)
-        {
-            Button button = Button("×", form.ClientSize.Width - 60, 22, 36, DialogResult.Cancel);
-            button.Height = 34;
-            button.Font = UiFont(12F);
-            form.CancelButton = button;
-            return button;
-        }
-
-        public static void StyleTab(TabControl tabs)
-        {
-            tabs.Appearance = TabAppearance.FlatButtons;
-            tabs.ItemSize = new Size(118, 34);
-            tabs.SizeMode = TabSizeMode.Fixed;
-            tabs.Font = UiFont(9F);
-        }
-
-        public static Button DangerButton(string text, int x, int y, int width, DialogResult result)
-        {
-            Button button = Button(text, x, y, width, result);
-            button.ForeColor = Danger;
-            button.BackColor = Dark ? Color.FromArgb(69, 44, 51) : Color.FromArgb(255, 246, 246);
-            button.FlatAppearance.BorderColor = button.BackColor;
-            return button;
-        }
-
-        public static void StyleList(ListView list)
-        {
-            list.BackColor = Panel; list.ForeColor = Text; list.BorderStyle = BorderStyle.FixedSingle;
-            list.Font = UiFont(9F); list.FullRowSelect = true; list.HideSelection = false;
-            list.HeaderStyle = ColumnHeaderStyle.Nonclickable; list.GridLines = true;
-            Round(list, 10);
-        }
-
-        public static bool Confirm(string text, string title)
-        {
-            return ConfirmRisk(text, title, "此操作无法撤销。", "确认删除", true);
-        }
-
-        // 规格 §5.3：把风险确认抽成可复用函数 —— 付费确认（§5.2）必须走同一条 LightUi 路径，
-        // 不另起一套样式。danger=false 时确认按钮是主色而非红字：付费确认不是"危险操作"，
-        // 但它必须同样清楚地说明后果（费用由 note 承载）。
-        public static bool ConfirmRisk(string text, string title, string note, string confirmText)
-        {
-            return ConfirmRisk(text, title, note, confirmText, false);
-        }
-
-        // Only tile refresh offers a day-long snooze. A plugin-center run uses
-        // ConfirmRisk instead and always asks again on its next explicit run.
-        public static DialogResult ConfirmPaidWithSnooze(string text, string title, string note)
-        {
-            if(Environment.GetEnvironmentVariable("RAINMETER_UI_SMOKE")=="1"&&
-                Environment.GetEnvironmentVariable("RAINMETER_UI_SMOKE_CHOICE")=="snooze")
-                return DialogResult.Ignore;
-            Font bodyFont=UiFont(10F);
-            Size measured=TextRenderer.MeasureText(text??"",bodyFont,new Size(400,Int32.MaxValue),TextFormatFlags.WordBreak);
-            int messageHeight=Math.Max(72,measured.Height+34),formHeight=270+(messageHeight-72);
-            Form form=Form(title,520,formHeight);Heading(form,title,note);
-            Label message=new Label{Text=text,Left=26,Top=98,Width=468,Height=messageHeight,
-                ForeColor=Text,BackColor=Surface,Padding=new Padding(14,14,14,8),Font=bodyFont};
-            Round(message,10);form.Controls.Add(message);
-            int top=formHeight-66;
-            Button snooze=Button("今天不再提醒",26,top,142,DialogResult.Ignore);
-            Button cancel=Button("暂不使用",284,top,96,DialogResult.No);
-            Button confirm=PrimaryButton("使用 AI 评分",388,top,106,DialogResult.Yes);
-            form.Controls.AddRange(new Control[]{snooze,cancel,confirm});
-            form.CancelButton=cancel;
-            return form.ShowDialog();
-        }
-
-        private static bool ConfirmRisk(string text, string title, string note, string confirmText, bool danger)
-        {
-            Font bodyFont = UiFont(10F), buttonFont = UiFont(9F);
-            // 文案可能比原来的删除确认长得多（付费确认要写清楚花谁的钱），所以高度按实际测量走；
-            // 按钮仍右对齐在 454，宽度按确认文案实测，于是短文案（原「确认删除」）与既有位置基本重合。
-            Size measured = TextRenderer.MeasureText(text ?? "", bodyFont, new Size(428 - 28, Int32.MaxValue), TextFormatFlags.WordBreak);
-            int messageHeight = Math.Max(72, measured.Height + 34);
-            int formHeight = 250 + (messageHeight - 72);
-            Form form = Form(title, 480, formHeight); Heading(form, title, note);
-            Label message = new Label { Text = text, Left = 26, Top = 98, Width = 428, Height = messageHeight, ForeColor = Text, BackColor = Surface, Padding = new Padding(14, 14, 14, 8), Font = bodyFont };
-            Round(message, 10); form.Controls.Add(message);
-            int buttonWidth = Math.Max(96, TextRenderer.MeasureText(confirmText ?? "", buttonFont).Width + 36);
-            int buttonTop = formHeight - 66, confirmLeft = 454 - buttonWidth, cancelLeft = confirmLeft - 94;
-            Button cancel = Button("取消", cancelLeft, buttonTop, 84, DialogResult.Cancel);
-            Button confirm = danger ? DangerButton(confirmText, confirmLeft, buttonTop, buttonWidth, DialogResult.Yes) : PrimaryButton(confirmText, confirmLeft, buttonTop, buttonWidth, DialogResult.Yes);
-            form.Controls.AddRange(new Control[] { cancel, confirm }); form.CancelButton = cancel;
-            return form.ShowDialog() == DialogResult.Yes;
-        }
-
-        public static void Error(string text)
-        {
-            Form form = Form("操作未完成", 480, 240); Heading(form, "操作未完成", "请检查输入后再试一次。");
-            Label message = new Label { Text = text, Left = 26, Top = 98, Width = 428, Height = 52, ForeColor = Text, BackColor = Surface, Padding = new Padding(14, 13, 14, 8), Font = UiFont(10F) };
-            Round(message, 10); form.Controls.Add(message);
-            Button close = PrimaryButton("知道了", 370, 174, 84, DialogResult.OK); form.Controls.Add(close); form.AcceptButton = close; form.CancelButton = close;
-            form.ShowDialog();
+            catch { return false; }
         }
     }
 }

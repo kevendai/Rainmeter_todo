@@ -1,6 +1,5 @@
 using System;
 using System.Collections.Generic;
-using System.Drawing;
 using System.Globalization;
 using System.IO;
 using System.Linq;
@@ -8,7 +7,6 @@ using System.Net;
 using System.Text;
 using System.Text.RegularExpressions;
 using System.Threading;
-using System.Windows.Forms;
 using System.Xml;
 using RainmeterBackend;
 
@@ -56,7 +54,7 @@ internal static partial class CalendarApp
         try{System.Diagnostics.ProcessStartInfo info=new System.Diagnostics.ProcessStartInfo(host,"Values "+pluginId){UseShellExecute=false,CreateNoWindow=true,RedirectStandardOutput=true,RedirectStandardError=true};using(System.Diagnostics.Process process=System.Diagnostics.Process.Start(info)){if(process==null){error="无法启动插件宿主";return false;}string output=process.StandardOutput.ReadToEnd(),stderr=process.StandardError.ReadToEnd();if(!process.WaitForExit(95000)){try{process.Kill();}catch{}error="地址插件搜索超时";return false;}if(process.ExitCode==0)return true;error=(stderr.Trim()!=""?stderr:output).Trim();if(error=="")error="地址插件执行失败";return false;}}
         catch(Exception ex){error=ex.Message;return false;}
     }
-    private static System.Diagnostics.Process StartBackgroundSync(){try{return System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(Application.ExecutablePath,"Sync"){UseShellExecute=false,CreateNoWindow=true});}catch{return null;}}
+    private static System.Diagnostics.Process StartBackgroundSync(){try{return System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(System.Diagnostics.Process.GetCurrentProcess().MainModule.FileName,"Sync"){UseShellExecute=false,CreateNoWindow=true});}catch{return null;}}
 
     private static bool SaveLocalEvent(Dictionary<string,object> e,Dictionary<string,object> state)
     {
@@ -66,7 +64,7 @@ internal static partial class CalendarApp
     private static void DeleteLocalEvent(Dictionary<string,object> e,Dictionary<string,object> state,string mode="series")
     {
         if(B(e,"recurring")&&mode=="once"){if(!HiddenEvents(state).Any(x=>S(x,"occurrence_key")==S(e,"occurrence_key")))HiddenEvents(state).Add(new Dictionary<string,object>{{"id",S(e,"id")},{"uid",S(e,"uid")},{"occurrence_key",S(e,"occurrence_key")},{"hidden_at",RuntimeUtil.Iso(DateTimeOffset.Now)}});return;}
-        Dictionary<string,object> master=LocalSeriesMaster(state,e);string id=master==null?S(e,"id"):S(master,"id"),uid=S(e,"uid");LocalEvents(state).RemoveAll(x=>S(x,"id")==id||(B(e,"recurring")&&S(x,"uid")==uid));
+        Dictionary<string,object> master=LocalSeriesMaster(state,e);string id=master==null?S(e,"id"):S(master,"id"),uid=S(e,"uid");LocalEvents(state).RemoveAll(x=>S(x,"id")==id||(B(e,"recurring")&&S(x,"uid")==uid));if(B(e,"recurring"))Rules(state).RemoveAll(x=>S(x,"uid")==uid);
     }
 
     private static void SaveCalDavEvent(Dictionary<string,object> e,Dictionary<string,object> cache)

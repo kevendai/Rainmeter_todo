@@ -1,7 +1,6 @@
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
-using System.Drawing;
 using System.Globalization;
 using System.IO;
 using System.Linq;
@@ -9,7 +8,6 @@ using System.Net;
 using System.Text;
 using System.Text.RegularExpressions;
 using System.Threading;
-using System.Windows.Forms;
 using RainmeterBackend;
 
 internal static partial class TodoApp
@@ -125,4 +123,3 @@ internal static partial class TodoApp
     // 直接冲突。凭据本身按 §9.2 仍以**复制不删除**的方式留在旧 secret / 备份里，迁移由
     // ProviderMigration 负责。
 }
-

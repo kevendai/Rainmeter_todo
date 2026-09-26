@@ -1,7 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Diagnostics;
-using System.Drawing;
 using System.Globalization;
 using System.IO;
 using System.Linq;
@@ -9,7 +8,6 @@ using System.Net;
 using System.Text;
 using System.Text.RegularExpressions;
 using System.Threading;
-using System.Windows.Forms;
 using RainmeterBackend;
 
 internal static partial class TodoApp
@@ -65,4 +63,3 @@ internal static partial class TodoApp
     private static void Commit(Dictionary<string, object> state) { Save(state); Render(state); }
 
 }
-

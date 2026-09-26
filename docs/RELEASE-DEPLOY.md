@@ -8,6 +8,8 @@
 
 ## 初次安装
 
+2.2.0 起管理界面使用 WinUI 3，支持 Windows 10 2004（19041）或更高版本的 x64 系统。安装包自带 .NET 和 Windows App SDK 运行时，无需另装 .NET。
+
 1. 从 [Rainmeter 官网](https://www.rainmeter.net/) 安装 Rainmeter 4.5.26 或更高版本。
 2. 从 GitHub Releases 下载 `rainmeter-desktop-widgets-<版本>.rmskin`。
 3. 双击该文件，在 Rainmeter Skin Installer 中确认并点击 Install。
@@ -35,8 +37,8 @@
 ## 从源码打包
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File .\scripts\Test-Backends.ps1
-powershell -ExecutionPolicy Bypass -File .\scripts\Build-ReleasePackages.ps1
+pwsh -File .\scripts\Test-Backends.ps1
+pwsh -File .\scripts\Build-ReleasePackages.ps1
 ```
 
 构建会生成统一 ZIP、统一 `.rmskin` 和仅供旧客户端使用的 full/lite 兼容 ZIP（三份内容相同，同时写入 `releases\v<版本>\` 并作为 Release 资产发布）。

@@ -106,9 +106,10 @@ public sealed partial class MainWindow : Window
         todoRepository = new TodoRepository(todoRoot);
         pluginDataRoot = Environment.GetEnvironmentVariable("RAINMETER_PLUGIN_ROOT")
             ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "RainmeterDesktopWidgets");
-        ExtendsContentIntoTitleBar = false;
+        ExtendsContentIntoTitleBar = true;
         SystemBackdrop = studioStyle ? new DesktopAcrylicBackdrop() : new MicaBackdrop { Kind = MicaKind.Base };
         if (Content is FrameworkElement shell) shell.RequestedTheme = DarkTheme ? ElementTheme.Dark : ElementTheme.Light;
+        ApplyAppearance();
         AppWindow.Resize(new SizeInt32(1190, 820));
         Nav.SelectedIndex = 0;
         var startPage = Environment.GetEnvironmentVariable("RAINMETER_UI_START_PAGE");
@@ -134,6 +135,13 @@ public sealed partial class MainWindow : Window
             {
                 if (action == "Add") ShowTodoEditor(null);
                 else if (action == "Edit" && id != "") ShowTodoEditor(id);
+                else if (action == "Delete" && id != "")
+                {
+                    var task = todoRepository.Find(id);
+                    if (task is not null) DeleteTodo(id, task.Title);
+                }
+                else if (action == "PluginConfirmAttention" && id != "")
+                    _ = ShowPendingPluginConfirmationAsync(id);
                 else if (action == "Settings") Navigate("settings");
             }
             else if (destination == "calendar")
@@ -187,6 +195,7 @@ public sealed partial class MainWindow : Window
     {
         Title = "桌面组件";
         var root = Shell;
+        root.UseLayoutRounding = true;
         root.Background = Canvas;
         root.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(236) });
         root.ColumnDefinitions.Add(new ColumnDefinition());
@@ -242,11 +251,11 @@ public sealed partial class MainWindow : Window
         Grid.SetRow(BrandFooter, 2);
         sidebar.Children.Add(BrandFooter);
         Sidebar.Background = DarkTheme ? Brush(24, 16, 32, 235) : Brush(241, 235, 247, 245);
-        Sidebar.Padding = new Thickness(20, 28, 20, 28);
+        Sidebar.Padding = new Thickness(20, 40, 20, 28);
         Sidebar.Child = sidebar;
         root.Children.Add(Sidebar);
 
-        var body = new StackPanel { Spacing = 22, Margin = new Thickness(34, 28, 34, 42) };
+        var body = new StackPanel { Spacing = 22, Margin = new Thickness(34, 40, 34, 42) };
         var header = new Grid();
         header.ColumnDefinitions.Add(new ColumnDefinition());
         var titles = new StackPanel { Spacing = 6 };
@@ -388,6 +397,9 @@ public sealed partial class MainWindow : Window
     private void Calendar(string action, string id = "") => Run(calendarRoot, "CalendarHost.exe", action, id);
 
     private void ShowMessage(string message) => PageContent.Children.Insert(0, Card(Text(message, 13, muted: true), 14));
+
+    private async Task ShowNoticeAsync(string title, string message)
+        => await EditorDialog(title, Text(message, 14), "确定").ShowAsync();
 
     private static string DisplayDate(string? iso)
         => DateTimeOffset.TryParse(iso, out var date) ? date.ToLocalTime().ToString("yyyy-MM-dd HH:mm") : "";

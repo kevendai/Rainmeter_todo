@@ -25,7 +25,6 @@ internal static class SsdpServerIpPlugin
             Dictionary<string,object> request = Obj(Json.DeserializeObject(Console.In.ReadLine() ?? ""));
             requestId = Str(request,"request_id",""); string action = Str(request,"action","");
             Dictionary<string,object> config = Obj(Get(request,"config"));
-            if(action=="configure_discovery") return SsdpServerIpSetupForm.Run(requestId,config);
             if(action=="validate_settings") { ValidateNetwork(config); return Result(requestId,true,new Dictionary<string,object>{{"message","扫描范围有效"}},null); }
             if(action!="get_values") return Result(requestId,false,null,"不支持的 action");
             ValidateNetwork(config);

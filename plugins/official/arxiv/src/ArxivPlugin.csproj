@@ -1,6 +1,6 @@
 <Project ToolsVersion="4.0" DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <PropertyGroup><Configuration>Release</Configuration><OutputType>Exe</OutputType><AssemblyName>ArxivPlugin</AssemblyName><TargetFrameworkVersion>v4.0</TargetFrameworkVersion><NoStdLib>true</NoStdLib><OutputPath>bin\</OutputPath><IntermediateOutputPath>obj\</IntermediateOutputPath></PropertyGroup>
-  <ItemGroup><Reference Include="mscorlib"><HintPath>$(MSBuildToolsPath)\mscorlib.dll</HintPath><Private>False</Private></Reference><Reference Include="System"/><Reference Include="System.Core"/><Reference Include="System.Drawing"/><Reference Include="System.Security"/><Reference Include="System.Web.Extensions"/><Reference Include="System.Windows.Forms"/><Reference Include="System.Xml"/></ItemGroup>
+  <ItemGroup><Reference Include="mscorlib"><HintPath>$(MSBuildToolsPath)\mscorlib.dll</HintPath><Private>False</Private></Reference><Reference Include="System"/><Reference Include="System.Core"/><Reference Include="System.Security"/><Reference Include="System.Web.Extensions"/><Reference Include="System.Xml"/></ItemGroup>
   <ItemGroup>
     <Compile Include="..\..\..\..\backend\Common.cs"><Link>Common.cs</Link></Compile>
     <Compile Include="..\..\..\..\backend\PaperBundle.cs"><Link>PaperBundle.cs</Link></Compile>

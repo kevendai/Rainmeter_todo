@@ -12,7 +12,6 @@ using System.Text;
 using System.Text.RegularExpressions;
 using System.Threading;
 using System.Web.Script.Serialization;
-using System.Windows.Forms;
 using Microsoft.Win32;
 using RainmeterBackend;
 
@@ -20,7 +19,7 @@ namespace RainmeterUpdater
 {
     internal static class Program
     {
-        private const string UpdaterVersion = "2.0";
+        private const string UpdaterVersion = "2.1";
         private const long MaxArchiveBytes = 512L * 1024 * 1024;
         private const long MaxEntryBytes = 256L * 1024 * 1024;
         private const int MaxEntries = 8192;
@@ -65,7 +64,7 @@ namespace RainmeterUpdater
             catch (Exception ex)
             {
                 try { Directory.CreateDirectory(LogRoot); File.WriteAllText(ErrorLog, DateTimeOffset.Now.ToString("o") + "\r\n" + ex + "\r\n", new UTF8Encoding(false)); } catch { }
-                if (!Quiet) try { MessageBox.Show("更新失败：" + ex.Message + "\r\n\r\n错误日志：" + ErrorLog, "Rainmeter Desktop Widgets Update", MessageBoxButtons.OK, MessageBoxIcon.Error); } catch { }
+                if (!Quiet) try { Console.Error.WriteLine("更新失败：" + ex.Message + "；错误日志：" + ErrorLog); } catch { }
                 return 1;
             }
         }
@@ -202,10 +201,16 @@ namespace RainmeterUpdater
             int comparison = CompareVersions(latestVersion, options.CurrentVersion);
             if (comparison <= 0)
             {
-                if (!Quiet) MessageBox.Show(comparison == 0 ? "已经是最新版本：" + latestTag : "当前版本比最新发布版更新。", "Rainmeter Desktop Widgets", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                if (!Quiet) Console.WriteLine(comparison == 0 ? "已经是最新版本：" + latestTag : "当前版本比最新发布版更新。");
                 return;
             }
-            if (!options.AssumeYes && !Quiet && MessageBox.Show("发现新版本 " + latestTag + "。\r\n\r\n现在下载并安装吗？Rainmeter 将重新启动。", "Rainmeter Desktop Widgets Update", MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes) return;
+            // WinUI confirms the update before launching this worker. A direct
+            // invocation without consent only reports availability; it never installs.
+            if (!options.AssumeYes)
+            {
+                if (!Quiet) Console.WriteLine("发现新版本 " + latestTag + "；请在设置界面确认更新。");
+                return;
+            }
             string asset = "rainmeter-desktop-widgets-" + latestVersion + ".zip";
             string temp = Path.Combine(Path.GetTempPath(), "RainmeterDesktopWidgetsUpdate-" + Guid.NewGuid().ToString("N"));
             string zip = Path.Combine(temp, asset);
@@ -290,6 +295,8 @@ namespace RainmeterUpdater
                         File.Copy(current, destination, true);
                     }
                     preserved[skin] = hashes;
+                    string paperCache = Path.Combine(target, "@Resources", "PaperCache");
+                    if (Directory.Exists(paperCache)) CopyDirectory(paperCache, Path.Combine(stage, "@Resources", "PaperCache"));
                     string scaleInclude = Path.Combine(stage, "@Resources", "UiScale.inc");
                     if (File.Exists(scaleInclude)) File.Delete(scaleInclude);
                 }
@@ -317,8 +324,8 @@ namespace RainmeterUpdater
                 {
                     string target = Path.Combine(roots.SkinsRoot, skin), stage = Path.Combine(transaction, "stage", skin), backup = Path.Combine(transaction, "backup", skin);
                     MoveDirectoryWithRetry(target, backup);
-                    MoveDirectoryWithRetry(stage, target);
                     swapped.Add(skin);
+                    MoveDirectoryWithRetry(stage, target);
                 }
                 VerifyPreserved(roots.SkinsRoot, preserved, null);
                 ValidateInstalledHosts(roots.SkinsRoot, package.RequiresPluginHost);
@@ -356,6 +363,12 @@ namespace RainmeterUpdater
                 if (!Directory.Exists(skinRoot) || !File.Exists(host) || !File.Exists(versionFile) || File.ReadAllText(versionFile, Encoding.UTF8).Trim() != version) throw new InvalidDataException(skin + " 文件或版本不完整。");
             }
             var result = new Package { RequiresPluginHost = CompareVersions(version, "2.0.0") >= 0 };
+            if (CompareVersions(version, "2.2.0") >= 0)
+            {
+                string desktop = Path.Combine(root, "Skins", "Todo", "@Resources", "DesktopUI");
+                foreach (string file in new[] { "Rainmeter.Desktop.exe", "Rainmeter.Desktop.dll", "Rainmeter.Desktop.runtimeconfig.json", "coreclr.dll", "Microsoft.UI.Xaml.dll" })
+                    if (!File.Exists(Path.Combine(desktop, file))) throw new InvalidDataException("更新包缺少桌面界面运行时：" + file);
+            }
             string lockPath = Path.Combine(root, "Skins", "Todo", "@Resources", "bundled-plugins.lock.json");
             if (result.RequiresPluginHost)
             {
@@ -514,8 +527,8 @@ namespace RainmeterUpdater
 
         private static void StopKnownHosts(string skinsRoot)
         {
-            var allowed = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { Path.Combine(skinsRoot, "Todo", "@Resources", "TodoHost.exe"), Path.Combine(skinsRoot, "Calendar", "@Resources", "CalendarHost.exe"), Path.Combine(skinsRoot, "Todo", "@Resources", "PluginHost.exe") };
-            foreach (string name in new[] { "TodoHost", "CalendarHost", "PluginHost" })
+            var allowed = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { Path.Combine(skinsRoot, "Todo", "@Resources", "TodoHost.exe"), Path.Combine(skinsRoot, "Calendar", "@Resources", "CalendarHost.exe"), Path.Combine(skinsRoot, "Todo", "@Resources", "PluginHost.exe"), Path.Combine(skinsRoot, "Todo", "@Resources", "DesktopUI", "Rainmeter.Desktop.exe") };
+            foreach (string name in new[] { "TodoHost", "CalendarHost", "PluginHost", "Rainmeter.Desktop" })
             {
                 foreach (Process p in Process.GetProcessesByName(name))
                 {
@@ -535,7 +548,7 @@ namespace RainmeterUpdater
         }
         private static void StopManagedPluginProcesses()
         {
-            string local = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "RainmeterDesktopWidgets"), pluginRoot = FullDirectory(Path.Combine(local, "Plugins")), jobs = Path.Combine(local, "PluginJobs");
+            string local = PluginStateRoot(), pluginRoot = FullDirectory(Path.Combine(local, "Plugins")), jobs = Path.Combine(local, "PluginJobs");
             if (!Directory.Exists(jobs)) return;
             foreach (string file in Directory.GetFiles(jobs, "*.json")) try { IDictionary<string, object> job = ReadObject(file); int pid = Convert.ToInt32(job["pid"], CultureInfo.InvariantCulture); string entry = Path.GetFullPath(Text(job, "entry")); if (!entry.StartsWith(pluginRoot, StringComparison.OrdinalIgnoreCase)) continue; using (Process p = Process.GetProcessById(pid)) { if (!Path.GetFullPath(p.MainModule.FileName).Equals(entry, StringComparison.OrdinalIgnoreCase)) continue; try { p.CloseMainWindow(); } catch { } if (!p.WaitForExit(3000)) p.Kill(); } job["state"] = "cancelled"; job["message"] = "Cancelled for host update"; job.Remove("pid"); job.Remove("entry"); job.Remove("process_started_at"); File.WriteAllText(file, Json.Serialize(job), new UTF8Encoding(false)); } catch { }
         }
@@ -552,9 +565,14 @@ namespace RainmeterUpdater
             }
         }
         private sealed class FileSnapshot { public string Path; public bool Existed; public string Backup; }
+        private static string PluginStateRoot()
+        {
+            string configured = Environment.GetEnvironmentVariable("RAINMETER_PLUGIN_ROOT");
+            return String.IsNullOrWhiteSpace(configured) ? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "RainmeterDesktopWidgets") : Path.GetFullPath(configured);
+        }
         private static List<FileSnapshot> SnapshotPluginState(IEnumerable<string> ids, string tx)
         {
-            string local = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "RainmeterDesktopWidgets"), root = Path.Combine(tx, "plugin-state"); Directory.CreateDirectory(root);
+            string local = PluginStateRoot(), root = Path.Combine(tx, "plugin-state"); Directory.CreateDirectory(root);
             var paths = new List<string> { Path.Combine(local, "migration-v2.json") };
             foreach (string id in ids) { paths.Add(Path.Combine(local, "Plugins", id, "current.json")); foreach (string name in new[] { "config.json", "secret.dat", "state.json" }) paths.Add(Path.Combine(local, "PluginData", id, name)); }
             var result = new List<FileSnapshot>(); int index = 0;

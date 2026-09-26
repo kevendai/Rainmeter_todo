@@ -487,20 +487,32 @@ namespace RainmeterBackend
                     try{held=mutex.WaitOne(TimeSpan.FromSeconds(15));}catch(AbandonedMutexException){held=true;}if(!held)throw new TimeoutException("待办数据正忙，请稍后重试");
                     Dictionary<string,object> state=File.Exists(todoPath)?JsonUtil.LoadObject(todoPath):new Dictionary<string,object>{{"version",3},{"meta",new Dictionary<string,object>{{"status","就绪"}}},{"tasks",new List<object>()}};
                     MigrateV3(state);List<Dictionary<string,object>> tasks=JsonUtil.Array(JsonUtil.Get(state,"tasks")).Select(JsonUtil.Object).ToList();state["tasks"]=tasks;
-                    int created=0,skipped=0,invalid=0,count=0;string firstTaskId="";
+                    int created=0,updated=0,skipped=0,invalid=0,count=0;string firstTaskId="";
                     foreach(Dictionary<string,object> d in drafts??Enumerable.Empty<Dictionary<string,object>>())
                     {
                         count++;if(count>500){invalid++;continue;}string external=JsonUtil.String(d,"external_id","").Trim(),title=JsonUtil.String(d,"title","").Trim();
                         if(external==""||title==""||external.Length>300||title.Length>500){invalid++;continue;}
                         bool exists=tasks.Any(t=>{Dictionary<string,object> o=JsonUtil.Object(JsonUtil.Get(t,"origin"));return JsonUtil.String(o,"plugin_id","").Equals(pluginId,StringComparison.OrdinalIgnoreCase)&&JsonUtil.String(o,"external_id","")==external;});
-                        if(exists){skipped++;if(firstTaskId==""){Dictionary<string,object> existing=tasks.First(t=>{Dictionary<string,object> o=JsonUtil.Object(JsonUtil.Get(t,"origin"));return JsonUtil.String(o,"plugin_id","").Equals(pluginId,StringComparison.OrdinalIgnoreCase)&&JsonUtil.String(o,"external_id","")==external;});firstTaskId=JsonUtil.String(existing,"id","");}continue;}
+                        if(exists){Dictionary<string,object> existing=tasks.First(t=>{Dictionary<string,object> o=JsonUtil.Object(JsonUtil.Get(t,"origin"));return JsonUtil.String(o,"plugin_id","").Equals(pluginId,StringComparison.OrdinalIgnoreCase)&&JsonUtil.String(o,"external_id","")==external;});if(pluginId=="io.github.kevendai.arxiv"&&TryRefreshPaperTranslation(existing,d))updated++;else skipped++;if(firstTaskId=="")firstTaskId=JsonUtil.String(existing,"id","");continue;}
                         List<object> labels=JsonUtil.Array(JsonUtil.Get(d,"labels")).Select(Convert.ToString).Where(x=>!String.IsNullOrWhiteSpace(x)).Distinct().Take(32).Cast<object>().ToList();
                         tasks.Add(new Dictionary<string,object>{{"id",Guid.NewGuid().ToString("N")},{"title",title},{"target",JsonUtil.String(d,"target","")},{"note",JsonUtil.String(d,"note","")},{"labels",labels},{"completed",false},{"source","plugin"},{"origin",new Dictionary<string,object>{{"plugin_id",pluginId},{"external_id",external}}},{"policy",JsonUtil.Object(JsonUtil.Get(d,"policy"))},{"created_at",DateTimeOffset.Now.ToString("o",CultureInfo.InvariantCulture)},{"completed_at",null},{"available_from",EmptyNull(JsonUtil.Get(d,"available_from"))},{"due_at",EmptyNull(JsonUtil.Get(d,"due_at"))}});
                         if(firstTaskId=="")firstTaskId=JsonUtil.String(tasks[tasks.Count-1],"id","");created++;
                     }
-                    JsonUtil.SaveAtomic(todoPath,state);PluginRuntime.WritePluginTaskSnapshots(state);return new Dictionary<string,object>{{"created",created},{"skipped",skipped},{"invalid",invalid},{"task_id",firstTaskId}};
+                    JsonUtil.SaveAtomic(todoPath,state);PluginRuntime.WritePluginTaskSnapshots(state);return new Dictionary<string,object>{{"created",created},{"updated",updated},{"skipped",skipped},{"invalid",invalid},{"task_id",firstTaskId}};
                 }finally{if(held)mutex.ReleaseMutex();}
             }
+        }
+        internal static bool TryRefreshPaperTranslation(Dictionary<string,object> existing,Dictionary<string,object> draft)
+        {
+            string current=JsonUtil.String(existing,"title","");
+            string translated=JsonUtil.String(draft,"title","");
+            string note=JsonUtil.String(draft,"note","");
+            System.Text.RegularExpressions.Match original=System.Text.RegularExpressions.Regex.Match(note,@"(?:^|\r?\n)论文原标题：([^\r\n]+)");
+            System.Text.RegularExpressions.Match scored=System.Text.RegularExpressions.Regex.Match(translated,@"^(\(\d+\) )(.+)$");
+            if(!original.Success||!scored.Success||translated==current||
+                !String.Equals(current,scored.Groups[1].Value+original.Groups[1].Value,StringComparison.Ordinal))return false;
+            existing["title"]=translated;
+            return true;
         }
         private static object EmptyNull(object v){return v==null||String.IsNullOrWhiteSpace(Convert.ToString(v,CultureInfo.InvariantCulture))?null:v;}
         public static void MigrateV3(Dictionary<string,object> state)

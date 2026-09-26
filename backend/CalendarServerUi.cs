@@ -7,6 +7,59 @@ using RainmeterBackend;
 
 internal static partial class CalendarApp
 {
+    private static string calendarCredentialsLoadError = "";
+    private static Dictionary<string,object> ReadCredentials()
+    {
+        calendarCredentialsLoadError = "";
+        if (!File.Exists(SecretPath)) return new Dictionary<string,object>();
+        try
+        {
+            Dictionary<string,object> credentials=JsonUtil.ReadDpapiJson(SecretPath);
+            string stored=JsonUtil.String(credentials,"Server","");
+            credentials["_StoredServer"]=stored;
+            credentials["Server"]=DynamicPluginValues.BindSelected(stored,"calendar.caldav",JsonUtil.String(credentials,"AddressSource",""));
+            return credentials;
+        }
+        catch (Exception ex)
+        {
+            calendarCredentialsLoadError="CalDAV 凭据无法解密或已损坏："+ex.Message.Replace("\r"," ").Replace("\n"," ");
+            return new Dictionary<string,object>();
+        }
+    }
+
+    private static void SaveCredentials(string server,string username,string password,Dictionary<string,object> cache,string addressSource="ssdp")
+    {
+        string s=(server??"").Trim(),u=(username??"").Trim(),p=password??"";
+        if(s=="")throw new Exception("CalDAV 地址不能为空");
+        if(!s.StartsWith("http://",StringComparison.OrdinalIgnoreCase)&&!s.StartsWith("https://",StringComparison.OrdinalIgnoreCase))s="https://"+s;
+        if(u==""||p=="")throw new Exception("账号和密码不能为空");
+        s=s.TrimEnd('/');
+        JsonUtil.WriteDpapiJson(SecretPath,new Dictionary<string,object>{{"Server",s},{"Username",u},{"Password",p},{"AddressSource",addressSource}});
+        cache["calendar_url"]="";cache["events"]=new List<object>();cache["fetched_at"]="";cache["status"]="CalDAV 凭据已保存";Save(CachePath,cache);
+    }
+
+    private static Dictionary<string,object> CredentialsFromValues(string server,string username,string password,string addressSource="ssdp")
+    {
+        string s=(server??"").Trim(),u=(username??"").Trim(),p=password??"";
+        if(s=="")throw new Exception("CalDAV 地址不能为空");
+        if(!s.StartsWith("http://",StringComparison.OrdinalIgnoreCase)&&!s.StartsWith("https://",StringComparison.OrdinalIgnoreCase))s="https://"+s;
+        s=DynamicPluginValues.BindSelected(s,"calendar.caldav",addressSource);
+        if(u==""||p=="")throw new Exception("账号和密码不能为空");
+        return new Dictionary<string,object>{{"Server",s},{"Username",u},{"Password",p},{"AddressSource",addressSource}};
+    }
+
+    private static string TestCredentials(string server,string username,string password,string addressSource="ssdp")
+    {
+        CalendarInfo calendar=Discover(CredentialsFromValues(server,username,password,addressSource));
+        return "连接成功："+(calendar.Name==""?calendar.Uri:calendar.Name);
+    }
+
+    private static void ClearCredentials(Dictionary<string,object> cache)
+    {
+        if(File.Exists(SecretPath))File.Delete(SecretPath);
+        cache["events"]=new List<object>();cache["calendar_url"]="";cache["fetched_at"]="";cache["status"]="CalDAV 未连接";Save(CachePath,cache);
+    }
+
     private static int HandleServerUi(string action,string inputPath,string resultPath)
     {
         string output=action=="UiServerModel"?inputPath:resultPath;

@@ -14,8 +14,9 @@ internal static partial class TodoApp
         {
             PluginManifest manifest = PluginRuntime.Resolve(pluginId, false);
             string versionRoot = PluginPaths.VersionRoot(pluginId, manifest.Version);
-            Dictionary<string, object> schema = JsonUtil.LoadObject(
-                PluginManifest.SafeChildPath(versionRoot, manifest.SettingsSchema, "设置 Schema"));
+            Dictionary<string, object> schema = String.IsNullOrWhiteSpace(manifest.SettingsSchema)
+                ? new Dictionary<string, object>{{"properties",new Dictionary<string,object>()},{"required",new object[0]}}
+                : JsonUtil.LoadObject(PluginManifest.SafeChildPath(versionRoot, manifest.SettingsSchema, "设置 Schema"));
             List<SettingsField> fields = PluginSettingsLayout.Parse(
                 JsonUtil.Object(JsonUtil.Get(schema, "properties")));
             string dataRoot = PluginPaths.DataRoot(pluginId);
@@ -66,14 +67,27 @@ internal static partial class TodoApp
                 }
                 rows.Add(row);
             }
-            JsonUtil.SaveAtomic(resultPath, new Dictionary<string, object>{
+            Dictionary<string, object> model=new Dictionary<string, object>{
                 {"ok", true}, {"name", PluginNames.Display(pluginId, manifest.Name)},
                 {"version", manifest.Version}, {"scan", pluginId == DynamicPluginValues.SsdpPluginId},
                 {"address_provider_ip", manifest.AddressTarget == "" ? "" :
                     (DynamicPluginValues.AddressProvider(manifest.AddressTarget) == null ? "" :
                     DynamicPluginValues.AddressProvider(manifest.AddressTarget).Value)},
                 {"fields", rows}
-            });
+            };
+            if(pluginId=="io.github.kevendai.calendar-to-todo")
+            {
+                string calendarResult=Path.Combine(Path.GetTempPath(),"rw-calendar-conversions-"+Guid.NewGuid().ToString("N")+".json");
+                try
+                {
+                    RunCalendarConversionCommand("UiConversionModel",calendarResult,null);
+                    Dictionary<string,object> conversions=JsonUtil.LoadObject(calendarResult);
+                    model["conversion_management"]=true;
+                    model["conversions"]=JsonUtil.Array(JsonUtil.Get(conversions,"conversions"));
+                }
+                finally{try{File.Delete(calendarResult);}catch{}}
+            }
+            JsonUtil.SaveAtomic(resultPath, model);
             return 0;
         }
         catch (Exception ex)
@@ -84,11 +98,55 @@ internal static partial class TodoApp
         }
     }
 
+    private static int UiPluginConfigCancel(string pluginId,string requestPath,string resultPath)
+    {
+        string input=Path.Combine(Path.GetTempPath(),"rw-calendar-cancel-"+Guid.NewGuid().ToString("N")+".json");
+        try
+        {
+            if(pluginId!="io.github.kevendai.calendar-to-todo")throw new InvalidDataException("此插件没有日程转换管理功能。");
+            Dictionary<string,object> request=requestPath=="-"?JsonUtil.Object(JsonUtil.Deserialize(Console.In.ReadToEnd())):JsonUtil.LoadObject(requestPath);
+            string key=JsonUtil.String(request,"occurrence_key","");
+            if(key=="")throw new InvalidDataException("缺少日程转换标识。");
+            JsonUtil.SaveAtomic(input,new Dictionary<string,object>{{"occurrence_key",key},{"cancel_mode",JsonUtil.String(request,"cancel_mode","once")}});
+            RunCalendarConversionCommand("UiConversionCancel",resultPath,input);
+            JsonUtil.SaveAtomic(resultPath,new Dictionary<string,object>{{"ok",true}});
+            return 0;
+        }
+        catch(Exception ex)
+        {
+            try{JsonUtil.SaveAtomic(resultPath,new Dictionary<string,object>{{"ok",false},{"error",ex.Message}});}catch{}
+            return 1;
+        }
+        finally{try{File.Delete(input);}catch{}}
+    }
+
+    private static void RunCalendarConversionCommand(string action,string resultPath,string inputPath)
+    {
+        string calendarRoot=Path.GetFullPath(Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"..","..","Calendar","@Resources"));
+        string executable=Path.Combine(calendarRoot,"CalendarHost.exe");
+        if(!File.Exists(executable))throw new FileNotFoundException("未找到日历宿主，无法读取转换记录。",executable);
+        string arguments=action+" "+QuoteConfigArgument(inputPath??resultPath)+(inputPath==null?"":" "+QuoteConfigArgument(resultPath));
+        using(Process process=Process.Start(new ProcessStartInfo(executable,arguments){UseShellExecute=false,CreateNoWindow=true,WindowStyle=ProcessWindowStyle.Hidden}))
+        {
+            if(process==null||!process.WaitForExit(45000))throw new IOException("日程转换管理操作超时。");
+            if(process.ExitCode!=0)throw new IOException("日程转换管理操作失败。");
+        }
+        Dictionary<string,object> result=JsonUtil.LoadObject(resultPath);
+        if(!JsonUtil.Bool(result,"ok",false))throw new InvalidDataException(JsonUtil.String(result,"error","日程转换管理操作失败。"));
+    }
+
+    private static string QuoteConfigArgument(string value){return "\""+(value??"").Replace("\"","\\\"")+"\"";}
+
     private static int UiPluginConfigSave(string pluginId, string requestPath, string resultPath)
     {
         try
         {
             PluginManifest manifest = PluginRuntime.Resolve(pluginId, false);
+            if(pluginId=="io.github.kevendai.calendar-to-todo"&&String.IsNullOrWhiteSpace(manifest.SettingsSchema))
+            {
+                JsonUtil.SaveAtomic(resultPath,new Dictionary<string,object>{{"ok",true}});
+                return 0;
+            }
             string versionRoot = PluginPaths.VersionRoot(pluginId, manifest.Version);
             Dictionary<string, object> schema = JsonUtil.LoadObject(
                 PluginManifest.SafeChildPath(versionRoot, manifest.SettingsSchema, "设置 Schema"));
@@ -104,12 +162,17 @@ internal static partial class TodoApp
             Directory.CreateDirectory(dataRoot);
             string configPath = Path.Combine(dataRoot, "config.json");
             string secretPath = Path.Combine(dataRoot, "secret.dat");
+            string currentPath = Path.Combine(PluginPaths.PluginRoot(pluginId), "current.json");
             bool hadConfig = File.Exists(configPath), hadSecret = File.Exists(secretPath);
             Dictionary<string, object> config = hadConfig
                 ? JsonUtil.LoadObject(configPath) : new Dictionary<string, object>();
             Dictionary<string, object> secret = hadSecret
                 ? JsonUtil.ReadDpapiJson(secretPath) : new Dictionary<string, object>();
             string oldConfig = JsonUtil.Serialize(config), oldSecret = JsonUtil.Serialize(secret);
+            bool enableSelectedSsdp = pluginId == DynamicPluginValues.SsdpPluginId &&
+                JsonUtil.String(edits, "selected_usn", "") != "";
+            Dictionary<string, object> current = enableSelectedSsdp ? PluginRuntime.Current(pluginId) : null;
+            string oldCurrent = current == null ? "" : JsonUtil.Serialize(current);
             HashSet<string> required = new HashSet<string>(
                 JsonUtil.Array(JsonUtil.Get(schema, "required")).Select(Convert.ToString),
                 StringComparer.OrdinalIgnoreCase);
@@ -193,6 +256,7 @@ internal static partial class TodoApp
                     UseShellExecute = false, CreateNoWindow = true }))
                     if (validation == null || !validation.WaitForExit(35000) || validation.ExitCode != 0)
                         throw new InvalidDataException("插件拒绝了当前设置。");
+                if (enableSelectedSsdp) { current["enabled"] = true; JsonUtil.SaveAtomic(currentPath, current); }
             }
             catch
             {
@@ -201,6 +265,7 @@ internal static partial class TodoApp
                 if (hadSecret) JsonUtil.WriteDpapiJson(secretPath, JsonUtil.Object(JsonUtil.Deserialize(oldSecret)));
                 else if (File.Exists(secretPath)) File.Delete(secretPath);
                 PluginSettingsLayout.ApplyBindings(pluginId, previousBindings);
+                if (enableSelectedSsdp) JsonUtil.SaveAtomic(currentPath, JsonUtil.Object(JsonUtil.Deserialize(oldCurrent)));
                 throw;
             }
             JsonUtil.SaveAtomic(resultPath, new Dictionary<string, object>{{"ok", true}});

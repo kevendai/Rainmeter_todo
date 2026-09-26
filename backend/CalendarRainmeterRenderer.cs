@@ -1,6 +1,5 @@
 using System;
 using System.Collections.Generic;
-using System.Drawing;
 using System.Globalization;
 using System.IO;
 using System.Linq;
@@ -8,7 +7,6 @@ using System.Net;
 using System.Text;
 using System.Text.RegularExpressions;
 using System.Threading;
-using System.Windows.Forms;
 using System.Xml;
 using RainmeterBackend;
 
@@ -71,8 +69,8 @@ internal static partial class CalendarApp
         Meter(output, "HeaderRule", "Meter=Shape", "X=24", "Y=69", "Shape=Rectangle 0,0,472,1 | Fill Color #BorderColor# | StrokeWidth 0");
         Meter(output, "ManageBackground", "Meter=Shape", "X=423", "Y=22", "Shape=Rectangle 0,0,36,36,10 | Fill Color #CardColor# | Stroke Color #BorderColor# | StrokeWidth 1", "MouseOverAction=[!SetOption Manage FontColor \"#TextColor#\"][!UpdateMeter Manage][!Redraw]", "MouseLeaveAction=[!SetOption Manage FontColor \"#MutedColor#\"][!UpdateMeter Manage][!Redraw]", "LeftMouseUpAction=[\"#@#CalendarHost.exe\" \"Manage\"]");
         Meter(output, "SyncBackground", "Meter=Shape", "X=464", "Y=22", "Shape=Rectangle 0,0,36,36,10 | Fill Color #AccentFill# | Stroke Color #AccentColor# | StrokeWidth 1", "MouseOverAction=[!SetOption Sync FontColor \"255,255,255,255\"][!UpdateMeter Sync][!Redraw]", "MouseLeaveAction=[!SetOption Sync FontColor \"225,242,255,255\"][!UpdateMeter Sync][!Redraw]", "LeftMouseUpAction=[!SetOption Sync FontColor \"#AccentColor#\"][!UpdateMeter Sync][!Redraw][\"#@#CalendarHost.exe\" \"Sync\"]");
-        Meter(output, "Manage", "Meter=String", "X=441", "Y=40", "FontFace=" + LightUi.IconFontName, "FontSize=12", "FontColor=#MutedColor#", "StringAlign=CenterCenter", "AntiAlias=1", "Text=\xE700", "ToolTipText=日程管理");
-        Meter(output, "Sync", "Meter=String", "X=482", "Y=40", "FontFace=" + LightUi.IconFontName, "FontSize=12", "FontColor=225,242,255,255", "StringAlign=CenterCenter", "AntiAlias=1", "Text=\xE72C", "ToolTipText=立即同步 CalDAV");
+        Meter(output, "Manage", "Meter=String", "X=441", "Y=40", "FontFace=" + TileIconFont.Name, "FontSize=12", "FontColor=#MutedColor#", "StringAlign=CenterCenter", "AntiAlias=1", "Text=\xE700", "ToolTipText=日程管理");
+        Meter(output, "Sync", "Meter=String", "X=482", "Y=40", "FontFace=" + TileIconFont.Name, "FontSize=12", "FontColor=225,242,255,255", "StringAlign=CenterCenter", "AntiAlias=1", "Text=\xE72C", "ToolTipText=立即同步 CalDAV");
     }
     private static string TimeLabel(Dictionary<string,object>e,DateTimeOffset day){DateTimeOffset s=RuntimeUtil.Date(e,"start_at").Value,x=RuntimeUtil.Date(e,"end_at").Value,next=day.AddDays(1);if(B(e,"all_day"))return s.Date<day.Date||x.Date>next.Date?"全天 · 延续":"全天";if(s<day&&x>next)return"全天 · 延续";if(s<day)return"延续–"+x.ToString("HH:mm");if(x>next)return s.ToString("HH:mm")+"–次日";return x<=s?s.ToString("HH:mm"):s.ToString("HH:mm")+"–"+x.ToString("HH:mm");}
     private static void Meter(List<string>l,string n,params string[]b){l.Add("["+n+"]");l.AddRange(b.Select(option=>UiScale.RainmeterOption(option,RainmeterRenderScale)));l.Add("");}

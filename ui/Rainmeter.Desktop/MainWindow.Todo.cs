@@ -128,7 +128,7 @@ public sealed partial class MainWindow
             return;
         }
         Render();
-        if (saved) RunTodoAction("Render");
+        if (saved) RunTodoAction("RenderAndRefresh");
     }
 
     private async Task PickTodoTargetAsync(TextBox target)
@@ -168,11 +168,23 @@ public sealed partial class MainWindow
         if (state is null) { Empty("还没有待办数据。"); return; }
         var tasks = Items(state.RootElement, "tasks").ToArray();
         if (tasks.Length == 0) { Empty("一切就绪。新增一条待办，开始安排今天。"); return; }
-        var pending = tasks.Where(task => Value(task, "completed") != "True").ToArray();
-        var completed = tasks.Where(task => Value(task, "completed") == "True").ToArray();
+        var pending = tasks.Where(task => Value(task, "completed") != "True")
+            .OrderBy(task => TodoManagementDate(task, "due_at").HasValue ? 0 : 1)
+            .ThenBy(task => TodoManagementDate(task, "due_at") ?? DateTimeOffset.MaxValue)
+            .ThenBy(task => TodoManagementDate(task, "created_at") ?? DateTimeOffset.MinValue)
+            .ThenBy(task => Value(task, "id"), StringComparer.Ordinal)
+            .ToArray();
+        var completed = tasks.Where(task => Value(task, "completed") == "True")
+            .OrderByDescending(task => TodoManagementDate(task, "completed_at") ?? DateTimeOffset.MinValue)
+            .ThenBy(task => Value(task, "id"), StringComparer.Ordinal)
+            .ToArray();
         RenderTodoSection("未完成", pending, false);
         RenderTodoSection("已完成", completed, true);
     }
+
+    private static DateTimeOffset? TodoManagementDate(JsonElement task, string field)
+        => DateTimeOffset.TryParse(Value(task, field), CultureInfo.InvariantCulture,
+            DateTimeStyles.RoundtripKind, out var value) ? value : null;
 
     private void RenderTodoSection(string heading, JsonElement[] tasks, bool done)
     {

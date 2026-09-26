@@ -9,14 +9,10 @@ using RainmeterBackend;
 
 // v2.1 官方 Provider：论文快照同步（规格 docs/V2.1-PROVIDER-INTERFACE.md §7.1）。
 //
-// 职责只有一件事：把生成好的 PaperBundle 存进文件服务器（File Browser）、按需取回来。
+// 职责只有一件事：把现有论文数组存进文件服务器（File Browser）、按需取回来。
 // 不负责 arXiv 抓取、AI 评分、prompt、翻译、Todo 导入 —— 那些分别属于 arxiv 与其他 provider。
 //
-// 远端布局：paper/<date>-<hash12>.json（hash12 = profile_hash 前 12 位）。
-//   · 文件名由 (date, profile_hash) 决定 ⇒ 同一份配置重复上传是幂等覆盖、不同配置互不踩踏，
-//     因此不需要旧版那种「是否覆盖远端文件」的确认（§5.1：插件进程里本来也不允许 UI）。
-//   · 旧版 arxiv 1.0.2 的 paper/<date>_papers.json 不读取也不改动 —— §9.2 的
-//     「复制不删除」回滚保护在远端同样成立。
+// 远端布局：paper/<date>_papers.json，内容为论文数组。
 //
 // found:false（服务器明确回答「没有」）与 ok:false（请求失败）严格区分（§7.1）：
 // HTTP 404 → found:false；401/403/5xx/超时/DNS → ok:false（Broker 记 provider_error）。
@@ -60,7 +56,7 @@ internal static class PaperSnapshotSyncPlugin
         return ok?0:1;
     }
 
-    // ── get_snapshot：input {source, date, profile_hash} → {found:true, snapshot} / {found:false} ──
+    // ── get_snapshot：input {source, date} → {found:true, papers} / {found:false} ──
     private static int GetSnapshot(string requestId,Dictionary<string,object> config,Dictionary<string,object> secret,Dictionary<string,object> input)
     {
         ServerConfig server=BuildServerConfig(config,secret);
@@ -71,19 +67,12 @@ internal static class PaperSnapshotSyncPlugin
         if(source!="arxiv")throw new InvalidDataException("input.source 仅支持 arxiv，实际为「"+source+"」");
         string date=JsonUtil.String(input,"date","").Trim();
         RequireBundleDate(date,"input.date");
-        string hash=JsonUtil.String(input,"profile_hash","").Trim();
-        RequireProfileHash(hash,"input.profile_hash");
         if(server.BaseUrl==""||server.Account=="")return Emit(requestId,true,NotFound("文件服务器未配置"),null);
         string token=Login(server);
         try
         {
-            Dictionary<string,object> bundle=DownloadBundle(server,token,SnapshotFileName(date,hash));
-            // 文件名已经由请求的 (date,hash) 决定；内容里的指纹标记必须一致，否则说明文件
-            // 被换过或损坏 —— 这是错误（要进 warning 日志），不是「没有」。
-            string remoteHash=JsonUtil.String(JsonUtil.Object(JsonUtil.Get(bundle,"profile")),"profile_hash","");
-            if(!String.Equals(remoteHash,hash,StringComparison.Ordinal))
-                throw new InvalidDataException("远端快照的 profile_hash 与请求不符（文件可能已损坏或被替换）");
-            return Emit(requestId,true,new Dictionary<string,object>{{"found",true},{"snapshot",bundle}},null);
+            List<object> papers=DownloadPapers(server,token,SnapshotFileName(date));
+            return Emit(requestId,true,new Dictionary<string,object>{{"found",true},{"papers",papers}},null);
         }
         catch(FileServerException ex)
         {
@@ -92,27 +81,24 @@ internal static class PaperSnapshotSyncPlugin
         }
     }
 
-    // ── put_snapshot：input {snapshot:{…}} → {stored:true, remote_path} ──
+    // ── put_snapshot：input {date, papers:[…]} → {stored:true, remote_path} ──
     private static int PutSnapshot(string requestId,Dictionary<string,object> config,Dictionary<string,object> secret,Dictionary<string,object> input)
     {
         ServerConfig server=BuildServerConfig(config,secret);
         if(!server.Enabled)return Emit(requestId,true,new Dictionary<string,object>{{"stored",false},{"reason","插件未启用"}},null);
-        Dictionary<string,object> snapshot=JsonUtil.Object(JsonUtil.Get(input,"snapshot"));
-        if(snapshot.Count==0)throw new InvalidDataException("缺少 input.snapshot");
-        string json=JsonUtil.Serialize(snapshot);
+        List<object> papers=JsonUtil.Array(JsonUtil.Get(input,"papers"));
+        if(papers.Count==0)throw new InvalidDataException("缺少 input.papers 或论文数组为空");
+        string json=JsonUtil.Serialize(papers);
         if(Encoding.UTF8.GetByteCount(json)>PaperBundleValidator.MaxBundleBytes)
             throw new InvalidDataException("快照体积超过 8 MB 上限");
-        // 文件名需要的两个字段必须先过格式校验（bundle 全量校验是 consumer 的事，这里只看命名依据）。
-        string date=JsonUtil.String(snapshot,"date","").Trim();
-        RequireBundleDate(date,"snapshot.date");
-        string hash=JsonUtil.String(JsonUtil.Object(JsonUtil.Get(snapshot,"profile")),"profile_hash","").Trim();
-        RequireProfileHash(hash,"snapshot.profile.profile_hash");
+        // 文件名只由日期决定；论文数组的完整性由消费端校验。
+        string date=JsonUtil.String(input,"date","").Trim();
+        RequireBundleDate(date,"input.date");
         if(server.BaseUrl==""||server.Account=="")throw new InvalidDataException("文件服务器未配置，无法上传快照");
         string token=Login(server);
         EnsureRemoteDirectory(server,token);
-        string name=SnapshotFileName(date,hash);
-        // override=true：同一 (date, profile_hash) 的重复上传是幂等覆盖 —— 文件名已经由
-        // 配置指纹决定，不存在「覆盖别人的快照」的问题。
+        string name=SnapshotFileName(date);
+        // 同一天只保留一个现有格式文件。
         HttpCall("POST",server.BaseUrl+"/api/resources/"+RemoteDirectory+"/"+name+"?override=true",json,
             new Dictionary<string,string>{{"X-Auth",token}},30000);
         return Emit(requestId,true,new Dictionary<string,object>{{"stored",true},{"remote_path",RemoteDirectory+"/"+name}},null);
@@ -189,9 +175,9 @@ internal static class PaperSnapshotSyncPlugin
     }
 
     // ── 命名与输入校验 ─────────────────────────────────────────────────────────
-    private static string SnapshotFileName(string date,string profileHash)
+    private static string SnapshotFileName(string date)
     {
-        return date+"-"+profileHash.Substring(0,12)+".json";
+        return date+"_papers.json";
     }
 
     private static void RequireBundleDate(string value,string label)
@@ -199,12 +185,6 @@ internal static class PaperSnapshotSyncPlugin
         DateTime parsed;
         if(value==null||value.Length!=10||!DateTime.TryParseExact(value,"yyyy-MM-dd",CultureInfo.InvariantCulture,DateTimeStyles.None,out parsed))
             throw new InvalidDataException(label+" 必须是 YYYY-MM-DD，实际为「"+(value??"")+"」");
-    }
-
-    private static void RequireProfileHash(string value,string label)
-    {
-        if(value==null||value.Length!=64||!Regex.IsMatch(value,@"^[0-9a-f]{64}$"))
-            throw new InvalidDataException(label+" 必须是 64 位小写十六进制，实际为「"+(value??"")+"」");
     }
 
     private static string NormalizeHttpUrl(string value)
@@ -267,7 +247,7 @@ internal static class PaperSnapshotSyncPlugin
         }
     }
 
-    private static Dictionary<string,object> DownloadBundle(ServerConfig server,string token,string name)
+    private static List<object> DownloadPapers(ServerConfig server,string token,string name)
     {
         string raw=HttpCall("GET",server.BaseUrl+"/api/resources/"+RemoteDirectory+"/"+name,null,
             new Dictionary<string,string>{{"X-Auth",token}},15000);
@@ -275,9 +255,13 @@ internal static class PaperSnapshotSyncPlugin
         Dictionary<string,object> envelope=JsonUtil.Object(JsonUtil.Deserialize(raw));
         object content=JsonUtil.Get(envelope,"content");
         string json=content is string?(string)content:JsonUtil.Serialize(content??envelope);
-        Dictionary<string,object> bundle=JsonUtil.Object(JsonUtil.Deserialize(json));
-        if(bundle.Count==0)throw new InvalidDataException("远端快照内容不是 JSON 对象");
-        return bundle;
+        if(Encoding.UTF8.GetByteCount(json)>PaperBundleValidator.MaxBundleBytes)
+            throw new InvalidDataException("远端快照体积超过 8 MB 上限");
+        object parsed=JsonUtil.Deserialize(json);
+        if(!(parsed is System.Collections.IList))throw new InvalidDataException("远端快照内容不是论文数组");
+        List<object> papers=JsonUtil.Array(parsed);
+        if(papers.Count==0)throw new InvalidDataException("远端论文数组为空");
+        return papers;
     }
 
     private static void EnsureRemoteDirectory(ServerConfig server,string token)
@@ -301,14 +285,10 @@ internal static class PaperSnapshotSyncPlugin
     // ── 离线自检（不经网络；退出码 60 起）──────────────────────────────────────
     private static int RunSelfTests()
     {
-        string hash="";
-        for(int i=0;i<64;i++)hash+=((i%16)).ToString("x",CultureInfo.InvariantCulture);
-        // 60：文件名派生 = <date>-<hash12>.json。
-        if(SnapshotFileName("2026-09-16",hash)!="2026-09-16-"+hash.Substring(0,12)+".json")return 60;
-        // 61-62：date / profile_hash 的格式校验必须拒掉坏值（含大写 hex）。
+        // 60：文件名沿用现有服务器格式。
+        if(SnapshotFileName("2026-09-16")!="2026-09-16_papers.json")return 60;
+        // 61：日期格式校验必须拒掉坏值。
         if(!Throws(delegate{RequireBundleDate("2026-9-16","input.date");})||!Throws(delegate{RequireBundleDate("2026-09-32","input.date");}))return 61;
-        if(!Throws(delegate{RequireProfileHash(hash.Substring(1),"input.profile_hash");})
-            ||!Throws(delegate{RequireProfileHash(hash.ToUpperInvariant(),"input.profile_hash");}))return 62;
         // 63：地址 URL 规范化：补 https 前缀、去尾部斜杠。
         if(NormalizeHttpUrl("192.0.2.10:8900/")!="https://192.0.2.10:8900")return 63;
         // 64-67：地址插件接管四情形（同 arxiv AddressStatusSelfTest 的 55-59）。

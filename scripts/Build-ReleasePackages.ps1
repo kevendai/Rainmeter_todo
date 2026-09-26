@@ -20,10 +20,21 @@ if (-not (Test-Path -LiteralPath $installer)) {
     Invoke-WebRequest -Uri $RainmeterInstallerUrl -OutFile $installer
 }
 
+$OutputRoot = [IO.Path]::GetFullPath($OutputRoot)
+if (-not $OutputRoot.StartsWith($projectRoot.TrimEnd('\') + '\', [StringComparison]::OrdinalIgnoreCase) -or
+    [IO.Path]::GetFileName($OutputRoot) -notlike 'release-build*') { throw 'OutputRoot must be a release-build directory inside this repository.' }
 if (Test-Path -LiteralPath $OutputRoot) { Remove-Item -LiteralPath $OutputRoot -Recurse -Force }
 New-Item -ItemType Directory -Path $OutputRoot -Force | Out-Null
 $updaterBuild = Join-Path $OutputRoot '.updater-build'
 & (Join-Path $PSScriptRoot 'Build-Backend.ps1') -Backend Updater -OutputDirectory $updaterBuild | Out-Null
+$desktopBuild = Join-Path $OutputRoot '.desktop-build'
+$dotnet = Join-Path $projectRoot '.winui-tools\dotnet\dotnet.exe'
+if (-not (Test-Path -LiteralPath $dotnet)) { $dotnet = (Get-Command dotnet -ErrorAction Stop).Source }
+& $dotnet publish (Join-Path $projectRoot 'ui\Rainmeter.Desktop\Rainmeter.Desktop.csproj') -c Release -r win-x64 --self-contained true -p:Platform=x64 "-p:Version=$Version" -o $desktopBuild
+if ($LASTEXITCODE -ne 0) { throw 'WinUI self-contained publish failed.' }
+foreach ($required in @('Rainmeter.Desktop.exe','Rainmeter.Desktop.dll','Rainmeter.Desktop.runtimeconfig.json','coreclr.dll','Microsoft.UI.Xaml.dll')) {
+    if (-not (Test-Path -LiteralPath (Join-Path $desktopBuild $required))) { throw "Missing desktop runtime file: $required" }
+}
 
 function Copy-Tree {
     param([string]$Source, [string]$Destination)
@@ -45,6 +56,7 @@ function Copy-Tree {
         if ($excludedNames -contains $item.Name) { continue }
         if ($item.Name -like '*.tmp' -or $item.Name -like '*.log' -or $item.Name -like '*.build.exe' -or $item.Name -like '*.pdb') { continue }
         $relative = $item.FullName.Substring($Source.Length).TrimStart('\', '/')
+        if ($relative -match '(^|[\\/])DesktopUI([\\/]|$)') { continue }
         if ($relative -match '(^|[\\/])PaperCache([\\/]|$)') { continue }
         $target = Join-Path $Destination $relative
         if ($item.PSIsContainer) {
@@ -221,6 +233,7 @@ function New-Package {
 
     Copy-Tree (Join-Path $projectRoot 'skins\Todo') $todoRoot
     Copy-Tree (Join-Path $projectRoot 'skins\Calendar') $calendarRoot
+    Copy-Item -LiteralPath $desktopBuild -Destination (Join-Path $todoRoot '@Resources\DesktopUI') -Recurse -Force
     # PluginValues.inc is user/runtime data. Never copy the working-tree file
     # into a release; create a known-empty bridge for first startup instead.
     [IO.File]::WriteAllText(

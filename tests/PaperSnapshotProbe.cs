@@ -22,8 +22,7 @@ internal static class PaperSnapshotProbe
     private const string Service = "paper_snapshot_provider@1";
     private const string Consumer = "io.github.test.snapshot-consumer";
     private const string Date = "2026-09-16";
-    private const string Hash = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
-    private const string RemoteName = Date + "-0123456789ab.json";
+    private const string RemoteName = Date + "_papers.json";
     private static FakeFileBrowser server;
 
     private static int Main(string[] args)
@@ -53,7 +52,7 @@ internal static class PaperSnapshotProbe
     // ── manifest：真实 plugin.json 按 v2.1 语义加载 ───────────────────────────
     private static void ManifestSection()
     {
-        PluginManifest manifest = PluginManifest.Load(PluginPaths.VersionRoot(PluginId, "1.0.0"));
+        PluginManifest manifest = PluginRuntime.Resolve(PluginId, false);
         Expect(manifest.Provides.Count == 1 && manifest.Provides[0] == Service, "manifest 声明 provides=paper_snapshot_provider@1");
         Expect(manifest.Billing == "free", "billing=free");
         Expect(manifest.AddressTarget == "paper_snapshot.file_server", "address_target=paper_snapshot.file_server");
@@ -91,32 +90,29 @@ internal static class PaperSnapshotProbe
         Expect(!JsonUtil.Bool(missingOut, "found", true), "get_snapshot 未命中 ⇒ found:false");
         Expect(JsonUtil.String(missing, "error_kind", "") == "", "未命中不是 error_kind");
 
-        // 2) put：存储成功 + date-hash12 命名。
-        Dictionary<string, object> stored = Broker(new Dictionary<string, object>{{"snapshot", Bundle(Hash)}}, "put_snapshot");
+        // 2) put：存储成功，沿用日期_papers.json 命名。
+        Dictionary<string, object> stored = Broker(PutInput(), "put_snapshot");
         Dictionary<string, object> storedOut = Output(stored);
         Expect(JsonUtil.Bool(stored, "ok", false) && JsonUtil.Bool(storedOut, "stored", false), "put_snapshot 成功，实际 " + JsonUtil.String(stored, "error", ""));
-        Expect(JsonUtil.String(storedOut, "remote_path", "") == "paper/" + RemoteName, "remote_path=paper/<date>-<hash12>.json，实际 " + JsonUtil.String(storedOut, "remote_path", ""));
-        Expect(server.LastUploadBody.Contains(Hash) && server.LastUploadBody.Contains("2609.01234"), "上传正文是完整 bundle JSON");
+        Expect(JsonUtil.String(storedOut, "remote_path", "") == "paper/" + RemoteName, "remote_path=paper/<date>_papers.json，实际 " + JsonUtil.String(storedOut, "remote_path", ""));
+        Expect(server.LastUploadBody.StartsWith("[", StringComparison.Ordinal) && server.LastUploadBody.Contains("2609.01234"), "上传正文是论文数组 JSON");
         Expect(server.DirectoryCreated, "首次上传前创建了远端 paper 目录");
 
-        // 3) 命中：snapshot 原样回传、指纹一致、论文字段无损。
+        // 3) 命中：论文数组原样回传。
         Dictionary<string, object> hit = Broker(GetInput(), "get_snapshot");
         Dictionary<string, object> hitOut = Output(hit);
         Expect(JsonUtil.Bool(hit, "ok", false) && JsonUtil.Bool(hitOut, "found", false), "put 后 get_snapshot 命中");
-        Dictionary<string, object> snapshot = JsonUtil.Object(JsonUtil.Get(hitOut, "snapshot"));
-        Expect(JsonUtil.String(JsonUtil.Object(JsonUtil.Get(snapshot, "profile")), "profile_hash", "") == Hash, "回传 snapshot 的 profile_hash 一致");
-        List<object> papers = JsonUtil.Array(JsonUtil.Get(snapshot, "papers"));
+        List<object> papers = JsonUtil.Array(JsonUtil.Get(hitOut, "papers"));
         Dictionary<string, object> first = papers.Count > 0 ? JsonUtil.Object(papers[0]) : new Dictionary<string, object>();
-        Dictionary<string, object> scores = JsonUtil.Object(JsonUtil.Get(first, "scores"));
-        Expect(JsonUtil.String(first, "id", "") == "2609.01234", "论文 id 往返无损");
+        Dictionary<string, object> scores = JsonUtil.Object(JsonUtil.Get(first, "score"));
+        Expect(JsonUtil.String(first, "arxiv_id", "") == "2609.01234", "论文 id 往返无损");
         Expect(JsonUtil.Int(scores, "title", -1) == 9 && JsonUtil.Int(scores, "abstract", -1) == 46, "分段分数往返无损（title 0-10 / abstract 0-50）");
 
-        // 4) 输入校验：坏 date / 坏 source / 短 hash / 缺 snapshot / 坏 hash 全部拒绝。
-        ExpectRejected("坏 date 被拒", Broker(new Dictionary<string, object>{{"source", "arxiv"}, {"date", "2026-9-16"}, {"profile_hash", Hash}}, "get_snapshot"), "date");
-        ExpectRejected("非 arxiv source 被拒", Broker(new Dictionary<string, object>{{"source", "ieee"}, {"date", Date}, {"profile_hash", Hash}}, "get_snapshot"), "source");
-        ExpectRejected("大写 hash 被拒", Broker(new Dictionary<string, object>{{"source", "arxiv"}, {"date", Date}, {"profile_hash", Hash.ToUpperInvariant()}}, "get_snapshot"), "profile_hash");
-        ExpectRejected("缺 snapshot 被拒", Broker(new Dictionary<string, object>(), "put_snapshot"), "snapshot");
-        ExpectRejected("坏 profile_hash 的 bundle 被拒", Broker(new Dictionary<string, object>{{"snapshot", Bundle("zz" + Hash.Substring(2))}}, "put_snapshot"), "profile_hash");
+        // 4) 输入校验：日期、来源、论文数组。
+        ExpectRejected("坏 date 被拒", Broker(new Dictionary<string, object>{{"source", "arxiv"}, {"date", "2026-9-16"}}, "get_snapshot"), "date");
+        ExpectRejected("非 arxiv source 被拒", Broker(new Dictionary<string, object>{{"source", "ieee"}, {"date", Date}}, "get_snapshot"), "source");
+        ExpectRejected("缺 papers 被拒", Broker(new Dictionary<string, object>(), "put_snapshot"), "papers");
+        ExpectRejected("坏上传日期被拒", Broker(new Dictionary<string, object>{{"date", "2026-9-16"}, {"papers", JsonUtil.Get(PutInput(), "papers")}}, "put_snapshot"), "date");
 
         // 5) 认证失败：401 ⇒ ok:false + 可读中文（严格区别于 found:false）。
         server.Mode = "auth_fail";
@@ -131,12 +127,12 @@ internal static class PaperSnapshotProbe
         Expect(!JsonUtil.Bool(serverError, "ok", true) && JsonUtil.String(serverError, "error_kind", "") == "provider_error", "服务器 5xx ⇒ provider_error");
         server.Mode = "ok";
 
-        // 7) 损坏内容：文件名对了但内容指纹不符 ⇒ 错误（不是「没有」）。
-        server.SetFile(RemoteName, JsonUtil.Serialize(Bundle("fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210")));
+        // 7) 损坏内容：文件名对了但不是数组 ⇒ 错误（不是「没有」）。
+        server.SetFile(RemoteName, "{\"bad\":true}");
         Dictionary<string, object> corrupt = Broker(GetInput(), "get_snapshot");
         Expect(!JsonUtil.Bool(corrupt, "ok", true), "损坏快照 ⇒ ok:false");
-        Expect(JsonUtil.String(corrupt, "error", "").IndexOf("损坏", StringComparison.Ordinal) >= 0, "损坏文案写明原因：" + JsonUtil.String(corrupt, "error", ""));
-        server.SetFile(RemoteName, JsonUtil.Serialize(Bundle(Hash)));
+        Expect(JsonUtil.String(corrupt, "error", "").IndexOf("论文数组", StringComparison.Ordinal) >= 0, "损坏文案写明原因：" + JsonUtil.String(corrupt, "error", ""));
+        server.SetFile(RemoteName, JsonUtil.Serialize(JsonUtil.Get(PutInput(), "papers")));
 
         // 8) 自动下载关闭 ⇒ found:false 且不碰服务器。
         int downloadsBefore = server.Downloads;
@@ -149,7 +145,7 @@ internal static class PaperSnapshotProbe
         WritePluginConfig(server.Url, false, true, "probe-pass");
         Dictionary<string, object> disabledGet = Broker(GetInput(), "get_snapshot");
         Expect(JsonUtil.Bool(disabledGet, "ok", false) && !JsonUtil.Bool(Output(disabledGet), "found", true), "插件开关关闭 ⇒ get found:false");
-        Dictionary<string, object> disabledPut = Broker(new Dictionary<string, object>{{"snapshot", Bundle(Hash)}}, "put_snapshot");
+        Dictionary<string, object> disabledPut = Broker(PutInput(), "put_snapshot");
         Expect(JsonUtil.Bool(disabledPut, "ok", false) && !JsonUtil.Bool(Output(disabledPut), "stored", false), "插件开关关闭 ⇒ put stored:false");
         WritePluginConfig(server.Url, true, true, "probe-pass");
 
@@ -231,7 +227,7 @@ internal static class PaperSnapshotProbe
         Expect(JsonUtil.String(JsonUtil.Object(JsonUtil.Get(result, "payload")), "message", "").IndexOf("地址由", StringComparison.Ordinal) >= 0, "连接成功文案注明地址由地址插件提供");
 
         // Broker 链路在被接管地址下 get/put 依旧成功。
-        Dictionary<string, object> stored = Broker(new Dictionary<string, object>{{"snapshot", Bundle(Hash)}}, "put_snapshot");
+        Dictionary<string, object> stored = Broker(PutInput(), "put_snapshot");
         Expect(JsonUtil.Bool(stored, "ok", false) && JsonUtil.Bool(Output(stored), "stored", false), "被接管地址下 put 成功");
         Dictionary<string, object> hit = Broker(GetInput(), "get_snapshot");
         Expect(JsonUtil.Bool(hit, "ok", false) && JsonUtil.Bool(Output(hit), "found", false), "被接管地址下 get 命中");
@@ -257,7 +253,7 @@ internal static class PaperSnapshotProbe
 
     private static Dictionary<string, object> GetInput()
     {
-        return new Dictionary<string, object>{{"source", "arxiv"}, {"date", Date}, {"profile_hash", Hash}};
+        return new Dictionary<string, object>{{"source", "arxiv"}, {"date", Date}};
     }
 
     private static Dictionary<string, object> Output(Dictionary<string, object> response)
@@ -265,40 +261,15 @@ internal static class PaperSnapshotProbe
         return JsonUtil.Object(JsonUtil.Get(response, "output"));
     }
 
-    private static Dictionary<string, object> Bundle(string hash)
+    private static Dictionary<string, object> PutInput()
     {
-        Dictionary<string, object> profile = new Dictionary<string, object>();
-        profile["categories"] = new List<object> { "cs.CV" };
-        profile["exclude_categories"] = new List<object>();
-        profile["profile_hash"] = hash;
-        Dictionary<string, object> generator = new Dictionary<string, object>();
-        generator["type"] = "ai";
-        generator["provider_id"] = "io.github.test.fake-ai";
-        generator["model"] = "fake";
-        generator["producer_version"] = "probe 1.0";
-        generator["generated_at"] = "2026-09-16T08:00:00+08:00";
-        Dictionary<string, object> scores = new Dictionary<string, object>();
-        scores["title"] = 9;
-        scores["abstract"] = 46;
-        Dictionary<string, object> paper = new Dictionary<string, object>();
-        paper["id"] = "2609.01234";
-        paper["title"] = "Fake paper title";
-        paper["abstract"] = "Fake abstract";
-        paper["authors"] = new List<object>();
-        paper["categories"] = new List<object> { "cs.CV" };
-        paper["published_at"] = "2026-09-16T00:30:00+08:00";
-        paper["url"] = "https://arxiv.org/abs/2609.01234";
-        paper["pdf_url"] = "https://arxiv.org/pdf/2609.01234";
-        paper["scores"] = scores;
-        Dictionary<string, object> bundle = new Dictionary<string, object>();
-        bundle["schema_version"] = 1;
-        bundle["profile_hash_version"] = 1;
-        bundle["source"] = "arxiv";
-        bundle["date"] = Date;
-        bundle["profile"] = profile;
-        bundle["generator"] = generator;
-        bundle["papers"] = new List<object> { paper };
-        return bundle;
+        Dictionary<string, object> paper = new Dictionary<string, object>{
+            {"id", 1}, {"arxiv_id", "2609.01234"}, {"title", "Fake paper title"},
+            {"abstract", "Fake abstract"}, {"authors", "Example Author"},
+            {"abs_link", "https://arxiv.org/abs/2609.01234"},
+            {"pdf_link", "https://arxiv.org/pdf/2609.01234"},
+            {"score", new Dictionary<string, object>{{"title", 9}, {"abstract", 46}}}};
+        return new Dictionary<string, object>{{"date", Date}, {"papers", new List<object>{paper}}};
     }
 
     // 以一个未安装的 consumer 身份直接调用 Broker（§4.4：caller 身份只认环境变量）。

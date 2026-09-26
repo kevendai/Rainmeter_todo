@@ -86,12 +86,7 @@ function Write-Step {
 
 function Show-Message {
     param([string]$Text, [string]$Caption = 'Rainmeter Desktop Widgets')
-    try {
-        Add-Type -AssemblyName System.Windows.Forms
-        [System.Windows.Forms.MessageBox]::Show($Text, $Caption, [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Information) | Out-Null
-    } catch {
-        Write-Host $Text
-    }
+    Write-Step ($Caption + ': ' + $Text)
 }
 
 function Normalize-Version {

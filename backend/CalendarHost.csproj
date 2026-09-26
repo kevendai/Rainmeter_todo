@@ -16,10 +16,8 @@
     <Reference Include="mscorlib"><HintPath>$(MSBuildToolsPath)\mscorlib.dll</HintPath><Private>False</Private></Reference>
     <Reference Include="System" />
     <Reference Include="System.Core" />
-    <Reference Include="System.Drawing" />
     <Reference Include="System.Security" />
     <Reference Include="System.Web.Extensions" />
-    <Reference Include="System.Windows.Forms" />
     <Reference Include="System.Xml" />
   </ItemGroup>
   <ItemGroup>
@@ -27,11 +25,10 @@
     <Compile Include="DesktopUiBridge.cs" />
     <Compile Include="CalendarApp.cs" />
     <Compile Include="CalendarCalDavService.cs" />
-    <Compile Include="CalendarForms.cs" />
     <Compile Include="CalendarIcs.cs" />
     <Compile Include="CalendarRainmeterRenderer.cs" />
-    <Compile Include="CalendarRecurrence.cs" />
-    <Compile Include="CalendarRules.cs" />
+    <Compile Include="CalendarRecurrenceCore.cs" />
+    <Compile Include="CalendarRulesCore.cs" />
     <Compile Include="CalendarService.cs" />
     <Compile Include="CalendarServerUi.cs" />
     <Compile Include="CalendarStore.cs" />

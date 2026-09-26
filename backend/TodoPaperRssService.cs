@@ -9,7 +9,6 @@ using System.Net.Sockets;
 using System.Text;
 using System.Text.RegularExpressions;
 using System.Threading;
-using System.Windows.Forms;
 using System.Xml;
 using RainmeterBackend;
 
@@ -59,7 +58,7 @@ internal static partial class TodoApp
         try { if (File.Exists(PaperRssStatusPath)) File.Delete(PaperRssStatusPath); } catch { }
         try
         {
-            Process.Start(new ProcessStartInfo(Application.ExecutablePath, "PaperRssServer") {
+            Process.Start(new ProcessStartInfo(Process.GetCurrentProcess().MainModule.FileName, "PaperRssServer") {
                 UseShellExecute = false, CreateNoWindow = true, WindowStyle = ProcessWindowStyle.Hidden
             });
         }

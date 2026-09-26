@@ -1,10 +1,8 @@
 using System;
 using System.Collections.Generic;
-using System.Drawing;
 using System.Globalization;
 using System.Linq;
 using System.Text.RegularExpressions;
-using System.Windows.Forms;
 using RainmeterBackend;
 
 
@@ -112,63 +110,6 @@ internal static partial class CalendarApp
         if(spec.Frequency=="monthly")return "每月"+(spec.MonthDay>0?" · "+spec.MonthDay+"日":"");
         if(spec.Frequency=="yearly")return "每年"+(spec.Month>0&&spec.MonthDay>0?" · "+spec.Month+"月"+spec.MonthDay+"日":"");
         return "周期日程";
-    }
-
-    private static bool ShowRecurrenceDialog(RecurrenceSpec current,DateTime startDate,out RecurrenceSpec result)
-    {
-        RecurrenceSpec original=CopyRecurrence(current),working=CopyRecurrence(current);result=current;
-        Form f=LightUi.Form("周期设置",500,440);LightUi.Heading(f,"周期设置","设置日程重复频率和结束方式。");
-        if(working.Preserve){
-            Label info=new Label{Text="这个日程使用了当前界面无法安全简化的周期规则。保存日程内容时会原样保留该规则。",Left=30,Top=104,Width=440,Height=54,BackColor=Color.Transparent,ForeColor=LightUi.Muted,Font=new Font("Microsoft YaHei UI",10F)};
-            Button close=LightUi.PrimaryButton("知道了",386,372,84,DialogResult.OK);f.Controls.Add(info);f.Controls.Add(close);f.AcceptButton=close;if(f.ShowDialog()==DialogResult.OK){result=working;return true;}return false;
-        }
-        Label frequencyLabel=new Label{Text="重复频率",Left=30,Top=92,Width=100,Height=24,BackColor=Color.Transparent,ForeColor=LightUi.Text,Font=new Font("Microsoft YaHei UI",9.5F,FontStyle.Bold)};
-        string[] frequencyValues={"none","daily","weekly","monthly","yearly"},frequencyNames={"不重复","每天","每周","每月","每年"};
-        List<Button> frequencyButtons=new List<Button>();
-        Action paintFrequency=null;
-        paintFrequency=delegate{for(int i=0;i<frequencyButtons.Count;i++){Button button=frequencyButtons[i];bool active=working.Frequency==frequencyValues[i];button.BackColor=active?LightUi.AccentFill:Color.FromArgb(246,251,255);button.ForeColor=active?Color.White:LightUi.Text;button.FlatAppearance.BorderSize=0;button.FlatAppearance.MouseOverBackColor=active?Color.FromArgb(38,118,222):Color.White;}};
-        for(int i=0;i<frequencyValues.Length;i++){Button button=LightUi.Button(frequencyNames[i],30+i*88,120,80,DialogResult.None);button.Height=36;button.Tag=frequencyValues[i];button.TextAlign=ContentAlignment.MiddleCenter;button.Click+=delegate(object sender,EventArgs args){working.Frequency=Convert.ToString(((Control)sender).Tag,CultureInfo.InvariantCulture);working.Preserve=false;paintFrequency();};button.MouseEnter+=delegate(object sender,EventArgs args){Button hoverButton=(Button)sender;if(working.Frequency==Convert.ToString(hoverButton.Tag,CultureInfo.InvariantCulture))paintFrequency();};button.MouseLeave+=delegate{paintFrequency();};frequencyButtons.Add(button);f.Controls.Add(button);}
-        f.Controls.Add(frequencyLabel);paintFrequency();
-
-        Label weekdayLabel=new Label{Text="每周重复日",Left=30,Top=174,Width=120,Height=24,BackColor=Color.Transparent,ForeColor=LightUi.Text,Font=new Font("Microsoft YaHei UI",9.5F,FontStyle.Bold)};
-        List<Button> weekdayButtons=new List<Button>();Action paintWeekdays=null;
-        paintWeekdays=delegate{for(int i=0;i<weekdayButtons.Count;i++){Button button=weekdayButtons[i];int day=(int)button.Tag;bool active=working.Weekdays.Contains(day);Color background=active?LightUi.AccentFill:Color.FromArgb(246,251,255);button.BackColor=background;button.ForeColor=active?Color.White:LightUi.Text;button.FlatAppearance.BorderSize=0;button.FlatAppearance.MouseOverBackColor=active?Color.FromArgb(38,118,222):Color.White;button.FlatAppearance.MouseDownBackColor=active?Color.FromArgb(30,105,200):Color.FromArgb(232,244,254);}};
-        for(int day=1;day<=7;day++){Button button=LightUi.Button(WeekdayName(day).Substring(1),30+(day-1)*62,202,54,DialogResult.None);button.Height=34;button.Tag=day;button.TextAlign=ContentAlignment.MiddleCenter;button.Click+=delegate(object sender,EventArgs args){int value=(int)((Control)sender).Tag;if(working.Weekdays.Contains(value))working.Weekdays.Remove(value);else working.Weekdays.Add(value);paintWeekdays();};button.MouseEnter+=delegate(object sender,EventArgs args){Button hoverButton=(Button)sender;if(working.Weekdays.Contains((int)hoverButton.Tag))paintWeekdays();};button.MouseLeave+=delegate{paintWeekdays();};weekdayButtons.Add(button);f.Controls.Add(button);}
-        f.Controls.Add(weekdayLabel);paintWeekdays();
-
-        Label monthlyLabel=new Label{Text="每月重复日期",Left=30,Top=174,Width=120,Height=24,BackColor=Color.Transparent,ForeColor=LightUi.Text,Font=new Font("Microsoft YaHei UI",9.5F,FontStyle.Bold)};
-        Label monthlyPrefix=new Label{Text="每月第",Left=30,Top=207,Width=62,Height=26,BackColor=Color.Transparent,ForeColor=LightUi.Text,TextAlign=ContentAlignment.MiddleLeft};
-        ComboBox monthlyDay=new ComboBox{Left=92,Top=202,Width=76,Height=32,DropDownStyle=ComboBoxStyle.DropDownList,Font=new Font("Microsoft YaHei UI",10F)};
-        for(int day=1;day<=31;day++)monthlyDay.Items.Add(day);monthlyDay.SelectedItem=working.MonthDay>0?working.MonthDay:startDate.Day;
-        Label monthlyUnit=new Label{Text="日",Left=178,Top=207,Width=36,Height=26,BackColor=Color.Transparent,ForeColor=LightUi.Text};
-        Label yearlyLabel=new Label{Text="每年重复日期",Left=30,Top=174,Width=120,Height=24,BackColor=Color.Transparent,ForeColor=LightUi.Text,Font=new Font("Microsoft YaHei UI",9.5F,FontStyle.Bold)};
-        ComboBox yearlyMonth=new ComboBox{Left=30,Top=202,Width=76,Height=32,DropDownStyle=ComboBoxStyle.DropDownList,Font=new Font("Microsoft YaHei UI",10F)};
-        for(int month=1;month<=12;month++)yearlyMonth.Items.Add(month);yearlyMonth.SelectedItem=working.Month>0?working.Month:startDate.Month;
-        Label yearlyMonthUnit=new Label{Text="月",Left=114,Top=207,Width=32,Height=26,BackColor=Color.Transparent,ForeColor=LightUi.Text};
-        ComboBox yearlyDay=new ComboBox{Left=150,Top=202,Width=76,Height=32,DropDownStyle=ComboBoxStyle.DropDownList,Font=new Font("Microsoft YaHei UI",10F)};
-        Action refreshYearlyDays=delegate{int month=(int)yearlyMonth.SelectedItem,selected=yearlyDay.SelectedItem==null?(working.MonthDay>0?working.MonthDay:startDate.Day):(int)yearlyDay.SelectedItem,maxDay=DateTime.DaysInMonth(2024,month);yearlyDay.Items.Clear();for(int day=1;day<=maxDay;day++)yearlyDay.Items.Add(day);yearlyDay.SelectedItem=Math.Min(selected,maxDay);};
-        refreshYearlyDays();yearlyMonth.SelectedIndexChanged+=delegate{refreshYearlyDays();};
-        Label yearlyDayUnit=new Label{Text="日",Left=234,Top=207,Width=32,Height=26,BackColor=Color.Transparent,ForeColor=LightUi.Text};
-        f.Controls.AddRange(new Control[]{monthlyLabel,monthlyPrefix,monthlyDay,monthlyUnit,yearlyLabel,yearlyMonth,yearlyMonthUnit,yearlyDay,yearlyDayUnit});
-
-        Label endLabel=new Label{Text="结束方式",Left=30,Top=254,Width=100,Height=24,BackColor=Color.Transparent,ForeColor=LightUi.Text,Font=new Font("Microsoft YaHei UI",9.5F,FontStyle.Bold)};
-        RadioButton never=new RadioButton{Text="永不结束",Left=30,Top=286,Width=108,Height=28,BackColor=Color.Transparent,ForeColor=LightUi.Text,Checked=working.EndMode!="count"};
-        RadioButton countMode=new RadioButton{Text="共重复",Left=30,Top=322,Width=108,Height=28,BackColor=Color.Transparent,ForeColor=LightUi.Text,Checked=working.EndMode=="count"};
-        TextBox count=new TextBox{Left=142,Top=320,Width=86,Height=30,Text=Math.Max(1,Math.Min(999,working.Count)).ToString(CultureInfo.InvariantCulture),MaxLength=3,Font=new Font("Microsoft YaHei UI",10F)};
-        count.KeyPress+=delegate(object sender,KeyPressEventArgs args){if(!Char.IsControl(args.KeyChar)&&!Char.IsDigit(args.KeyChar))args.Handled=true;};
-        Label countUnit=new Label{Text="次（包含第一次）",Left=240,Top=324,Width=170,Height=24,BackColor=Color.Transparent,ForeColor=LightUi.Muted};
-        f.Controls.AddRange(new Control[]{endLabel,never,countMode,count,countUnit});
-        Button cancel=LightUi.Button("取消",330,382,66,DialogResult.Cancel),save=LightUi.PrimaryButton("确定",404,382,66,DialogResult.None);f.Controls.AddRange(new Control[]{cancel,save});f.CancelButton=cancel;
-        Action<bool> applyDialogLayout=delegate(bool expanded){int endTop=expanded?254:174,endOptionTop=endTop+32,countTop=endTop+68,buttonTop=expanded?382:302,targetHeight=expanded?440:360;endLabel.Top=UiScale.Logical(f,endTop);never.Top=UiScale.Logical(f,endOptionTop);countMode.Top=UiScale.Logical(f,countTop);count.Top=UiScale.Logical(f,countTop-2);countUnit.Top=UiScale.Logical(f,countTop+2);cancel.Top=UiScale.Logical(f,buttonTop);save.Top=UiScale.Logical(f,buttonTop);f.Height=UiScale.Logical(f,targetHeight);};
-        Action updateEnabled=delegate{bool active=working.Frequency!="none",weekly=working.Frequency=="weekly",monthly=working.Frequency=="monthly",yearly=working.Frequency=="yearly",expanded=weekly||monthly||yearly;weekdayLabel.Visible=weekly;foreach(Button b in weekdayButtons)b.Visible=b.Enabled=weekly;monthlyLabel.Visible=monthly;monthlyPrefix.Visible=monthly;monthlyDay.Visible=monthly;monthlyUnit.Visible=monthly;yearlyLabel.Visible=yearly;yearlyMonth.Visible=yearly;yearlyMonthUnit.Visible=yearly;yearlyDay.Visible=yearly;yearlyDayUnit.Visible=yearly;never.Enabled=countMode.Enabled=active;count.Enabled=active&&countMode.Checked;applyDialogLayout(expanded);};
-        foreach(Button button in frequencyButtons)button.Click+=delegate{working.Interval=1;if(working.EndMode=="until")working.EndMode="never";if(working.Frequency=="monthly"&&working.MonthDay==0)working.MonthDay=startDate.Day;if(working.Frequency=="yearly"){if(working.Month==0)working.Month=startDate.Month;if(working.MonthDay==0)working.MonthDay=startDate.Day;}never.Checked=working.EndMode!="count";paintWeekdays();updateEnabled();};never.CheckedChanged+=delegate{updateEnabled();};countMode.CheckedChanged+=delegate{updateEnabled();};updateEnabled();
-        save.Click+=delegate{
-            int repeatCount=working.Count;if(countMode.Checked&&(!Int32.TryParse(count.Text.Trim(),NumberStyles.None,CultureInfo.InvariantCulture,out repeatCount)||repeatCount<1||repeatCount>999)){LightUi.Error("重复次数请输入 1 到 999 之间的数字。");count.Focus();return;}
-            working.Interval=1;working.Count=countMode.Checked?repeatCount:Math.Max(1,working.Count);working.EndMode=countMode.Checked?"count":"never";if(working.Frequency=="monthly")working.MonthDay=(int)monthlyDay.SelectedItem;if(working.Frequency=="yearly"){working.Month=(int)yearlyMonth.SelectedItem;working.MonthDay=(int)yearlyDay.SelectedItem;if(working.MonthDay>DateTime.DaysInMonth(2024,working.Month)){LightUi.Error("所选月份没有这一天。");return;}}
-            if(working.Frequency=="weekly"&&working.Weekdays.Count==0){LightUi.Error("请至少选择一个每周重复日。");return;}
-            working.Changed=!SameRecurrence(original,working);f.DialogResult=DialogResult.OK;f.Close();
-        };
-        if(f.ShowDialog()!=DialogResult.OK)return false;result=working;return true;
     }
 
     private static DateTimeOffset LocalDateTime(DateTime date,DateTimeOffset template)

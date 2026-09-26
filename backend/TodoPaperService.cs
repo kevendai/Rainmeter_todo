@@ -9,7 +9,6 @@ using System.Text;
 using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
-using System.Windows.Forms;
 using System.Xml;
 using RainmeterBackend;
 
@@ -310,28 +309,26 @@ internal static partial class TodoApp
         return PaperProfileHash.Compute(profile);
     }
 
-    // 远端快照 → 内部论文表。结构合法性由 PaperBundleValidator 负责（远端 JSON 一律不可信），
-    // 这里只做形状转换。
+    // 远端使用现有的日期_papers.json 论文数组格式；读取前仍要校验不可信内容。
     private static SnapshotResult FetchSnapshot(PaperSettings settings, string date)
     {
-        string hash = ProfileHashOf(settings);
         Dictionary<string, object> call = new Dictionary<string, object> {
             {"source", PaperProfileHash.SourceId},
-            {"date", date},
-            {"profile_hash", hash}
+            {"date", date}
         };
         ServiceCallResult response = ServiceClient.Call(SnapshotService, "get_snapshot", call, SnapshotCallTimeoutSeconds);
         if (!response.Ok)
             return new SnapshotResult { Failed = true, Error = "远端论文同步失败：" + ServiceClient.Trim(response.Error) };
         if (!JsonUtil.Bool(response.Output, "found", false)) return new SnapshotResult();
-        // 快照以**原始 JSON 文本**回传：校验器要按字节判体积、按原样判结构，插件不该替它做形状假设。
-        string json = JsonUtil.Serialize(JsonUtil.Object(JsonUtil.Get(response.Output, "snapshot")));
-        PaperBundleCheckResult check = PaperBundleValidator.Check(json, hash);
-        if (check.Verdict == PaperBundleVerdict.Compatible)
-            return new SnapshotResult { Found = true, Papers = PapersFromBundle(check.Bundle, settings) };
-        // incompatible（结构合法但不是给我们用的）与 error（取不到/解析失败）都要**走 AI 询问**，
-        // 但绝不能导入 —— 把理由原样带出去给用户看（§6.2）。
-        return new SnapshotResult { Failed = true, Error = "远端快照不可用：" + check.Reason };
+        object raw = JsonUtil.Get(response.Output, "papers");
+        if (!(raw is System.Collections.IList))
+            return new SnapshotResult { Failed = true, Error = "远端快照不是论文数组" };
+        List<Dictionary<string, object>> papers = JsonUtil.Array(raw).Select(JsonUtil.Object).ToList();
+        if (papers.Count > 2000 || Encoding.UTF8.GetByteCount(JsonUtil.Serialize(raw)) > PaperBundleValidator.MaxBundleBytes ||
+            papers.Any(p => p.Count == 0 || S(p, "arxiv_id") == "" || S(p, "title") == "") ||
+            !IsPaperFileComplete(papers, settings))
+            return new SnapshotResult { Failed = true, Error = "远端论文数组不完整或超出限制" };
+        return new SnapshotResult { Found = true, Papers = papers };
     }
 
     private static List<Dictionary<string, object>> PapersFromBundle(PaperBundle bundle, PaperSettings settings)
@@ -413,7 +410,7 @@ internal static partial class TodoApp
     // 只是别的机器这次拿不到结果。
     private static string StoreSnapshot(List<Dictionary<string, object>> papers, string date, PaperSettings settings)
     {
-        Dictionary<string, object> call = new Dictionary<string, object> { { "snapshot", BundleFromPapers(papers, date, settings) } };
+        Dictionary<string, object> call = new Dictionary<string, object> { { "date", date }, { "papers", papers } };
         ServiceCallResult response = ServiceClient.Call(SnapshotService, "put_snapshot", call, SnapshotCallTimeoutSeconds);
         if (!response.Ok) return "失败：" + ServiceClient.Trim(response.Error);
         if (!JsonUtil.Bool(response.Output, "stored", false)) return "未存储：" + JsonUtil.String(response.Output, "reason", "提供者未存储该快照");
@@ -521,8 +518,9 @@ internal static partial class TodoApp
                 result.Error = "没有可用且已启用的 AI 评分插件，无法重新爬取并打分。";
                 return result;
             }
-            Meta(state)["status"] = "今天没有可用的论文推荐结果";
-            result.Summary = "今天没有可用的论文推荐结果。\r\n\r\n你可以：\r\n• 安装论文同步插件，从远端获取已经生成的推荐结果；\r\n• 安装 AI Provider，在需要时手动生成推荐结果。";
+            Meta(state)["status"] = "今日论文未更新：" + remoteError + "；AI 评分插件未启用或不可用";
+            result.Summary = JsonUtil.String(Meta(state), "status", "今日论文未更新")
+                + "。\r\n\r\n普通刷新依次检查本地缓存和远端同日期快照；重复点击不会绕过这两项去重新爬取。若需要新论文，请启用 AI 评分插件后在插件界面选择重新爬取并打分。";
             return result;
         }
         if (!PaidAiAllowed)

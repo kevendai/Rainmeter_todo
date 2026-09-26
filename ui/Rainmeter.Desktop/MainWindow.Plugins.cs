@@ -105,12 +105,58 @@ public sealed partial class MainWindow
         using var job = ReadJson(Path.Combine(pluginDataRoot, "PluginJobs", id + ".json"));
         if (job is null || Value(job.RootElement, "state") != "attention" ||
             Value(job.RootElement, "resume_action") == "") return;
-        using var prompt = Process.Start(new ProcessStartInfo(Path.Combine(todoRoot, "TodoHost.exe"))
+        var attention = job.RootElement.TryGetProperty("attention", out var info) ? info : default;
+        var allowSnooze = attention.ValueKind == JsonValueKind.Object &&
+            Value(attention, "allow_snooze") == "True";
+        var content = new StackPanel { Spacing = 14, MinWidth = 350 };
+        content.Children.Add(Text(Value(job.RootElement, "message", "这个任务需要用 AI 继续。"), 14));
+        content.Children.Add(Text("继续会使用已配置的 API Key 调用模型，费用由你的账号承担。", 13, muted: true));
+        var snooze = new CheckBox { Content = "今天不再提醒", Visibility = allowSnooze ? Visibility.Visible : Visibility.Collapsed };
+        content.Children.Add(snooze);
+        var dialog = new ContentDialog
         {
-            UseShellExecute = false, CreateNoWindow = true,
-            ArgumentList = { "PluginConfirmAttention", id }
-        }) ?? throw new InvalidOperationException("无法打开 AI 评分确认。");
-        await prompt.WaitForExitAsync();
+            XamlRoot = Shell.XamlRoot, Title = HumanPluginName(id) + " · AI 评分确认",
+            Content = content, PrimaryButtonText = "使用 AI 评分",
+            SecondaryButtonText = "不使用", CloseButtonText = "稍后再说"
+        };
+        var choice = await dialog.ShowAsync();
+        if (choice == ContentDialogResult.None) return;
+        var host = Path.Combine(todoRoot, "PluginHost.exe");
+        if (choice != ContentDialogResult.Primary)
+        {
+            using var cancelled = Process.Start(new ProcessStartInfo(host)
+            {
+                UseShellExecute = false, CreateNoWindow = true,
+                ArgumentList = { "Cancel", id, snooze.IsChecked == true ? "user_declined" : "user_cancelled" }
+            }) ?? throw new InvalidOperationException("无法保存本次选择。");
+            await cancelled.WaitForExitAsync();
+            if (cancelled.ExitCode != 0) throw new InvalidOperationException("未能保存本次选择。");
+            Render();
+            return;
+        }
+        var input = Path.Combine(Path.GetTempPath(), "rainmeter-paid-consent-" + Guid.NewGuid().ToString("N") + ".json");
+        var output = input + ".result.json";
+        try
+        {
+            var resume = job.RootElement.TryGetProperty("resume_input", out var payload) && payload.ValueKind == JsonValueKind.Object
+                ? JsonNode.Parse(payload.GetRawText())?.AsObject() ?? new JsonObject() : new JsonObject();
+            resume["allow_paid_ai"] = true;
+            File.WriteAllText(input, resume.ToJsonString());
+            var start = new ProcessStartInfo(host) { UseShellExecute = false, CreateNoWindow = true };
+            start.ArgumentList.Add("PluginAction"); start.ArgumentList.Add(id);
+            start.ArgumentList.Add(Value(job.RootElement, "resume_action"));
+            start.ArgumentList.Add(input); start.ArgumentList.Add(output);
+            start.Environment["RW_PAID_CONSENT"] = "1";
+            using var process = Process.Start(start) ?? throw new InvalidOperationException("无法继续 AI 评分。");
+            await process.WaitForExitAsync();
+            if (process.ExitCode != 0) throw new InvalidOperationException("AI 评分未能启动，请查看插件状态。");
+        }
+        finally
+        {
+            if (File.Exists(input)) File.Delete(input);
+            if (File.Exists(output)) File.Delete(output);
+        }
+        Render();
     }
 
     private string InstalledPluginStatus(string id, bool enabled)
@@ -214,6 +260,21 @@ public sealed partial class MainWindow
         await EditorDialog("测试连接", Text(message, 14), "确定").ShowAsync();
     }
 
+    private async Task ConfirmClearPluginTasksAsync(string id)
+    {
+        var dialog = new ContentDialog
+        {
+            XamlRoot = Shell.XamlRoot,
+            Title = "清除插件待办？",
+            Content = Text("这会删除该插件创建的全部待办，但不会卸载插件。", 14),
+            PrimaryButtonText = "清除",
+            CloseButtonText = "取消",
+            DefaultButton = ContentDialogButton.Close
+        };
+        if (await dialog.ShowAsync() != ContentDialogResult.Primary) return;
+        StartPluginUtility("TodoHost.exe", "PluginClearTasks", id);
+    }
+
     private Button PluginMoreActions(string id, JsonElement? manifest)
     {
         var button = Action("更多", () => { });
@@ -225,7 +286,7 @@ public sealed partial class MainWindow
             menu.Items.Add(item);
         }
         Add("取消当前任务", () => StartPluginUtility("PluginHost.exe", "Cancel", id));
-        Add("清除该插件创建的待办", () => StartPluginUtility("TodoHost.exe", "PluginClearTasks", id));
+        Add("清除该插件创建的待办", () => _ = ConfirmClearPluginTasksAsync(id));
         if (manifest is JsonElement data)
             foreach (var action in Items(data, "actions"))
             {
@@ -353,7 +414,8 @@ public sealed partial class MainWindow
                 var capability = manifest is null ? "" :
                     Items(manifest.RootElement, "capabilities").Select(item => item.GetString() ?? "")
                         .FirstOrDefault(value => value is "value_provider" or "todo_source") ?? "";
-                var hasConfig = manifest is not null && Value(manifest.RootElement, "settings_schema") != "";
+                var hasConfig = id == "io.github.kevendai.calendar-to-todo" ||
+                    manifest is not null && Value(manifest.RootElement, "settings_schema") != "";
                 var line = new Grid { ColumnSpacing = 16 };
                 line.ColumnDefinitions.Add(new ColumnDefinition());
                 line.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
