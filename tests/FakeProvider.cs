@@ -55,7 +55,7 @@ internal static class FakeProvider
                 if(payload.ContainsKey("__ok")){ok=(bool)payload["__ok"];payload.Remove("__ok");}
                 break;
             case "sync":
-                Thread.Sleep(4000);
+                Thread.Sleep(12000);
                 payload["tasks"]=new List<object>();
                 payload["summary"]="已完成（假插件）";
                 break;

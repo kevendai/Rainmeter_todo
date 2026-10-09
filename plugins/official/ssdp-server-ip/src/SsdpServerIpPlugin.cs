@@ -117,17 +117,45 @@ internal static class SsdpScanner
     public static List<SsdpDevice> Scan(NetworkRange range,string expectedUsn,int waitMs){return Scan(range,expectedUsn,waitMs,null);}
     public static List<SsdpDevice> Scan(NetworkRange range,string expectedUsn,int waitMs,Action<int,int> progress){return Run(Enumerate(range),expectedUsn,waitMs,expectedUsn!="",range.Count,progress);}
     private static IEnumerable<string> Enumerate(NetworkRange range){for(uint value=range.First;;value++){yield return NetworkRange.FromUInt(value);if(value==range.Last)break;}}
-    private static List<SsdpDevice> Run(IEnumerable<string> targets,string expectedUsn,int waitMs,bool stopOnMatch,int total,Action<int,int> progress)
+    internal static List<SsdpDevice> Run(IEnumerable<string> targets,string expectedUsn,int waitMs,bool stopOnMatch,int total,Action<int,int> progress,int port=1900)
     {
-        List<SsdpDevice> found=new List<SsdpDevice>();object gate=new object();
+        List<SsdpDevice> found=new List<SsdpDevice>();HashSet<string> identities=new HashSet<string>(StringComparer.OrdinalIgnoreCase);object gate=new object();
         using(ManualResetEvent stop=new ManualResetEvent(false))
         using(UdpClient client=new UdpClient(new IPEndPoint(IPAddress.Any,0)))
         {
             byte[] bytes=Encoding.ASCII.GetBytes(SsdpServerIpPlugin.SearchMessage);client.Client.ReceiveTimeout=100;
-            Thread receiver=new Thread(delegate(){while(!stop.WaitOne(0)){try{IPEndPoint ep=new IPEndPoint(IPAddress.Any,0);byte[] response=client.Receive(ref ep);SsdpDevice device=Parse(response,ep);if(device==null)continue;bool match=expectedUsn==""||String.Equals(device.Usn,expectedUsn,StringComparison.OrdinalIgnoreCase);lock(gate){if(!found.Any(x=>String.Equals(x.Usn,device.Usn,StringComparison.OrdinalIgnoreCase)&&x.Ip==device.Ip))found.Add(device);if(stopOnMatch&&match)stop.Set();}}catch(SocketException ex){if(ex.SocketErrorCode!=SocketError.TimedOut&&!stop.WaitOne(0))Thread.Sleep(10);}catch(ObjectDisposedException){return;}}});
+            client.Client.ReceiveBufferSize=1024*1024;
+            // Closed UDP ports must not interrupt reception of other hosts' replies on Windows.
+            try{client.Client.IOControl(unchecked((IOControlCode)0x9800000C),new byte[]{0},null);}catch(SocketException){}
+            Thread receiver=new Thread(delegate(){while(!stop.WaitOne(0)){try{IPEndPoint ep=new IPEndPoint(IPAddress.Any,0);byte[] response=client.Receive(ref ep);SsdpDevice device=Parse(response,ep);if(device==null)continue;bool match=expectedUsn==""||String.Equals(device.Usn,expectedUsn,StringComparison.OrdinalIgnoreCase);lock(gate){if(identities.Add(device.Ip+"|"+device.Usn))found.Add(device);if(stopOnMatch&&match)stop.Set();}}catch(SocketException ex){if(ex.SocketErrorCode!=SocketError.TimedOut&&!stop.WaitOne(0))Thread.Sleep(10);}catch(ObjectDisposedException){return;}}});
             receiver.IsBackground=true;receiver.Start();int sent=0;
-            foreach(string target in targets){if(stop.WaitOne(0))break;try{client.Send(bytes,bytes.Length,target,1900);}catch(SocketException){}sent++;if(progress!=null&&((sent&255)==0||sent==total))progress(sent,total);if((sent&127)==0)Thread.Sleep(1);}
-            if(progress!=null)progress(Math.Min(sent,total),total);stop.WaitOne(waitMs);stop.Set();try{client.Close();}catch{}receiver.Join(500);
+            try
+            {
+                using(IEnumerator<string> iterator=targets.GetEnumerator())
+                {
+                    while(!stop.WaitOne(0))
+                    {
+                        List<string> block=new List<string>(256);
+                        while(block.Count<256&&iterator.MoveNext())block.Add(iterator.Current);
+                        if(block.Count==0)break;
+                        for(int round=0;round<2&&!stop.WaitOne(0);round++)
+                        {
+                            int burst=0;
+                            foreach(string target in block)
+                            {
+                                if(stop.WaitOne(0))break;
+                                try{client.Send(bytes,bytes.Length,target,port);}catch(SocketException){}
+                                if(++burst%32==0)stop.WaitOne(10);
+                            }
+                            if(round==0)stop.WaitOne(total==1?Math.Max(1,waitMs/2):100);
+                        }
+                        sent+=block.Count;
+                        if(progress!=null)progress(Math.Min(sent,total),total);
+                    }
+                }
+                stop.WaitOne(total==1?Math.Max(1,waitMs-waitMs/2):waitMs);
+            }
+            finally{stop.Set();try{client.Close();}catch{}receiver.Join(500);}
         }
         lock(gate)return expectedUsn==""?found.OrderBy(x=>NetworkRange.ToUInt(IPAddress.Parse(x.Ip))).ThenBy(x=>x.SystemName()).ToList():found.Where(x=>String.Equals(x.Usn,expectedUsn,StringComparison.OrdinalIgnoreCase)).Take(1).ToList();
     }

@@ -90,6 +90,19 @@ internal static partial class TodoApp
         catch(Exception ex){try{JsonUtil.SaveAtomic(resultPath,new Dictionary<string,object>{{"ok",false},{"error",ex.Message}});}catch{}return 1;}
     }
 
+    private static int UiPluginInstallLocal(string packagePath,string resultPath)
+    {
+        try
+        {
+            if(String.IsNullOrWhiteSpace(packagePath)||!File.Exists(packagePath)
+                ||!String.Equals(Path.GetExtension(packagePath),".rwplugin",StringComparison.OrdinalIgnoreCase))
+                throw new Exception("请选择有效的 .rwplugin 插件包。");
+            PluginPackageInstaller.Install(packagePath,PluginPaths.Plugins,AppVersion,"");
+            JsonUtil.SaveAtomic(resultPath,new Dictionary<string,object>{{"ok",true}});return 0;
+        }
+        catch(Exception ex){try{JsonUtil.SaveAtomic(resultPath,new Dictionary<string,object>{{"ok",false},{"error",ex.Message}});}catch{}return 1;}
+    }
+
     private static int UiMarketInstall(string pluginId,string resultPath)
     {
         try

@@ -58,30 +58,27 @@ public sealed partial class MainWindow
             var savedQuery = Value(data, "query");
             var ssdpIp = Value(data, "provider_ip");
             var body = new StackPanel { Spacing = 16, HorizontalAlignment = HorizontalAlignment.Stretch };
-            body.Children.Add(Text("连接到你自己的 CalDAV 服务器。SSDP 只管理 IP；端口、协议和路径由你决定。", 13, muted: true));
 
             var address = new StackPanel { Spacing = 12 };
             address.Children.Add(Text("服务器地址", 17, true));
             var source = EditorControl(new ComboBox { Header = "IP 地址来源" });
-            source.Items.Add(new ComboBoxItem { Content = "手动填写", Tag = "manual" });
+            source.Items.Add(new ComboBoxItem { Content = "手动填写（HTTP）", Tag = "http" });
+            source.Items.Add(new ComboBoxItem { Content = "手动填写（HTTPS）", Tag = "https" });
             source.Items.Add(new ComboBoxItem { Content = "SSDP 自动发现", Tag = "ssdp" });
-            source.SelectedIndex = savedSource == "ssdp" ? 1 : 0;
+            source.SelectedIndex = savedSource == "ssdp" ? 2 : Value(data, "scheme") == "https" ? 1 : 0;
             address.Children.Add(source);
             var host = EditorControl(new TextBox { Header = "IP 地址 / 主机名", Text = savedHost });
             var manualHost = savedHost;
-            host.TextChanged += (_, _) => { if (source.SelectedIndex == 0) manualHost = host.Text; };
+            host.TextChanged += (_, _) => { if (source.SelectedIndex != 2) manualHost = host.Text; };
             var port = EditorControl(new TextBox { Header = "端口", Text = Value(data, "port", "443") });
             var endpoint = new Grid { ColumnSpacing = 10 };
             endpoint.ColumnDefinitions.Add(new ColumnDefinition());
             endpoint.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(132) });
             endpoint.Children.Add(host); Grid.SetColumn(port, 1); endpoint.Children.Add(port);
             address.Children.Add(endpoint);
-            var scheme = EditorControl(new ComboBox { Header = "协议" });
-            scheme.Items.Add("https"); scheme.Items.Add("http");
-            scheme.SelectedIndex = Value(data, "scheme") == "http" ? 1 : 0;
             var path = EditorControl(new TextBox { Header = "路径（可选）", Text = Value(data, "path"),
                 PlaceholderText = "例如 /caldav" });
-            address.Children.Add(scheme); address.Children.Add(path);
+            address.Children.Add(path);
             body.Children.Add(Card(address, 18));
 
             var account = new StackPanel { Spacing = 12 };
@@ -97,19 +94,50 @@ public sealed partial class MainWindow
             body.Children.Add(feedback);
             void UpdateSource()
             {
-                var automatic = source.SelectedIndex == 1;
+                var automatic = source.SelectedIndex == 2;
                 host.IsEnabled = !automatic;
                 host.Text = automatic ? ssdpIp : manualHost;
+                UpdatePort();
             }
+            void UpdatePort()
+            {
+                var https = source.SelectedIndex == 1;
+                port.Visibility = https ? Visibility.Collapsed : Visibility.Visible;
+                endpoint.ColumnDefinitions[1].Width = new GridLength(https ? 0 : 132);
+                endpoint.ColumnSpacing = https ? 0 : 10;
+            }
+            void NormalizeHost()
+            {
+                if (source.SelectedIndex == 2) return;
+                var raw = host.Text.Trim();
+                if (!(raw.StartsWith("http://", StringComparison.OrdinalIgnoreCase)
+                    || raw.StartsWith("https://", StringComparison.OrdinalIgnoreCase))) return;
+                if (!Uri.TryCreate(raw, UriKind.Absolute, out var uri) || uri.Host == "")
+                    throw new InvalidOperationException("服务器地址无效。");
+                manualHost = uri.Host;
+                source.SelectedIndex = uri.Scheme == "https" ? 1 : 0;
+                host.Text = manualHost;
+                if (uri.Scheme == "http") port.Text = uri.Port.ToString();
+                if (uri.AbsolutePath != "/") path.Text = uri.AbsolutePath;
+                savedQuery = uri.Query;
+            }
+            host.LostFocus += (_, _) =>
+            {
+                try { NormalizeHost(); }
+                catch (Exception ex) { feedback.Text = ex.Message; }
+            };
             source.SelectionChanged += (_, _) => UpdateSource();
             UpdateSource();
-            object Request() => new
+            object Request()
             {
-                source = source.SelectedIndex == 1 ? "ssdp" : "manual",
-                scheme = scheme.SelectedIndex == 1 ? "http" : "https",
-                host = host.Text.Trim(), port = port.Text.Trim(), path = path.Text.Trim(), query = savedQuery,
+                NormalizeHost();
+                return new {
+                source = source.SelectedIndex == 2 ? "ssdp" : "manual",
+                scheme = source.SelectedIndex == 1 ? "https" : "http",
+                host = host.Text.Trim(), port = source.SelectedIndex == 1 ? "443" : port.Text.Trim(), path = path.Text.Trim(), query = savedQuery,
                 username = username.Text.Trim(), password = password.Password
-            };
+                };
+            }
             var test = Action("测试连接", () => { });
             test.Click += async (_, _) =>
             {
@@ -119,6 +147,8 @@ public sealed partial class MainWindow
                 {
                     using var response = await CalendarServerCommandAsync("UiServerTest", Request());
                     feedback.Text = Value(response.RootElement, "message", "连接成功。");
+                    var discoveredPath = Value(response.RootElement, "calendar_path");
+                    if (discoveredPath != "") path.Text = discoveredPath;
                 }
                 catch (Exception ex) { feedback.Text = "连接失败：" + ex.Message; }
                 finally { test.IsEnabled = true; }
@@ -127,7 +157,6 @@ public sealed partial class MainWindow
             var buttons = Row(test, clear);
             body.Children.Add(buttons);
             var dialog = EditorDialog("日程同步服务器", body, "保存设置");
-            dialog.Width = 720;
             if (dialog.Content is ScrollViewer scroller) scroller.MaxHeight = 630;
             var clearArmed = false;
             clear.Click += async (_, _) =>

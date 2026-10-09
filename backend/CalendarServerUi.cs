@@ -79,7 +79,9 @@ internal static partial class CalendarApp
                     string password=JsonUtil.String(input,"password","");if(password=="")password=JsonUtil.String(existing,"Password","");
                     string source=JsonUtil.String(input,"source","manual");
                     string server=ServerUrlFromInput(input,source);
-                    result=new Dictionary<string,object>{{"message",TestCredentials(server,JsonUtil.String(input,"username",""),password,source)}};
+                    CalendarInfo discovered=Discover(CredentialsFromValues(server,JsonUtil.String(input,"username",""),password,source));
+                    result=new Dictionary<string,object>{{"message","连接成功："+(discovered.Name==""?discovered.Uri:discovered.Name)},
+                        {"calendar_url",discovered.Uri},{"calendar_path",new Uri(discovered.Uri).AbsolutePath}};
                 }
                 else
                 {
@@ -96,7 +98,9 @@ internal static partial class CalendarApp
                                 if(calendarCredentialsLoadError!="")throw new InvalidDataException(calendarCredentialsLoadError);
                                 string password=JsonUtil.String(input,"password","");if(password=="")password=JsonUtil.String(existing,"Password","");
                                 string source=JsonUtil.String(input,"source","manual");
-                                SaveCredentials(ServerUrlFromInput(input,source),JsonUtil.String(input,"username",""),password,cache,source);
+                                string server=ServerUrlFromInput(input,source),username=JsonUtil.String(input,"username","");
+                                CalendarInfo selected=Discover(CredentialsFromValues(server,username,password,source));
+                                SaveCredentials(selected.Uri,username,password,cache,source);
                             }
                             Render(cache,Load(StatePath,NewState()));
                             result=new Dictionary<string,object>{{"message",action=="UiServerClear"?"已清除日程同步服务器。":"日程同步服务器已保存。"}};
@@ -135,14 +139,24 @@ internal static partial class CalendarApp
     private static string ServerUrlFromInput(Dictionary<string,object> input,string source)
     {
         if(source!="manual"&&source!="ssdp")throw new InvalidDataException("IP 地址来源无效。");
-        string scheme=JsonUtil.String(input,"scheme","https");
+        string scheme=source=="ssdp"?"http":JsonUtil.String(input,"scheme","https");
         if(scheme!="http"&&scheme!="https")throw new InvalidDataException("协议只能是 HTTP 或 HTTPS。");
         AddressProviderBinding provider=source=="ssdp"?DynamicPluginValues.AddressProvider("calendar.caldav"):null;
         string host=source=="ssdp"?(provider==null?"":provider.Value):JsonUtil.String(input,"host","").Trim();
         if(host=="")throw new InvalidDataException(source=="ssdp"?"SSDP 尚未提供服务器 IP，请先执行 SSDP 插件。":"请填写服务器 IP 或主机名。");
-        int port=JsonUtil.Int(input,"port",0);if(port<1||port>65535)throw new InvalidDataException("端口必须是 1–65535。");
         string path=JsonUtil.String(input,"path","").Trim();
-        try{UriBuilder builder=new UriBuilder(scheme,host,port,path);builder.Query=JsonUtil.String(input,"query","");return builder.Uri.AbsoluteUri.TrimEnd('/');}
+        string query=JsonUtil.String(input,"query","");
+        int port=JsonUtil.Int(input,"port",0);
+        if(source=="manual"&&(host.StartsWith("http://",StringComparison.OrdinalIgnoreCase)||host.StartsWith("https://",StringComparison.OrdinalIgnoreCase)))
+        {
+            Uri supplied;if(!Uri.TryCreate(host,UriKind.Absolute,out supplied)||supplied.Host=="")throw new InvalidDataException("日程服务器地址无效。");
+            scheme=supplied.Scheme;host=supplied.Host;port=supplied.Port;
+            if(supplied.AbsolutePath!="/")path=supplied.AbsolutePath;
+            query=supplied.Query;
+        }
+        if(scheme=="https")port=-1;
+        else if(port<1||port>65535)throw new InvalidDataException("端口必须是 1–65535。");
+        try{UriBuilder builder=new UriBuilder(scheme,host,port,path);builder.Query=query.TrimStart('?');return builder.Uri.AbsoluteUri.TrimEnd('/');}
         catch(Exception ex){throw new InvalidDataException("日程服务器地址无效："+ex.Message);}
     }
 }

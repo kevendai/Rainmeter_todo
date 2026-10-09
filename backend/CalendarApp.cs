@@ -29,6 +29,17 @@ internal static partial class CalendarApp
             return HandleServerUi(action,id,args.Length>2?args[2]:"");
         if(action=="New"||action=="Edit"||action=="Detail"||action=="Manage"||action=="Settings"||action=="Convert")
             return DesktopUiBridge.TryOpen(TodoDir,"calendar",action,id)?0:5;
+        // Atomic state files can be read without holding the writer mutex. Queries
+        // may be cancelled by the UI and must never abandon the mutation lock.
+        if(action=="UiEvents"){
+            try{
+                var queryCache=File.Exists(CachePath)?JsonUtil.LoadObject(CachePath):NewCache();
+                var queryState=File.Exists(StatePath)?JsonUtil.LoadObject(StatePath):NewState();
+                Shape(queryCache,queryState);
+                JsonUtil.SaveAtomic(id+".result.json",CalendarUiModel(queryCache,queryState,JsonUtil.LoadObject(id)));
+                return 0;
+            }catch{return 1;}
+        }
         using(Mutex mutex=new Mutex(false,@"Global\RainmeterCalendarState")){bool held=false;Dictionary<string,object> cache=null,state=null;try{
             held=mutex.WaitOne(TimeSpan.FromSeconds(20));if(!held)return 4;cache=Load(CachePath,NewCache());state=Load(StatePath,NewState());Shape(cache,state);if(Reconcile(state))Save(StatePath,state);bool refresh=false,refreshTodo=false;
             if(action=="Startup"||action=="Rollover"||action=="Sync"){
@@ -49,7 +60,7 @@ internal static partial class CalendarApp
                 string resultPath=id+".result.json";
                 try{
                     Dictionary<string,object> input=JsonUtil.LoadObject(id);
-                    Dictionary<string,object> ev=FindEvent(cache,state,JsonUtil.String(input,"id",""));
+                    Dictionary<string,object> ev=FindUiEvent(cache,state,input);
                     if(ev==null)throw new Exception("日程已不存在，请刷新后重试。");
                     bool added=ConvertWithoutUi(ev,state,cache,JsonUtil.String(input,"mode","once"),JsonUtil.Bool(input,"hide",true));
                     Save(StatePath,state);Save(CachePath,cache);Render(cache,state);refresh=true;refreshTodo=added;
@@ -75,7 +86,7 @@ internal static partial class CalendarApp
                 string resultPath=id+".result.json";
                 try{
                     Dictionary<string,object> input=JsonUtil.LoadObject(id);
-                    Dictionary<string,object> ev=FindEvent(cache,state,JsonUtil.String(input,"id",""));
+                    Dictionary<string,object> ev=FindUiEvent(cache,state,input);
                     if(ev==null)throw new Exception("日程已不存在，请刷新后重试。");
                     string mode=JsonUtil.String(input,"mode","series");
                     if(mode!="once"&&mode!="series")throw new InvalidDataException("删除范围无效");
@@ -96,7 +107,7 @@ internal static partial class CalendarApp
         if(String.IsNullOrWhiteSpace(inputPath)||!File.Exists(inputPath))throw new Exception("日程输入文件不存在。");
         Dictionary<string,object> input=JsonUtil.LoadObject(inputPath);
         string id=JsonUtil.String(input,"id",""),source=JsonUtil.String(input,"source","local");
-        Dictionary<string,object> original=id==""?null:FindEvent(cache,state,id);
+        Dictionary<string,object> original=id==""?null:FindUiEvent(cache,state,input);
         if(id!=""&&original==null)throw new Exception("日程已不存在，请刷新后重试。");
         bool recurring=original!=null&&B(original,"recurring");
         if(recurring&&S(original,"source")=="caldav"){
@@ -107,7 +118,9 @@ internal static partial class CalendarApp
                 edit["recurring"]=true;original=edit;}
         }else if(recurring){Dictionary<string,object> master=LocalSeriesMaster(state,original);if(master!=null)original=master;}
         if(source!="local"&&source!="caldav")throw new Exception("日程来源无效。");
-        if(original!=null&&S(original,"source")!=source)throw new Exception("当前不支持更改已有日程来源。");
+        bool moveLocalToCalDav=original!=null&&S(original,"source")=="local"&&source=="caldav";
+        if(original!=null&&S(original,"source")!=source&&!moveLocalToCalDav)
+            throw new Exception("当前不支持更改已有日程来源。");
         string title=JsonUtil.String(input,"title","").Trim();
         if(title=="")throw new Exception("标题不能为空。");
         DateTimeOffset start,end;
@@ -169,7 +182,11 @@ internal static partial class CalendarApp
             recurrence);
         draft["time_changed"]=timingChanged;
         if(recurring&&timingChanged&&!recurrence.Preserve){recurrence.Changed=true;draft["rrule"]=BuildRecurrenceRule(recurrence,start,allDay);draft["rrule_changed"]=true;}
-        if(source=="caldav") {if(recurring)SaveCalDavSeriesEvent(draft,cache);else SaveCalDavEvent(draft,cache);}
+        if(source=="caldav") {
+            if(recurring&&!moveLocalToCalDav)SaveCalDavSeriesEvent(draft,cache);
+            else SaveCalDavEvent(draft,cache);
+            if(moveLocalToCalDav)DeleteLocalEvent(original,state);
+        }
         else{SaveLocalEvent(draft,state);cache["status"]="已保存到本地日历";}
     }
 

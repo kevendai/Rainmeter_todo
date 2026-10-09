@@ -2,15 +2,87 @@ using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Media;
 using Microsoft.UI.Xaml.Input;
+using Microsoft.UI.Composition.SystemBackdrops;
 using System.Runtime.CompilerServices;
+using Windows.UI;
 
 namespace Rainmeter.Desktop;
 
 public sealed partial class MainWindow
 {
-    private Brush EditorSurface => DarkTheme ? Brush(41, 35, 51) : Brush(250, 248, 252);
-    private Brush EditorField => DarkTheme ? Brush(53, 47, 64) : Brush(242, 238, 245);
-    private Brush EditorStroke => DarkTheme ? Brush(68, 59, 80) : Brush(221, 213, 226);
+    private Brush EditorSurface => DarkTheme
+        ? Brush(41, 35, 51, studioStyle ? 42 : 62)
+        : Brush(250, 247, 253, studioStyle ? 42 : 62);
+    private Brush EditorField => DarkTheme
+        ? studioStyle ? Brush(59, 51, 70, 185) : Brush(53, 47, 64, 220)
+        : studioStyle ? Brush(249, 246, 253, 195) : Brush(242, 238, 245, 224);
+    private Brush EditorStroke => DarkTheme ? Brush(180, 161, 198, 76) : Brush(108, 82, 139, 70);
+    private Brush DialogStroke => DarkTheme
+        ? Brush(255, 255, 255, studioStyle ? 52 : 36)
+        : Brush(255, 255, 255, studioStyle ? 185 : 145);
+
+    private ContentDialog MaterialDialog(ContentDialog dialog)
+    {
+        var primaryStyle = new Style(typeof(Button))
+        {
+            BasedOn = (Style)Application.Current.Resources["AccentButtonStyle"]
+        };
+        primaryStyle.Setters.Add(new Setter(Control.BackgroundProperty, PrimaryFill));
+        primaryStyle.Setters.Add(new Setter(Control.ForegroundProperty, Brush(255, 255, 255)));
+        var secondaryStyle = new Style(typeof(Button));
+        secondaryStyle.Setters.Add(new Setter(Control.BackgroundProperty, EditorField));
+        secondaryStyle.Setters.Add(new Setter(Control.ForegroundProperty, Ink));
+        secondaryStyle.Setters.Add(new Setter(Control.BorderBrushProperty, EditorStroke));
+        secondaryStyle.Setters.Add(new Setter(Control.BorderThicknessProperty, new Thickness(1)));
+        secondaryStyle.Setters.Add(new Setter(Control.CornerRadiusProperty, new CornerRadius(10)));
+
+        dialog.UseLayoutRounding = true;
+        dialog.XamlRoot = Shell.XamlRoot;
+        dialog.RequestedTheme = DarkTheme ? ElementTheme.Dark : ElementTheme.Light;
+        dialog.Background = EditorSurface;
+        dialog.Foreground = Ink;
+        dialog.BorderBrush = DialogStroke;
+        dialog.BorderThickness = new Thickness(1);
+        dialog.CornerRadius = new CornerRadius(20);
+        if (dialog.Title is string title) dialog.Title = Text(title, 21, true);
+        dialog.PrimaryButtonStyle = primaryStyle;
+        dialog.SecondaryButtonStyle = secondaryStyle;
+        dialog.CloseButtonStyle = secondaryStyle;
+        dialog.Resources["ContentDialogTopOverlay"] = DarkTheme
+            ? Brush(255, 255, 255, 10)
+            : Brush(255, 255, 255, 18);
+        dialog.Resources["AccentFillColorDefaultBrush"] = PrimaryFill;
+        dialog.Resources["AccentFillColorSecondaryBrush"] = PrimaryFill;
+        dialog.Loaded += (_, _) => AddDialogBackdrop(dialog);
+        return dialog;
+    }
+
+    private void AddDialogBackdrop(ContentDialog dialog)
+    {
+        static T? FindNamed<T>(DependencyObject parent, string name) where T : FrameworkElement
+        {
+            if (parent is T element && element.Name == name) return element;
+            for (var index = 0; index < VisualTreeHelper.GetChildrenCount(parent); index++)
+                if (FindNamed<T>(VisualTreeHelper.GetChild(parent, index), name) is { } found)
+                    return found;
+            return null;
+        }
+
+        var space = FindNamed<Grid>(dialog, "DialogSpace");
+        if (space is null || space.Children.OfType<SystemBackdropElement>().Any()) return;
+        var backdrop = new SystemBackdropElement
+        {
+            CornerRadius = new CornerRadius(20),
+            Margin = new Thickness(-24, -20, -24, -20),
+            SystemBackdrop = studioStyle
+                ? new DesktopAcrylicBackdrop()
+                : new MicaBackdrop { Kind = MicaKind.Base }
+        };
+        Grid.SetRowSpan(backdrop, 2);
+        space.Children.Insert(0, backdrop);
+        if (FindNamed<ScrollViewer>(dialog, "ContentScrollViewer")?.Content is Grid contentGrid)
+            contentGrid.Background = Brush(255, 255, 255, 0);
+    }
 
     private T EditorControl<T>(T control) where T : Control
     {
@@ -37,28 +109,9 @@ public sealed partial class MainWindow
 
     private ContentDialog EditorDialog(string title, UIElement content, string primaryText)
     {
-        var primaryStyle = new Style(typeof(Button))
-        {
-            BasedOn = (Style)Application.Current.Resources["AccentButtonStyle"]
-        };
-        primaryStyle.Setters.Add(new Setter(Control.BackgroundProperty, PrimaryFill));
-        primaryStyle.Setters.Add(new Setter(Control.ForegroundProperty, Brush(255, 255, 255)));
-        var secondaryStyle = new Style(typeof(Button));
-        secondaryStyle.Setters.Add(new Setter(Control.BackgroundProperty, EditorField));
-        secondaryStyle.Setters.Add(new Setter(Control.ForegroundProperty, Ink));
-        secondaryStyle.Setters.Add(new Setter(Control.BorderBrushProperty, EditorStroke));
-        secondaryStyle.Setters.Add(new Setter(Control.BorderThicknessProperty, new Thickness(1)));
-        secondaryStyle.Setters.Add(new Setter(Control.CornerRadiusProperty, new CornerRadius(10)));
+        var width = Math.Min(680, Math.Max(360, Shell.ActualWidth - 80));
         var dialog = new ContentDialog
         {
-            UseLayoutRounding = true,
-            XamlRoot = Shell.XamlRoot,
-            RequestedTheme = DarkTheme ? ElementTheme.Dark : ElementTheme.Light,
-            Background = EditorSurface,
-            Foreground = Ink,
-            BorderBrush = EditorStroke,
-            BorderThickness = new Thickness(1),
-            CornerRadius = new CornerRadius(20),
             Title = Text(title, 23, true),
             Content = new ScrollViewer
             {
@@ -69,18 +122,16 @@ public sealed partial class MainWindow
                 HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
                 HorizontalContentAlignment = HorizontalAlignment.Stretch
             },
-            Width = 680,
+            Width = width,
             PrimaryButtonText = primaryText,
-            PrimaryButtonStyle = primaryStyle,
             CloseButtonText = "取消",
-            CloseButtonStyle = secondaryStyle,
             DefaultButton = ContentDialogButton.Primary
         };
-        dialog.Resources["AccentFillColorDefaultBrush"] = PrimaryFill;
-        dialog.Resources["AccentFillColorSecondaryBrush"] = PrimaryFill;
+        dialog.Resources["ContentDialogMinWidth"] = width;
+        dialog.Resources["ContentDialogMaxWidth"] = width;
         if (dialog.Content is ScrollViewer scroller)
             ForwardHandledWheel(content, scroller);
-        return dialog;
+        return MaterialDialog(dialog);
     }
 
     private static Action<DependencyObject> ForwardHandledWheel(UIElement content, ScrollViewer scroller)

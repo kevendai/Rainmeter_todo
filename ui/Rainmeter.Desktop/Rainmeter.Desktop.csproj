@@ -17,5 +17,6 @@
   <ItemGroup>
     <Content Include="Assets\brand-mark.ico" CopyToOutputDirectory="PreserveNewest" />
     <Content Include="Assets\brand-mark.png" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="Assets\brand-mark-transparent.png" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 </Project>

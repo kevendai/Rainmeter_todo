@@ -172,7 +172,27 @@ internal static class PluginHostApp
     }
     private static bool ValueDue(string id){if(!File.Exists(PluginPaths.Values))return true;try{Dictionary<string,object> root=JsonUtil.LoadObject(PluginPaths.Values),providers=JsonUtil.Object(JsonUtil.Get(root,"providers")),provider=JsonUtil.Object(JsonUtil.Get(providers,id));DateTimeOffset expires;return !DateTimeOffset.TryParse(JsonUtil.String(provider,"expires_at",""),CultureInfo.InvariantCulture,DateTimeStyles.RoundtripKind,out expires)||DateTimeOffset.Now>=expires;}catch{return true;}}
     private static Action<Dictionary<string,object>> ThrottledProgress(string id,string baseDir){DateTime last=DateTime.MinValue;return delegate(Dictionary<string,object> progress){DateTime now=DateTime.UtcNow;int current=JsonUtil.Int(progress,"current",0),total=JsonUtil.Int(progress,"total",0);if(JsonUtil.String(progress,"type","")=="host_start"){WriteJob(id,progress);RefreshTodo(baseDir);return;}if(last!=DateTime.MinValue&&(now-last).TotalMilliseconds<500&&!(total>0&&current>=total))return;last=now;WriteJob(id,progress);RefreshTodo(baseDir);};}
-    private static void RefreshTodo(string baseDir){try{File.WriteAllText(Path.Combine(baseDir,".refresh-guard"),RuntimeUtil.Iso(DateTimeOffset.Now),RuntimeUtil.Utf8NoBom);}catch{return;}RuntimeUtil.Refresh("Todo");}
+    private static void RefreshTodo(string baseDir)
+    {
+        // Rainmeter reads Generated.inc before Todo.ini's OnRefreshAction runs.
+        // Generate it from the current job first, otherwise the visible status
+        // stays one refresh behind (often at the last progress message).
+        string host=Path.Combine(baseDir,"TodoHost.exe");
+        if(File.Exists(host))
+        {
+            try
+            {
+                using(Process render=Process.Start(new ProcessStartInfo(host,"Render"){
+                    UseShellExecute=false,CreateNoWindow=true,WindowStyle=ProcessWindowStyle.Hidden}))
+                {
+                    if(render==null||!render.WaitForExit(20000)||render.ExitCode!=0)return;
+                }
+            }
+            catch{return;}
+        }
+        try{File.WriteAllText(Path.Combine(baseDir,".refresh-guard"),RuntimeUtil.Iso(DateTimeOffset.Now),RuntimeUtil.Utf8NoBom);}catch{return;}
+        RuntimeUtil.Refresh("Todo");
+    }
 
     private static int QueryTasks(string baseDir,string[] args)
     {
@@ -213,7 +233,10 @@ internal static class PluginHostApp
 
     private static void WriteJob(string id, Dictionary<string, object> progress)
     {
-        using(System.Threading.Mutex mutex=new System.Threading.Mutex(false,@"Global\RainmeterPluginJob_"+Regex.Replace(id,@"[^A-Za-z0-9]","_"))){bool held=false;try{try{held=mutex.WaitOne(TimeSpan.FromSeconds(5));}catch(System.Threading.AbandonedMutexException){held=true;}if(!held)throw new TimeoutException("插件任务状态正忙");string path=Path.Combine(PluginPaths.Jobs,id+".json");Dictionary<string,object> job=File.Exists(path)?JsonUtil.LoadObject(path):new Dictionary<string,object>();foreach(KeyValuePair<string,object> pair in progress)job[pair.Key]=pair.Value;if(!progress.ContainsKey("state"))job["state"]="running";
+        using(System.Threading.Mutex mutex=new System.Threading.Mutex(false,@"Global\RainmeterPluginJob_"+Regex.Replace(id,@"[^A-Za-z0-9]","_"))){bool held=false;try{try{held=mutex.WaitOne(TimeSpan.FromSeconds(5));}catch(System.Threading.AbandonedMutexException){held=true;}if(!held)throw new TimeoutException("插件任务状态正忙");string path=Path.Combine(PluginPaths.Jobs,id+".json");Dictionary<string,object> job=File.Exists(path)?JsonUtil.LoadObject(path):new Dictionary<string,object>();
+            if(JsonUtil.String(job,"state","")=="cancelled" &&
+                (JsonUtil.String(progress,"job_id","")=="" || JsonUtil.String(progress,"job_id","")==JsonUtil.String(job,"job_id","")))return;
+            foreach(KeyValuePair<string,object> pair in progress)job[pair.Key]=pair.Value;if(!progress.ContainsKey("state"))job["state"]="running";
             // 规格 §4.6-1：pid/entry 在整个 job 生命周期里保留（不再像 2.0.4 那样收尾即删），
             // 否则 job 一收尾就再也取消不了；误杀风险由 CancelPlugin 的进程身份核对兜住。
             job["plugin_id"]=id;job["updated_at"]=DateTimeOffset.Now.ToString("o",CultureInfo.InvariantCulture);JsonUtil.SaveAtomic(path,job);}finally{if(held)mutex.ReleaseMutex();}}
@@ -245,32 +268,45 @@ internal static class PluginHostApp
         }
     }
 
-    // 取消传播（规格 §4.6）：先 provider（最深）→ 再 broker → 最后 consumer。
-    // 顺序反了会留下孤儿请求进程；每一步都用登记路径核对进程身份，PID 被复用则跳过而不是误杀。
+    // 先在 job 锁内封住新子进程登记，再立即停止 consumer 和已登记的子进程。
+    // 每一步都用登记路径核对进程身份，PID 被复用则跳过而不是误杀。
     private static int CancelPlugin(string id,string reason)
     {
         if(id=="")return 2;string path=Path.Combine(PluginPaths.Jobs,id+".json");if(!File.Exists(path))return 1;
-        Dictionary<string,object> job;try{job=JsonUtil.LoadObject(path);}catch{return 1;}
-        string state=JsonUtil.String(job,"state","");bool killed=false;
+        Dictionary<string,object> job;
+        string cancelReason=String.IsNullOrWhiteSpace(reason)?"user_cancelled":reason.Trim();
+        using(System.Threading.Mutex mutex=new System.Threading.Mutex(false,@"Global\RainmeterPluginJob_"+Regex.Replace(id,@"[^A-Za-z0-9]","_")))
+        {
+            bool held=false;
+            try
+            {
+                try{held=mutex.WaitOne(TimeSpan.FromSeconds(5));}catch(AbandonedMutexException){held=true;}
+                if(!held)return 1;
+                job=JsonUtil.LoadObject(path);
+                string state=JsonUtil.String(job,"state","");
+                if(state!="running"&&state!="attention")return 1;
+                job["state"]="cancelled";job["current"]=0;job["total"]=1;
+                job["message"]=CancelMessage(cancelReason);job["cancel_reason"]=cancelReason;
+                job["cancel_date"]=PluginRuntime.LocalDate();
+                job["cancelled_at"]=DateTimeOffset.Now.ToString("o",CultureInfo.InvariantCulture);
+                if(cancelReason=="user_declined")
+                {job["paid_declined_date"]=PluginRuntime.LocalDate();job["paid_declined_at"]=DateTimeOffset.Now.ToString("o",CultureInfo.InvariantCulture);}
+                job["plugin_id"]=id;job["updated_at"]=DateTimeOffset.Now.ToString("o",CultureInfo.InvariantCulture);
+                JsonUtil.SaveAtomic(path,job);
+            }
+            catch{return 1;}
+            finally{if(held)mutex.ReleaseMutex();}
+        }
+        // 先停 consumer，阻止它在本次取消期间再发起新一批请求。
+        KillRegisteredProcess(JsonUtil.Int(job,"pid",0),JsonUtil.String(job,"entry",""));
         List<Dictionary<string,object>> children=JsonUtil.Array(JsonUtil.Get(job,"children")).Select(JsonUtil.Object).ToList();
         for(int index=children.Count-1;index>=0;index--)
         {
             Dictionary<string,object> child=children[index];
-            if(KillRegisteredProcess(JsonUtil.Int(child,"broker_pid",0),JsonUtil.String(child,"broker_entry","")))killed=true;
-            if(KillRegisteredProcess(JsonUtil.Int(child,"pid",0),JsonUtil.String(child,"entry","")))killed=true;
+            KillRegisteredProcess(JsonUtil.Int(child,"pid",0),JsonUtil.String(child,"entry",""));
+            KillRegisteredProcess(JsonUtil.Int(child,"broker_pid",0),JsonUtil.String(child,"broker_entry",""));
         }
-        if(KillRegisteredProcess(JsonUtil.Int(job,"pid",0),JsonUtil.String(job,"entry","")))killed=true;
-        if(state=="completed"||state=="failed"||state=="cancelled")return 1;
-        if(!killed&&state!="running"&&state!="attention")return 1;
-        string cancelReason=String.IsNullOrWhiteSpace(reason)?"user_cancelled":reason.Trim();
-        Dictionary<string,object> cancelled=new Dictionary<string,object>{{"state","cancelled"},{"current",0},{"total",1},{"message",CancelMessage(cancelReason)},{"cancel_reason",cancelReason},{"cancel_date",PluginRuntime.LocalDate()},{"cancelled_at",DateTimeOffset.Now.ToString("o",CultureInfo.InvariantCulture)}};
-        // 规格 §4.6-6 第 2 条：只有用户**明确拒绝**才算"今天别再问"，headless 无人确认（provider_denied）
-        // 与用户主动中断正在跑的任务（user_cancelled）都不写这天记号。
-        // 记的是粘性字段：后续同步会把 state 改回 running/attention，粘性字段保证同日不再打扰。
-        if(cancelReason=="user_declined"){cancelled["paid_declined_date"]=PluginRuntime.LocalDate();cancelled["paid_declined_at"]=DateTimeOffset.Now.ToString("o",CultureInfo.InvariantCulture);}
-        // resume_action / resume_input 刻意**不清**：用户拒绝后磁贴仍要保留可点的「使用 DeepSeek AI」入口
-        // （规格 §4.6-6 第 2 条），入口就靠这两个字段重建。
-        WriteJob(id,cancelled);
+        RefreshTodo(AppDomain.CurrentDomain.BaseDirectory.TrimEnd(Path.DirectorySeparatorChar));
         return 0;
     }
 
@@ -292,8 +328,8 @@ internal static class PluginHostApp
             {
                 string actual;try{actual=process.MainModule.FileName;}catch{return false;}
                 if(!Path.GetFullPath(actual).Equals(Path.GetFullPath(entry),StringComparison.OrdinalIgnoreCase))return false;
-                try{process.CloseMainWindow();}catch{}
-                if(!process.WaitForExit(3000))process.Kill();
+                process.Kill();
+                process.WaitForExit(1000);
                 return true;
             }
         }

@@ -460,11 +460,21 @@ namespace RainmeterBackend
             {
                 string oldRoot=PluginPaths.PluginRoot(oldId);if(Directory.Exists(oldRoot))Directory.Delete(oldRoot,true);
             }
-            if(File.Exists(PluginPaths.Values))
+            using(Mutex mutex=new Mutex(false,@"Global\RainmeterPluginValues"))
             {
-                Dictionary<string,object> values=JsonUtil.LoadObject(PluginPaths.Values),entries=JsonUtil.Object(JsonUtil.Get(values,"entries")),providers=JsonUtil.Object(JsonUtil.Get(values,"providers"));
-                foreach(string prefix in new[]{"Plugin_io_github_kevendai_network_ip","Plugin_io_github_kevendai_xiaomi_router_wan_ip"})foreach(string key in entries.Keys.Where(k=>k.StartsWith(prefix,StringComparison.OrdinalIgnoreCase)).ToList())entries.Remove(key);
-                providers.Remove("io.github.kevendai.network-ip");providers.Remove("io.github.kevendai.xiaomi-router-wan-ip");values["entries"]=entries;values["providers"]=providers;JsonUtil.SaveAtomic(PluginPaths.Values,values);
+                bool held=false;
+                try
+                {
+                    try{held=mutex.WaitOne(TimeSpan.FromSeconds(15));}catch(AbandonedMutexException){held=true;}
+                    if(!held)throw new TimeoutException("插件动态值正忙");
+                    if(!File.Exists(PluginPaths.Values))return;
+                    Dictionary<string,object> values=JsonUtil.LoadObject(PluginPaths.Values),entries=JsonUtil.Object(JsonUtil.Get(values,"entries")),providers=JsonUtil.Object(JsonUtil.Get(values,"providers"));
+                    bool changed=false;
+                    foreach(string prefix in new[]{"Plugin_io_github_kevendai_network_ip","Plugin_io_github_kevendai_xiaomi_router_wan_ip"})foreach(string key in entries.Keys.Where(k=>k.StartsWith(prefix,StringComparison.OrdinalIgnoreCase)).ToList())changed=entries.Remove(key)||changed;
+                    changed=providers.Remove("io.github.kevendai.network-ip")||changed;changed=providers.Remove("io.github.kevendai.xiaomi-router-wan-ip")||changed;
+                    if(changed){values["entries"]=entries;values["providers"]=providers;JsonUtil.SaveAtomic(PluginPaths.Values,values);}
+                }
+                finally{if(held)mutex.ReleaseMutex();}
             }
         }
         public static void WritePluginTaskSnapshots(Dictionary<string,object> state)

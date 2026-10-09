@@ -120,6 +120,11 @@ internal static partial class TodoApp
         public List<Dictionary<string, object>> Papers;
     }
 
+    private static string RemoteUploadMode(SnapshotResult remote)
+    {
+        return remote == null || remote.Failed ? "" : remote.Found ? "overwrite" : "create";
+    }
+
     // AI 侧"重试和拆批都救不回来"的错误（Key 无效 / 余额不足 / 被拒绝 / 没有 provider）。
     // 一旦出现就立刻中止整轮评分，而不是对每一批都白跑一遍。2.0.4 的判据是 HTTP 码 401/402/403，
     // Provider 化之后厂商错误语义已经搬进 ai-deepseek，这里只认信封上的 `fatal` 与 `no_provider`
@@ -178,8 +183,8 @@ internal static partial class TodoApp
             settings.TranslateEnabled = JsonUtil.Bool(root, "TranslateEnabled", false);
             settings.Categories = JsonUtil.String(scoring, "Categories", settings.Categories);
             settings.ExcludeCategories = JsonUtil.String(scoring, "ExcludeCategories", settings.ExcludeCategories);
-            settings.TitlePrompt = EnsurePaperPlaceholder(JsonUtil.String(scoring, "TitlePrompt", settings.TitlePrompt), DefaultTitlePrompt);
-            settings.AbstractPrompt = EnsurePaperPlaceholder(JsonUtil.String(scoring, "AbstractPrompt", settings.AbstractPrompt), DefaultAbstractPrompt);
+            settings.TitlePrompt = JsonUtil.String(scoring, "TitlePrompt", settings.TitlePrompt);
+            settings.AbstractPrompt = JsonUtil.String(scoring, "AbstractPrompt", settings.AbstractPrompt);
             settings.TitleThreshold = Clamp(JsonUtil.Int(scoring, "TitleThreshold", settings.TitleThreshold), 0, 10);
             settings.TitleBatchSize = Clamp(JsonUtil.Int(scoring, "TitleBatchSize", settings.TitleBatchSize), 1, 50);
             settings.AbstractBatchSize = Clamp(JsonUtil.Int(scoring, "AbstractBatchSize", settings.AbstractBatchSize), 1, 20);
@@ -227,6 +232,16 @@ internal static partial class TodoApp
             throw new Exception("标题和摘要评分提示词都必须包含论文插入占位符 " + PaperListPlaceholder);
     }
 
+    private static bool HasPaperPlaceholders(PaperSettings settings, out string error)
+    {
+        var missing = new List<string>();
+        if (!settings.TitlePrompt.Contains(PaperListPlaceholder)) missing.Add("标题");
+        if (!settings.AbstractPrompt.Contains(PaperListPlaceholder)) missing.Add("摘要");
+        error = missing.Count == 0 ? "" : String.Join("和", missing) + "评分提示词缺少论文插入占位符 " +
+            PaperListPlaceholder + "，请到 AI 评分插件配置中修改后重试。";
+        return missing.Count == 0;
+    }
+
     private static int Clamp(int value, int minimum, int maximum) { return Math.Max(minimum, Math.Min(maximum, value)); }
     // "能不能评分" 现在只取决于**有没有可用的 ai_provider**（规格 §7.2：endpoint / key / model /
     // timeout / retry / max concurrency 全部搬进了 Provider，arxiv 侧一个字节都不留）。
@@ -238,7 +253,9 @@ internal static partial class TodoApp
     private static string EnsurePaperPlaceholder(string prompt, string fallback)
     {
         prompt = String.IsNullOrWhiteSpace(prompt) ? fallback : prompt.Trim();
-        return prompt.Contains(PaperListPlaceholder) ? prompt : prompt + "\r\n\r\nPapers to evaluate:\r\n" + PaperListPlaceholder;
+        // A prompt without the insertion marker cannot reliably request scores. Older
+        // configurations may contain only the first introductory sentence.
+        return prompt.Contains(PaperListPlaceholder) ? prompt : fallback;
     }
 
     // 有没有"远端快照"这条捷径。与 arxiv 自己的开关无关：快照插件自己决定要不要下载
@@ -265,8 +282,9 @@ internal static partial class TodoApp
             input.Append(Convert.ToString(JsonUtil.Get(paper, "id"), CultureInfo.InvariantCulture)).Append(": ").Append(S(paper, "title")).AppendLine();
             if (stage == "abstract") input.Append("Abstract: ").Append(S(paper, "abstract")).AppendLine().AppendLine();
         }
-        string resolvedPrompt = EnsurePaperPlaceholder(prompt, stage == "title" ? DefaultTitlePrompt : DefaultAbstractPrompt)
-            .Replace(PaperListPlaceholder, input.ToString().TrimEnd());
+        if (!prompt.Contains(PaperListPlaceholder))
+            throw new InvalidOperationException((stage == "title" ? "标题" : "摘要") + "评分提示词缺少论文插入占位符 " + PaperListPlaceholder + "，请到 AI 评分插件配置中修改。");
+        string resolvedPrompt = prompt.Replace(PaperListPlaceholder, input.ToString().TrimEnd());
         Dictionary<string, object> call = new Dictionary<string, object> {
             {"messages", new List<object> {
                 new Dictionary<string, object>{{"role", "system"}, {"content", "Follow the scoring instructions exactly and return valid JSON only."}},
@@ -274,8 +292,7 @@ internal static partial class TodoApp
             }},
             {"response_schema", new Dictionary<string, object> {
                 {"type", "object"},
-                {"properties", new Dictionary<string, object>{{"scores", new Dictionary<string, object>{{"type", "object"}}}}},
-                {"required", new List<object>{"scores"}}
+                {"properties", new Dictionary<string, object>{{"scores", new Dictionary<string, object>{{"type", "object"}}}}}
             }},
             {"purpose", stage == "title" ? "arxiv_title_scoring" : "arxiv_abstract_scoring"}
         };
@@ -408,9 +425,9 @@ internal static partial class TodoApp
 
     // 回传快照。**失败绝不让本轮同步失败**（§7.1 / 计划 §十）：AI 已经花过钱了，Todo 该照常导入，
     // 只是别的机器这次拿不到结果。
-    private static string StoreSnapshot(List<Dictionary<string, object>> papers, string date, PaperSettings settings)
+    private static string StoreSnapshot(List<Dictionary<string, object>> papers, string date, PaperSettings settings, bool overwrite)
     {
-        Dictionary<string, object> call = new Dictionary<string, object> { { "date", date }, { "papers", papers } };
+        Dictionary<string, object> call = new Dictionary<string, object> { { "date", date }, { "papers", papers }, { "overwrite", overwrite } };
         ServiceCallResult response = ServiceClient.Call(SnapshotService, "put_snapshot", call, SnapshotCallTimeoutSeconds);
         if (!response.Ok) return "失败：" + ServiceClient.Trim(response.Error);
         if (!JsonUtil.Bool(response.Output, "stored", false)) return "未存储：" + JsonUtil.String(response.Output, "reason", "提供者未存储该快照");
@@ -473,7 +490,10 @@ internal static partial class TodoApp
         {
             DateTime now = DateTime.Now;
             if (now.TimeOfDay < TimeSpan.FromHours(8) || now.TimeOfDay > TimeSpan.FromHours(20)) { result.Summary = "不在同步时段"; return result; }
-            if (JsonUtil.String(Meta(state), "last_arxiv_sync_date", "") == today) { result.Summary = "今日论文已同步"; return result; }
+            List<Dictionary<string,object>> completedCache;
+            if (JsonUtil.String(Meta(state), "last_arxiv_sync_date", "") == today &&
+                TryUseLocalCache(today, settings, out completedCache))
+            { result.Summary = "今日论文已同步"; return result; }
         }
         Directory.CreateDirectory(PaperCache);
         CleanupPaperCache(settings);
@@ -482,11 +502,65 @@ internal static partial class TodoApp
 
         // 普通同步（磁贴刷新和插件执行）先看本地缓存，再看远端快照。
         // 明确选择“重新爬取并打分”时两者都跳过，直接使用 AI。
+        List<Dictionary<string, object>> partialPapers = null;
+        bool resumePartial = !replaceToday &&
+            TryLoadPapers(Path.Combine(PaperCache, today + "_papers.partial.json"), out partialPapers) &&
+            !IsPaperFileComplete(partialPapers, settings);
         List<Dictionary<string, object>> papers;
-        if (!replaceToday && TryUseLocalCache(today, settings, out papers))
+        if (!replaceToday && !resumePartial && TryUseLocalCache(today, settings, out papers))
         {
             ImportPapers(state, papers, today, settings, replaceToday);
             result.Summary = JsonUtil.String(Meta(state), "status", "已导入本地缓存的今日论文");
+            return result;
+        }
+
+        // An interrupted paid run takes priority over the remote fallback. Never resume it
+        // from a background refresh without presenting the same paid-consent gate again.
+        if (resumePartial)
+        {
+            int titled = partialPapers.Count(p => JsonUtil.Get(JsonUtil.Object(JsonUtil.Get(p, "score")), "title") != null);
+            int abstracted = partialPapers.Count(p => JsonUtil.Get(JsonUtil.Object(JsonUtil.Get(p, "score")), "abstract") != null);
+            string resumeMessage = "上次评分中断，已保存 " + titled + "/" + partialPapers.Count + " 篇标题评分、" + abstracted + " 篇摘要评分。";
+            if (!AiAvailable(settings))
+            {
+                Meta(state)["status"] = resumeMessage + " AI 评分插件未启用或不可用";
+                result.Summary = JsonUtil.String(Meta(state), "status", resumeMessage);
+                return result;
+            }
+            string promptError;
+            if (!HasPaperPlaceholders(settings, out promptError))
+            {
+                result.Ok = false; result.Error = promptError; return result;
+            }
+            if (!PaidAiAllowed)
+            {
+                if (DeclinedToday)
+                {
+                    Meta(state)["status"] = resumeMessage + " 今天已拒绝过继续评分";
+                    result.Summary = JsonUtil.String(Meta(state), "status", resumeMessage);
+                    return result;
+                }
+                result.Attention = new Dictionary<string, object> {
+                    {"type", "paid_service_confirmation"}, {"allow_snooze", true}, {"service", AiService},
+                    {"message", resumeMessage + "\r\n\r\n是否使用「" + ProviderLabel(Services.AiName, "AI Provider") + "」继续评分未完成的论文？已保存的分数不会重新评分；后续调用可能产生费用。"},
+                    {"resume_action", ResumeAction},
+                    {"resume_input", new Dictionary<string, object>{{"allow_paid_ai", true}}}
+                };
+                Meta(state)["status"] = "论文推荐需要确认继续评分";
+                result.Summary = "论文推荐需要确认继续评分";
+                return result;
+            }
+            try { File.WriteAllText(PaperRescorePath(today), RuntimeUtil.Iso(DateTimeOffset.Now), RuntimeUtil.Utf8NoBom); }
+            catch { }
+            WritePaperJob("queued", "正在继续未完成的论文评分", titled, partialPapers.Count);
+            int resumed = RunPaperWorker(today, false);
+            if (resumed != 0)
+            {
+                result.Ok = false;
+                result.Error = ReadPaperJobMessage("论文评分失败");
+                return result;
+            }
+            result.Summary = JsonUtil.String(Meta(state), "status", "论文评分继续完成");
             return result;
         }
 
@@ -522,6 +596,11 @@ internal static partial class TodoApp
             result.Summary = JsonUtil.String(Meta(state), "status", "今日论文未更新")
                 + "。\r\n\r\n普通刷新依次检查本地缓存和远端同日期快照；重复点击不会绕过这两项去重新爬取。若需要新论文，请启用 AI 评分插件后在插件界面选择重新爬取并打分。";
             return result;
+        }
+        string newPromptError;
+        if (!HasPaperPlaceholders(settings, out newPromptError))
+        {
+            result.Ok = false; result.Error = newPromptError; return result;
         }
         if (!PaidAiAllowed)
         {
@@ -608,8 +687,6 @@ internal static partial class TodoApp
                 if (!IsPaperFileComplete(papers, settings)) throw new Exception("论文评分未完整完成");
                 JsonUtil.SaveAtomic(finalPath, papers);
                 if (File.Exists(partialPath)) File.Delete(partialPath);
-                // 评分完成后回传快照。失败只记 warning —— AI 的钱已经花过，Todo 必须照常导入（§7.1）。
-                string snapshotStatus = SnapshotAvailable(settings) ? StoreSnapshot(papers, date, settings) : "disabled";
                 WritePaperJob("importing", "评分完成，正在导入本地待办", papers.Count, papers.Count);
                 bool replaceToday = File.Exists(PaperRescorePath(date));
                 int result = WithLockedState(delegate(Dictionary<string, object> state, ref bool refresh) {
@@ -618,8 +695,6 @@ internal static partial class TodoApp
                     {
                         if (replaceToday) Tasks(state).RemoveAll(t => IsPaperTaskCreatedOnDate(t, date));
                         ImportPapers(state, papers, date, settings, false);
-                        if (snapshotStatus.StartsWith("失败", StringComparison.Ordinal)) Meta(state)["status"] += "；快照回传失败";
-                        else if (snapshotStatus.StartsWith("未存储", StringComparison.Ordinal)) Meta(state)["status"] += "；快照未存储";
                         Commit(state);
                         refresh = true;
                     }
@@ -633,10 +708,33 @@ internal static partial class TodoApp
                 {
                     try { File.Delete(PaperRescorePath(date)); } catch { }
                 }
-                string completion = result == 0 ? "论文评分和待办同步完成" : "评分完成，但待办同步失败";
-                if (result == 0 && snapshotStatus.StartsWith("失败", StringComparison.Ordinal)) completion += "；远端快照回传失败";
-                else if (result == 0 && snapshotStatus.StartsWith("未存储", StringComparison.Ordinal)) completion += "；远端未存储快照";
+                string remoteUploadMode = "";
+                string completion = result == 0 ? "论文评分和本地待办同步完成" : "评分完成，但本地待办同步失败";
+                if (result == 0 && SnapshotAvailable(settings))
+                {
+                    try
+                    {
+                        WritePaperJob("checking_remote", "正在确认远端是否已有今日结果", papers.Count, papers.Count);
+                        SnapshotResult remote = FetchSnapshot(settings, date);
+                        remoteUploadMode = RemoteUploadMode(remote);
+                        if (remote.Failed) completion += "；无法确认远端状态，未上传";
+                        else if (remote.Found) completion += "；远端已有结果";
+                    }
+                    catch { completion += "；无法确认远端状态，未上传"; }
+                }
                 WritePaperJob(result == 0 ? "completed" : "failed", completion, papers.Count, papers.Count);
+                if (remoteUploadMode != "")
+                {
+                    try
+                    {
+                        Dictionary<string,object> job = JsonUtil.LoadObject(PaperJobPath);
+                        job["remote_upload_available"] = true;
+                        job["remote_upload_date"] = date;
+                        job["remote_upload_mode"] = remoteUploadMode;
+                        JsonUtil.SaveAtomic(PaperJobPath, job);
+                    }
+                    catch { }
+                }
                 return result;
             }
             catch (Exception ex)
@@ -648,6 +746,36 @@ internal static partial class TodoApp
             }
             finally { if (held) mutex.ReleaseMutex(); }
         }
+    }
+
+    private static string UploadCompletedSnapshot(string date, bool overwrite)
+    {
+        DateTime parsed;
+        if (!DateTime.TryParseExact(date, "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out parsed)
+            || parsed.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture) != date)
+            throw new InvalidDataException("论文日期无效");
+        PaperSettings settings = LoadPaperSettings();
+        if (!SnapshotAvailable(settings)) throw new InvalidOperationException("远端快照插件不可用");
+        List<Dictionary<string,object>> papers;
+        if (!TryUseLocalCache(date, settings, out papers)) throw new InvalidOperationException("本地没有完整的评分结果");
+        SnapshotResult remote = FetchSnapshot(settings, date);
+        if (remote.Failed) throw new InvalidOperationException("无法确认远端状态，未上传：" + remote.Error);
+        if (remote.Found && !overwrite) return "remote_exists";
+        string stored = StoreSnapshot(papers, date, settings, overwrite);
+        if (stored != "ok")
+        {
+            if (!overwrite && (stored.IndexOf("409", StringComparison.Ordinal) >= 0 || stored.IndexOf("412", StringComparison.Ordinal) >= 0))
+                return "remote_exists";
+            throw new InvalidOperationException("远端同步未完成：" + stored);
+        }
+        Dictionary<string,object> job = JsonUtil.LoadObject(PaperJobPath);
+        if (JsonUtil.String(job,"remote_upload_date","") == date)
+        {
+            job["remote_upload_available"] = false;
+            job["remote_upload_status"] = "uploaded";
+            JsonUtil.SaveAtomic(PaperJobPath, job);
+        }
+        return "已同步 " + date + " 的论文结果到远端";
     }
 
     private static void UpdatePaperStatus(string message, bool refreshSkin)
@@ -894,6 +1022,7 @@ internal static partial class TodoApp
 
     private static void ScorePapers(List<Dictionary<string, object>> papers, PaperSettings settings, string partialPath)
     {
+        ValidatePaperSettings(settings);
         ScoreStage(papers.Where(p => JsonUtil.Get(JsonUtil.Object(JsonUtil.Get(p, "score")), "title") == null).ToList(), "title", settings.TitleBatchSize, 0, 10, settings, partialPath, papers);
         List<Dictionary<string, object>> abstracts = papers.Where(p => {
             Dictionary<string, object> score = JsonUtil.Object(JsonUtil.Get(p, "score"));
@@ -1172,6 +1301,8 @@ internal static partial class TodoApp
             if (Clamp(99, 1, 32) != 32 || Clamp(-1, 1, 32) != 1) return 34;
             Dictionary<int, int> parsed = ParseAiScores("{\"scores\":{\"1\":8,\"2\":5}}", papers, 0, 10);
             if (parsed.Count != 2 || parsed[1] != 8 || parsed[2] != 5) return 35;
+            parsed = ParseAiScores("{\"1\":8,\"2\":5}", papers, 0, 10);
+            if (parsed.Count != 2 || parsed[1] != 8 || parsed[2] != 5) return 35;
             try { ParseAiScores("{\"scores\":{\"1\":8}}", papers, 0, 10); return 36; }
             catch { }
             // §9.2 的"复制，不删除"：旧文件里那些 DeepSeek / 文件服务器段仍然存在，arxiv 读到
@@ -1187,7 +1318,7 @@ internal static partial class TodoApp
             if (LoadPaperSettings().Enabled) return 38;
             if (!DefaultTitlePrompt.Contains(PaperListPlaceholder) || !DefaultAbstractPrompt.Contains(PaperListPlaceholder)) return 39;
             string inserted = EnsurePaperPlaceholder("Score these papers", DefaultTitlePrompt).Replace(PaperListPlaceholder, "1: Test");
-            if (!inserted.Contains("1: Test") || inserted.Contains(PaperListPlaceholder)) return 40;
+            if (!inserted.Contains("1: Test") || !inserted.Contains("Assign an integer score") || inserted.Contains(PaperListPlaceholder)) return 40;
             XmlDocument rss = new XmlDocument();
             rss.LoadXml("<item><pubDate>Thu, 16 Jul 2026 00:00:00 -0400</pubDate></item>");
             DateTimeOffset published;

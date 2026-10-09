@@ -19,6 +19,7 @@ internal static class CalendarRecurrenceProbe
         Run("RRULE interval and endings", ProbeRuleOptions);
         Run("weekly start alignment", ProbeWeeklyStartAlignment);
         Run("local recurrence expansion", ProbeLocalExpansion);
+        Run("bounded UI recurrence query and instance lookup", ProbeUiWindow);
         Run("ICS recurrence parsing", ProbeParseIcs);
         Run("recurrence metadata parsing", ProbeRecurrenceMetadata);
         Run("ICS recurrence serialization", ProbeEventIcs);
@@ -42,6 +43,57 @@ internal static class CalendarRecurrenceProbe
             Environment.ExitCode = 1;
             throw;
         }
+    }
+
+    private static void ProbeUiWindow()
+    {
+        var master=Master("window-master","window-uid",Local(2024,1,1,9,0,0),"FREQ=DAILY",false);
+        var state=new Dictionary<string,object>{{"local_events",new List<object>{master}}};
+        var cache=new Dictionary<string,object>{{"events",new List<object>()}};
+        var from=Local(2040,1,1,0,0,0);
+        var request=new Dictionary<string,object>{{"from",from.ToString("o")},{"to",from.AddDays(42).ToString("o")}};
+        var model=(Dictionary<string,object>)Invoke("CalendarUiModel",cache,state,request);
+        var events=((IEnumerable)model["events"]).Cast<Dictionary<string,object>>().ToList();
+        Equal(42,events.Count,"Infinite recurrence window must contain only 42 days beyond the old horizon");
+        Equal(false,(bool)model["truncated"],"Small window unexpectedly truncated");
+        var first=events[0];
+        Equal(true,first.ContainsKey("series_event"),"Editor needs series master dates");
+        Equal(false,(string)first["id"]=="window-master","UI returned a master ID instead of occurrence ID");
+        var input=new Dictionary<string,object>{{"id",first["id"]},{"occurrence_start",first["start_at"]}};
+        var found=(Dictionary<string,object>)Invoke("FindUiEvent",cache,state,input);
+        Equal(first["id"],found["id"],"Action must resolve the displayed future instance");
+        var edit=new Dictionary<string,object>(master);
+        edit["id"]=first["id"];edit["occurrence_start"]=first["start_at"];edit["title"]="updated through instance";
+        string path=System.IO.Path.Combine(System.IO.Path.GetTempPath(),"calendar-window-edit-"+Guid.NewGuid().ToString("N")+".json");
+        try {
+            RainmeterBackend.JsonUtil.SaveAtomic(path,edit);
+            Invoke("SaveFromUi",path,state,cache);
+            var saved=((IEnumerable)state["local_events"]).Cast<Dictionary<string,object>>().Single();
+            Equal("window-master",saved["id"],"Editing an occurrence must update the master, not add a duplicate");
+            Equal("updated through instance",saved["title"],"Instance edit was not saved");
+            master=saved;
+        } finally { System.IO.File.Delete(path); }
+        Invoke("DeleteLocalEvent",found,state,"once");
+        Equal(1,((IEnumerable)state["local_events"]).Cast<object>().Count(),"Hiding one instance removed the series");
+        Equal(first["occurrence_key"],((IEnumerable)state["hidden_events"]).Cast<Dictionary<string,object>>().Single()["occurrence_key"],"Hide used master key");
+        input["id"]="invalid";
+        Equal(true,Invoke("FindUiEvent",cache,state,input)==null,"Lookup accepted a forged ID");
+        master["rrule"]="FREQ=DAILY;COUNT=2";
+        model=(Dictionary<string,object>)Invoke("CalendarUiModel",cache,state,request);
+        Equal(0,((IEnumerable)model["events"]).Cast<object>().Count(),"COUNT was reset by window seeking");
+        master["rrule"]="FREQ=DAILY;UNTIL=20240102";
+        model=(Dictionary<string,object>)Invoke("CalendarUiModel",cache,state,request);
+        Equal(0,((IEnumerable)model["events"]).Cast<object>().Count(),"UNTIL was ignored");
+        var many=new List<object>();
+        for(int i=0;i<2100;i++)many.Add(Master("id"+i,"uid"+i,from.AddHours(9),"",false));
+        cache["events"]=many;
+        model=(Dictionary<string,object>)Invoke("CalendarUiModel",cache,state,request);
+        Equal(2000,((IEnumerable)model["events"]).Cast<object>().Count(),"UI query result limit failed");
+        Equal(true,(bool)model["truncated"],"Result limit must be visible to UI");
+        request["to"]=from.AddDays(63).ToString("o");
+        bool rejected=false;
+        try{Invoke("CalendarUiModel",cache,state,request);}catch(System.IO.InvalidDataException){rejected=true;}
+        Equal(true,rejected,"Unbounded date range was accepted");
     }
 
     private static MethodInfo Method(string name)

@@ -22,7 +22,7 @@ internal static class PaperSnapshotSyncPlugin
     // 服务器 IP 同步）声明同一个 target 并已有主机值时，本插件处于「被接管」状态。
     private const string AddressTarget="paper_snapshot.file_server";
     private const string RemoteDirectory="paper";
-    private const string PluginVersion="1.0.0";
+    private const string PluginVersion="1.0.3";
 
     private static int Main(string[] args)
     {
@@ -98,10 +98,16 @@ internal static class PaperSnapshotSyncPlugin
         string token=Login(server);
         EnsureRemoteDirectory(server,token);
         string name=SnapshotFileName(date);
-        // 同一天只保留一个现有格式文件。
-        HttpCall("POST",server.BaseUrl+"/api/resources/"+RemoteDirectory+"/"+name+"?override=true",json,
+        // 只有用户确认覆盖时才允许替换远端已有文件；远端在检查后出现也不会被静默覆盖。
+        bool overwrite=JsonUtil.Bool(input,"overwrite",false);
+        HttpCall("POST",SnapshotWriteUrl(server.BaseUrl,name,overwrite),json,
             new Dictionary<string,string>{{"X-Auth",token}},30000);
         return Emit(requestId,true,new Dictionary<string,object>{{"stored",true},{"remote_path",RemoteDirectory+"/"+name}},null);
+    }
+
+    private static string SnapshotWriteUrl(string baseUrl,string name,bool overwrite)
+    {
+        return baseUrl+"/api/resources/"+RemoteDirectory+"/"+name+"?override="+(overwrite?"true":"false");
     }
 
     // ── test_connection：设置页的 [测试连接] 按钮 ──
@@ -154,6 +160,13 @@ internal static class PaperSnapshotSyncPlugin
         }
         else if(source=="ssdp")resolved="";
         server.BaseUrl=NormalizeHttpUrl(resolved);
+        if(server.BaseUrl!="")
+        {
+            UriBuilder endpoint=new UriBuilder(server.BaseUrl);
+            if(source=="ssdp")endpoint.Scheme="http";
+            else if(endpoint.Scheme=="https")endpoint.Port=-1;
+            server.BaseUrl=endpoint.Uri.AbsoluteUri.TrimEnd('/');
+        }
         server.Account=JsonUtil.String(config,"file_account","").Trim();
         server.Password=JsonUtil.String(secret,"file_password","");
         return server;
@@ -309,6 +322,10 @@ internal static class PaperSnapshotSyncPlugin
             if(BuildServerConfig(manual,new Dictionary<string,object>()).BaseUrl!="http://192.0.2.10:9800/files")return 69;
             Dictionary<string,object> selected=PlainConfig("http://192.0.2.10:9800/files");selected["address_source"]="ssdp";
             if(BuildServerConfig(selected,new Dictionary<string,object>()).BaseUrl!="http://203.0.113.9:9800/files")return 70;
+            selected["file_url"]="https://192.0.2.10:9800/files";
+            if(BuildServerConfig(selected,new Dictionary<string,object>()).BaseUrl!="http://203.0.113.9:9800/files")return 71;
+            manual["file_url"]="https://example.org:9843/files";
+            if(BuildServerConfig(manual,new Dictionary<string,object>()).BaseUrl!="https://example.org/files")return 72;
             // 67：地址插件已启用但还没拿到主机 / 被禁用 → 都视为未接管。
             WriteFakeAddressProvider(isolated,true,"server_ip","","Fake SSDP");
             if(BuildServerConfig(PlainConfig("http://192.0.2.10:8900"),new Dictionary<string,object>()).Managed)return 67;

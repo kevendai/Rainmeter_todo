@@ -60,6 +60,7 @@ internal static partial class TodoApp
         if (action == "BackupSelfTest") return RunBackupSelfTests();
         if (action == "UiMarketRefresh") return UiMarketRefresh(id);
         if (action == "UiMarketInstall") return UiMarketInstall(id, pluginAction);
+        if (action == "UiPluginInstallLocal") return UiPluginInstallLocal(id, pluginAction);
         if (action == "UiPluginConfigModel") return UiPluginConfigModel(id, pluginAction);
         if (action == "UiPluginConfigSave") return UiPluginConfigSave(id, pluginAction, args.Length > 3 ? args[3] : "");
         if (action == "UiPluginConfigCancel") return UiPluginConfigCancel(id, pluginAction, args.Length > 3 ? args[3] : "");
@@ -98,7 +99,16 @@ internal static partial class TodoApp
                     case "Toggle": Toggle(state, id, ref refresh); break;
                     case "Open": Open(state, id, ref refresh); break;
                     case "PluginClearTasks":
-                        if(id!=""){int removed=Tasks(state).RemoveAll(t=>JsonUtil.String(JsonUtil.Object(JsonUtil.Get(t,"origin")),"plugin_id","").Equals(id,StringComparison.OrdinalIgnoreCase));Meta(state)["status"]="已清除 "+removed+" 项插件待办";Commit(state);refresh=true;}break;
+                        if (id == "" || pluginAction == "") return 2;
+                        Dictionary<string,object> clearRequest = JsonUtil.LoadObject(pluginAction);
+                        if (!String.Equals(JsonUtil.String(clearRequest,"plugin_id",""),id,StringComparison.Ordinal)) return 2;
+                        List<object> requestedIds = JsonUtil.Array(JsonUtil.Get(clearRequest,"task_ids"));
+                        if (requestedIds.Count == 0 || requestedIds.Count > 100000) return 2;
+                        HashSet<string> approvedIds = new HashSet<string>(requestedIds.Select(Convert.ToString).Where(x=>!String.IsNullOrWhiteSpace(x)),StringComparer.Ordinal);
+                        if (approvedIds.Count != requestedIds.Count) return 2;
+                        int removed = Tasks(state).RemoveAll(t=>approvedIds.Contains(JsonUtil.String(t,"id","")) && String.Equals(JsonUtil.String(JsonUtil.Object(JsonUtil.Get(t,"origin")),"plugin_id",""),id,StringComparison.Ordinal));
+                        Meta(state)["status"]="已清除 "+removed+" 项插件待办";
+                        Commit(state);refresh=true;break;
                     case "PluginSync":
                         if(id!="")StartPluginCommand("Sync",id);Commit(state);refresh=true;break;
                 }

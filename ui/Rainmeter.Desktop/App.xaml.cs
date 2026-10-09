@@ -10,7 +10,21 @@ public partial class App : Application
     private Mutex? instanceMutex;
     private static string InstanceName => Environment.GetEnvironmentVariable("RAINMETER_UI_TEST_INSTANCE") == "1"
         ? "RainmeterDesktopUi-Test" : "RainmeterDesktopUi";
-    public App() => InitializeComponent();
+    public App()
+    {
+        UnhandledException += (_, args) =>
+        {
+            try
+            {
+                var path = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                    "RainmeterDesktopWidgets", "desktop-ui-error.log");
+                Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+                File.AppendAllText(path, DateTimeOffset.Now + " " + args.Exception + Environment.NewLine);
+            }
+            catch { }
+        };
+        InitializeComponent();
+    }
     protected override void OnLaunched(LaunchActivatedEventArgs args)
     {
         try

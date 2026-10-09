@@ -83,6 +83,70 @@ internal sealed class TodoRepository(string resourceDirectory)
         });
     }
 
+    internal void ToggleMany(IReadOnlyCollection<string> ids)
+    {
+        var selected = ids.ToHashSet(StringComparer.Ordinal);
+        if (selected.Count == 0) return;
+        Mutate(state =>
+        {
+            var now = DateTimeOffset.Now.ToString("O");
+            foreach (var task in EnsureTasks(state).OfType<JsonObject>()
+                .Where(item => selected.Contains(String(item, "id"))))
+            {
+                var completed = task["completed"]?.GetValue<bool>() ?? false;
+                var policy = task["policy"] as JsonObject;
+                var manualLabel = policy is null ? "" : String(policy, "manual_complete_label");
+                var rolloverLabel = policy is null ? "" : String(policy, "rollover_label");
+                var labels = task["labels"] as JsonArray ?? new JsonArray();
+                task["labels"] = labels;
+                if (completed)
+                {
+                    task["completed"] = false;
+                    task["completed_at"] = null;
+                    if (policy?["restore_resets_age"]?.GetValue<bool>() == true)
+                        task["created_at"] = now;
+                    RemoveLabel(labels, manualLabel);
+                    RemoveLabel(labels, rolloverLabel);
+                }
+                else
+                {
+                    task["completed"] = true;
+                    task["completed_at"] = now;
+                    AddLabel(labels, manualLabel);
+                    RemoveLabel(labels, rolloverLabel);
+                }
+            }
+            EnsureMeta(state)["status"] = "已批量更新待办";
+        });
+    }
+
+    internal void DeleteMany(IReadOnlyCollection<string> ids)
+    {
+        var selected = ids.ToHashSet(StringComparer.Ordinal);
+        if (selected.Count == 0) return;
+        Mutate(state =>
+        {
+            var tasks = EnsureTasks(state);
+            foreach (var task in tasks.OfType<JsonObject>()
+                .Where(item => selected.Contains(String(item, "id"))).ToArray())
+                tasks.Remove(task);
+            EnsureMeta(state)["status"] = "已批量删除待办";
+        });
+    }
+
+    private static void RemoveLabel(JsonArray labels, string label)
+    {
+        if (label == "") return;
+        foreach (var item in labels.Where(item => item?.GetValue<string>() == label).ToArray())
+            labels.Remove(item);
+    }
+
+    private static void AddLabel(JsonArray labels, string label)
+    {
+        if (label != "" && !labels.Any(item => item?.GetValue<string>() == label))
+            labels.Add(label);
+    }
+
     private JsonObject? ReadSnapshot()
     {
         try

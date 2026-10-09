@@ -10,6 +10,11 @@ try {
     if (-not (Test-Path -LiteralPath $csc)) { throw 'C# compiler not found' }
 
     $refs = @('/r:System.Web.Extensions.dll','/r:System.Security.dll')
+    $ssdpProbe = Join-Path $build 'SsdpScannerProbe.exe'
+    & $csc /nologo /target:exe /main:SsdpScannerProbe /optimize+ @refs "/out:$ssdpProbe" (Join-Path $projectRoot 'plugins\official\ssdp-server-ip\src\SsdpServerIpPlugin.cs') (Join-Path $tests 'SsdpScannerProbe.cs')
+    if ($LASTEXITCODE -ne 0) { throw 'SSDP scanner probe compilation failed' }
+    & $ssdpProbe
+    if ($LASTEXITCODE -ne 0) { throw 'SSDP scanner retry/burst probe failed' }
     $todo = Join-Path $build 'TodoHost.exe'
     $calendar = Join-Path $build 'CalendarHost.exe'
     $plugin = Join-Path $build 'PluginHost.exe'

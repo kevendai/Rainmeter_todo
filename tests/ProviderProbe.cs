@@ -211,9 +211,12 @@ internal static class ProviderProbe
         Expect(Alive(providerPid), "取消前 provider 进程仍在运行");
 
         string cancelError;
+        Stopwatch cancelTimer = Stopwatch.StartNew();
         int exit = RunHost("Cancel " + Consumer + " user_cancelled", out cancelError);
+        cancelTimer.Stop();
         Diag("cancel exit=" + exit + " stderr=" + cancelError);
         Expect(exit == 0, "取消命令返回 0，实际 " + exit);
+        Expect(cancelTimer.Elapsed < TimeSpan.FromSeconds(5), "取消应在 5 秒内完成，实际 " + cancelTimer.Elapsed);
         Expect(!Alive(consumerPid), "取消后 consumer 进程已退出");
         Expect(!Alive(providerPid), "取消后 provider 进程已退出（不留下孤儿请求）");
         Expect(!Alive(brokerPid), "取消后 Broker 进程已退出");

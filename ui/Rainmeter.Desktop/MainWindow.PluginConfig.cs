@@ -69,7 +69,25 @@ public sealed partial class MainWindow
           using (model)
           {
             var name = Value(model.RootElement, "name", "插件");
-            var fieldRows = Items(model.RootElement, "fields").ToArray();
+            const string paperPlugin = "io.github.kevendai.arxiv";
+            const string aiPlugin = "io.github.kevendai.ai-deepseek";
+            static bool IsPaperScoringSetting(string key) => key is "title_prompt" or "abstract_prompt"
+                or "categories" or "exclude_categories" or "title_threshold"
+                or "title_batch_size" or "abstract_batch_size";
+            static bool IsPaperPrompt(string key) => key is "title_prompt" or "abstract_prompt";
+            var fieldRows = Items(model.RootElement, "fields")
+                .Where(field => id != paperPlugin || !IsPaperScoringSetting(Value(field, "key")))
+                .Select(field => field.Clone()).ToList();
+            if (id == aiPlugin)
+            {
+                try
+                {
+                    using var paperModel = await PluginConfigCommandAsync("UiPluginConfigModel", paperPlugin);
+                    fieldRows.AddRange(Items(paperModel.RootElement, "fields")
+                        .Where(field => IsPaperScoringSetting(Value(field, "key"))).Select(field => field.Clone()));
+                }
+                catch { /* The AI provider can also be configured without the paper plugin. */ }
+            }
             var edits = new Dictionary<string, Func<object?>>();
             var clearSecrets = new Dictionary<string, CheckBox>();
             Action<string>? refreshAddress = null;
@@ -104,44 +122,73 @@ public sealed partial class MainWindow
                         var savedSource = sourceField.ValueKind == JsonValueKind.Undefined ? "" : ConfigFieldValue(sourceField);
                         var ssdpIp = Value(model.RootElement, "address_provider_ip");
                         var mode = EditorControl(new ComboBox { Header = "IP 地址来源", HorizontalAlignment = HorizontalAlignment.Stretch });
-                        mode.Items.Add(new ComboBoxItem { Content = "手动填写", Tag = "manual" });
+                        mode.Items.Add(new ComboBoxItem { Content = "手动填写（HTTP）", Tag = "http" });
+                        mode.Items.Add(new ComboBoxItem { Content = "手动填写（HTTPS）", Tag = "https" });
                         mode.Items.Add(new ComboBoxItem { Content = "SSDP 自动发现", Tag = "ssdp" });
-                        mode.SelectedIndex = savedSource == "manual" || savedSource == "" && ssdpIp == "" ? 0 : 1;
+                        mode.SelectedIndex = savedSource == "manual" || savedSource == "" && ssdpIp == ""
+                            ? parsed?.Scheme == "https" ? 1 : 0 : 2;
                         var host = EditorControl(new TextBox { Header = "IP 地址 / 主机名", Text = parsed?.Host ?? "",
                             MinHeight = 40 });
                         var manualHost = host.Text;
-                        host.TextChanged += (_, _) => { if (mode.SelectedIndex == 0) manualHost = host.Text; };
+                        host.TextChanged += (_, _) => { if (mode.SelectedIndex != 2) manualHost = host.Text; };
                         var port = EditorControl(new TextBox { Header = "端口", Text = parsed?.Port.ToString() ?? "8900",
                             MinHeight = 40, Width = 130 });
-                        var scheme = EditorControl(new ComboBox { Header = "协议", Width = 130 });
-                        scheme.Items.Add("http"); scheme.Items.Add("https");
-                        scheme.SelectedIndex = parsed?.Scheme == "https" ? 1 : 0;
+                        var query = parsed?.Query ?? "";
                         var path = EditorControl(new TextBox { Header = "路径（可选）", Text = parsed?.AbsolutePath == "/" ? "" : parsed?.AbsolutePath ?? "",
                             MinHeight = 40 });
+                        var addressRow = new Grid { ColumnSpacing = 10, HorizontalAlignment = HorizontalAlignment.Stretch };
+                        addressRow.ColumnDefinitions.Add(new ColumnDefinition());
+                        addressRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(130) });
+                        addressRow.Children.Add(host);
+                        Grid.SetColumn(port, 1);
+                        addressRow.Children.Add(port);
                         void UpdateHost()
                         {
-                            var automatic = mode.SelectedIndex == 1;
+                            var automatic = mode.SelectedIndex == 2;
                             host.Text = automatic ? ssdpIp : manualHost;
                             host.IsEnabled = !automatic;
+                            port.Visibility = mode.SelectedIndex == 1 ? Visibility.Collapsed : Visibility.Visible;
+                            addressRow.ColumnDefinitions[1].Width = new GridLength(mode.SelectedIndex == 1 ? 0 : 130);
+                            addressRow.ColumnSpacing = mode.SelectedIndex == 1 ? 0 : 10;
                         }
+                        void NormalizeHost()
+                        {
+                            if (mode.SelectedIndex == 2) return;
+                            var raw = host.Text.Trim();
+                            if (!(raw.StartsWith("http://", StringComparison.OrdinalIgnoreCase)
+                                || raw.StartsWith("https://", StringComparison.OrdinalIgnoreCase))) return;
+                            if (!Uri.TryCreate(raw, UriKind.Absolute, out var uri) || uri.Host == "")
+                                throw new InvalidOperationException("服务器地址无效。");
+                            manualHost = uri.Host;
+                            mode.SelectedIndex = uri.Scheme == "https" ? 1 : 0;
+                            host.Text = manualHost;
+                            if (uri.Scheme == "http") port.Text = uri.Port.ToString();
+                            if (uri.AbsolutePath != "/") path.Text = uri.AbsolutePath;
+                            query = uri.Query;
+                        }
+                        host.LostFocus += (_, _) =>
+                        {
+                            try { NormalizeHost(); }
+                            catch (Exception ex) { ShowMessage(ex.Message); }
+                        };
                         mode.SelectionChanged += (_, _) => UpdateHost();
                         UpdateHost();
-                        refreshAddress = value => { ssdpIp = value; if (mode.SelectedIndex == 1) host.Text = ssdpIp; };
-                        var addressRow = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 10 };
-                        host.Width = 320; addressRow.Children.Add(host); addressRow.Children.Add(port); addressRow.Children.Add(scheme);
+                        refreshAddress = value => { ssdpIp = value; if (mode.SelectedIndex == 2) host.Text = ssdpIp; };
                         item.Children.Add(mode); item.Children.Add(addressRow); item.Children.Add(path);
-                        item.Children.Add(Text("选择 SSDP 后只接管 IP；端口、协议和路径仍由你设置，服务器 IP 变化会在连接时自动切换。", 12, muted: true));
-                        edits["address_source"] = () => mode.SelectedIndex == 1 ? "ssdp" : "manual";
+                        edits["address_source"] = () => mode.SelectedIndex == 2 ? "ssdp" : "manual";
                         edits["file_url"] = () =>
                         {
-                            var selectedHost = mode.SelectedIndex == 1 ? ssdpIp : host.Text.Trim();
-                            if (selectedHost == "") throw new InvalidOperationException(mode.SelectedIndex == 1
+                            NormalizeHost();
+                            var selectedHost = mode.SelectedIndex == 2 ? ssdpIp : host.Text.Trim();
+                            if (selectedHost == "") throw new InvalidOperationException(mode.SelectedIndex == 2
                                 ? "SSDP 尚未提供地址，请先执行 SSDP 插件。" : "请填写服务器 IP 或主机名。");
-                            if (!int.TryParse(port.Text.Trim(), out var number) || number is < 1 or > 65535)
+                            var number = -1;
+                            if (mode.SelectedIndex != 1 && (!int.TryParse(port.Text.Trim(), out number) || number is < 1 or > 65535))
                                 throw new InvalidOperationException("端口必须是 1–65535。");
                             var builder = parsed is null ? new UriBuilder() : new UriBuilder(parsed);
-                            builder.Scheme = scheme.SelectedIndex == 1 ? "https" : "http";
+                            builder.Scheme = mode.SelectedIndex == 1 ? "https" : "http";
                             builder.Host = selectedHost; builder.Port = number; builder.Path = path.Text.Trim();
+                            builder.Query = query;
                             return builder.Uri.AbsoluteUri.TrimEnd('/');
                         };
                         section.Children.Add(item);
@@ -209,9 +256,28 @@ public sealed partial class MainWindow
                         var box = EditorControl(new TextBox { Text = ConfigFieldValue(field),
                             IsEnabled = enabled, AcceptsReturn = multi,
                             TextWrapping = multi ? TextWrapping.Wrap : TextWrapping.NoWrap,
-                            MinHeight = multi ? 94 : 40 });
+                            MinHeight = id == aiPlugin && IsPaperPrompt(key) ? 240 : multi ? 94 : 40 });
                         edits[key] = () => box.IsEnabled ? box.Text : null;
                         item.Children.Add(box);
+                        if (id == aiPlugin && IsPaperPrompt(key))
+                        {
+                            const string marker = "<INSERT_PAPER_LIST_HERE>";
+                            var caret = box.Text.Length;
+                            box.SelectionChanged += (_, _) => caret = box.SelectionStart;
+                            var label = key == "title_prompt" ? "插入标题论文占位符" : "插入摘要论文占位符";
+                            var insert = Action(label, () =>
+                            {
+                                var beforeCaret = box.Text[..Math.Clamp(caret, 0, box.Text.Length)];
+                                var position = beforeCaret.Replace(marker, "", StringComparison.Ordinal).Length;
+                                box.Text = box.Text.Replace(marker, "", StringComparison.Ordinal)
+                                    .Insert(position, marker);
+                                box.SelectionStart = position + marker.Length;
+                                box.SelectionLength = 0;
+                                box.Focus(FocusState.Programmatic);
+                            });
+                            insert.IsEnabled = enabled;
+                            item.Children.Add(insert);
+                        }
                     }
                     section.Children.Add(item);
                 }
@@ -222,7 +288,6 @@ public sealed partial class MainWindow
             var error = Text("", 12, muted: true);
             sections.Children.Add(error);
             var dialog = EditorDialog(name + " · 配置", sections, "保存配置");
-            dialog.Width = Math.Min(680, Math.Max(360, Shell.ActualWidth - 80));
             if (dialog.Content is ScrollViewer scroller) scroller.MaxHeight = 640;
             dialog.PrimaryButtonClick += async (_, args) =>
             {
@@ -235,10 +300,26 @@ public sealed partial class MainWindow
                         var value = edit.Value();
                         if (value is not null) values[edit.Key] = value;
                     }
+                    if (id == aiPlugin)
+                    {
+                        const string marker = "<INSERT_PAPER_LIST_HERE>";
+                        foreach (var (key, label) in new[] { ("title_prompt", "标题"), ("abstract_prompt", "摘要") })
+                            if (values.TryGetValue(key, out var prompt) &&
+                                (prompt?.ToString()?.Contains(marker, StringComparison.Ordinal) != true))
+                                throw new InvalidOperationException(label + "评分提示词缺少论文插入占位符 " + marker + "。请插入后再保存。");
+                    }
+                    var paperValues = id == aiPlugin
+                        ? values.Where(entry => IsPaperScoringSetting(entry.Key))
+                            .ToDictionary(entry => entry.Key, entry => entry.Value)
+                        : new Dictionary<string, object?>();
+                    foreach (var key in paperValues.Keys) values.Remove(key);
                     var clear_secrets = clearSecrets.Where(entry => entry.Value.IsChecked == true)
                         .Select(entry => entry.Key).ToArray();
                     using var result = await PluginConfigCommandAsync("UiPluginConfigSave", id,
                         new { values, clear_secrets });
+                    if (paperValues.Count > 0)
+                        using (var promptsSaved = await PluginConfigCommandAsync("UiPluginConfigSave", paperPlugin,
+                            new { values = paperValues, clear_secrets = Array.Empty<string>() })) { }
                     using var saved = await PluginConfigCommandAsync("UiPluginConfigModel", id);
                     foreach (var field in Items(saved.RootElement, "fields"))
                     {

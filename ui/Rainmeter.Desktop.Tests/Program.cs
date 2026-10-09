@@ -23,7 +23,32 @@ try
     try { repository.Save(new TodoDraft(id, "错误", "", "", [], "2026-09-23T20:00:00+08:00", "2026-09-23T19:00:00+08:00")); }
     catch (ArgumentException) { rejected = true; }
     if (!rejected) throw new Exception("无效时间未拒绝");
-    repository.Delete(id);
+    task = root["tasks"]!.AsArray()[0]!.AsObject();
+    task["policy"] = new JsonObject
+    {
+        ["manual_complete_label"] = "已读",
+        ["restore_resets_age"] = true
+    };
+    File.WriteAllText(path, root.ToJsonString());
+    repository.ToggleMany([id]);
+    root = JsonNode.Parse(File.ReadAllText(path))!.AsObject();
+    task = root["tasks"]!.AsArray()[0]!.AsObject();
+    if (task["completed"]!.GetValue<bool>() != true ||
+        !task["labels"]!.AsArray().Any(label => label!.GetValue<string>() == "已读"))
+        throw new Exception("批量完成没有保留策略行为");
+    repository.ToggleMany([id]);
+    root = JsonNode.Parse(File.ReadAllText(path))!.AsObject();
+    task = root["tasks"]!.AsArray()[0]!.AsObject();
+    if (task["completed"]!.GetValue<bool>() ||
+        task["labels"]!.AsArray().Any(label => label!.GetValue<string>() == "已读"))
+        throw new Exception("批量恢复没有保留策略行为");
+    repository.Save(new TodoDraft(null, "第二条", "", "", [], null, null));
+    repository.DeleteMany([id]);
+    root = JsonNode.Parse(File.ReadAllText(path))!.AsObject();
+    if (root["tasks"]!.AsArray().Count != 1 ||
+        root["tasks"]!.AsArray()[0]!["title"]!.GetValue<string>() != "第二条")
+        throw new Exception("批量删除范围错误");
+    repository.Delete(root["tasks"]!.AsArray()[0]!["id"]!.GetValue<string>());
     root = JsonNode.Parse(File.ReadAllText(path))!.AsObject();
     if (root["tasks"]!.AsArray().Count != 0) throw new Exception("删除待办失败");
     Console.WriteLine("TodoRepository: PASS");

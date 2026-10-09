@@ -2,7 +2,6 @@ using System.Diagnostics;
 using System.Globalization;
 using System.Text.Json;
 using System.Text.Json.Nodes;
-using Microsoft.UI.Composition.SystemBackdrops;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Media;
@@ -45,42 +44,38 @@ public sealed partial class MainWindow : Window
     private Brush Ink => DarkTheme ? Brush(244, 239, 249) : Brush(38, 30, 48);
     private Brush Muted => DarkTheme ? Brush(183, 172, 192) : Brush(103, 91, 115);
     private Brush Surface => DarkTheme
-        ? studioStyle ? Brush(48, 40, 57, 208) : Brush(47, 40, 54, 243)
-        : Brush(255, 255, 255, studioStyle ? 224 : 248);
+        ? studioStyle ? Brush(40, 33, 48, 108) : Brush(42, 34, 50, 148)
+        : Brush(255, 255, 255, studioStyle ? 122 : 174);
+    private Brush CardStroke => DarkTheme
+        ? Brush(255, 255, 255, studioStyle ? 28 : 20)
+        : Brush(255, 255, 255, studioStyle ? 105 : 82);
+    private Brush SidebarSurface => DarkTheme
+        ? studioStyle ? Brush(27, 19, 34, 102) : Brush(27, 19, 34, 148)
+        : studioStyle ? Brush(248, 243, 252, 120) : Brush(248, 243, 252, 170);
     private Brush Accent => DarkTheme ? Brush(206, 147, 255) : Brush(103, 58, 166);
     private Brush PrimaryFill => Brush(123, 86, 196);
-    private Brush Canvas => !DarkTheme
-        ? new LinearGradientBrush
+    private Brush Canvas => new LinearGradientBrush
+    {
+        StartPoint = new Windows.Foundation.Point(0, 0),
+        EndPoint = new Windows.Foundation.Point(1, 1),
+        GradientStops =
         {
-            StartPoint = new Windows.Foundation.Point(0, 0),
-            EndPoint = new Windows.Foundation.Point(1, 1),
-            GradientStops =
+            new GradientStop
             {
-                new GradientStop { Color = Color.FromArgb(255, 249, 246, 253), Offset = 0 },
-                new GradientStop { Color = Color.FromArgb(255, 236, 243, 251), Offset = 1 }
+                Color = DarkTheme
+                    ? studioStyle ? Color.FromArgb(28, 45, 29, 56) : Color.FromArgb(38, 46, 31, 58)
+                    : studioStyle ? Color.FromArgb(14, 246, 239, 252) : Color.FromArgb(24, 247, 241, 252),
+                Offset = 0
+            },
+            new GradientStop
+            {
+                Color = DarkTheme
+                    ? studioStyle ? Color.FromArgb(24, 28, 33, 53) : Color.FromArgb(34, 29, 31, 51)
+                    : studioStyle ? Color.FromArgb(12, 232, 240, 250) : Color.FromArgb(20, 232, 240, 250),
+                Offset = 1
             }
         }
-        : studioStyle
-        ? new LinearGradientBrush
-        {
-            StartPoint = new Windows.Foundation.Point(0, 0),
-            EndPoint = new Windows.Foundation.Point(1, 1),
-            GradientStops =
-            {
-                new GradientStop { Color = Color.FromArgb(184, 30, 18, 39), Offset = 0 },
-                new GradientStop { Color = Color.FromArgb(184, 25, 29, 48), Offset = 1 }
-            }
-        }
-        : new LinearGradientBrush
-        {
-            StartPoint = new Windows.Foundation.Point(0, 0),
-            EndPoint = new Windows.Foundation.Point(1, 1),
-            GradientStops =
-            {
-                new GradientStop { Color = Color.FromArgb(245, 31, 22, 40), Offset = 0 },
-                new GradientStop { Color = Color.FromArgb(245, 26, 28, 47), Offset = 1 }
-            }
-        };
+    };
     private static Brush Brush(int r, int g, int b) => new SolidColorBrush(Color.FromArgb(255, (byte)r, (byte)g, (byte)b));
     private static Brush Brush(int r, int g, int b, int alpha) => new SolidColorBrush(Color.FromArgb((byte)alpha, (byte)r, (byte)g, (byte)b));
     private static readonly string ThemePath = Path.Combine(
@@ -107,7 +102,7 @@ public sealed partial class MainWindow : Window
         pluginDataRoot = Environment.GetEnvironmentVariable("RAINMETER_PLUGIN_ROOT")
             ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "RainmeterDesktopWidgets");
         ExtendsContentIntoTitleBar = true;
-        SystemBackdrop = studioStyle ? new DesktopAcrylicBackdrop() : new MicaBackdrop { Kind = MicaKind.Base };
+        InitializeMaterialBackdrop();
         if (Content is FrameworkElement shell) shell.RequestedTheme = DarkTheme ? ElementTheme.Dark : ElementTheme.Light;
         ApplyAppearance();
         AppWindow.Resize(new SizeInt32(1190, 820));
@@ -206,7 +201,7 @@ public sealed partial class MainWindow : Window
         var brand = new Grid { ColumnSpacing = 12, Margin = new Thickness(2, 0, 0, 36) };
         brand.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(48) });
         brand.ColumnDefinitions.Add(new ColumnDefinition());
-        var brandImage = Path.Combine(AppContext.BaseDirectory, "Assets", "brand-mark.png");
+        var brandImage = Path.Combine(AppContext.BaseDirectory, "Assets", "brand-mark-transparent.png");
         if (File.Exists(brandImage))
             brand.Children.Add(new Image
             {
@@ -250,7 +245,7 @@ public sealed partial class MainWindow : Window
         BrandFooter.Margin = new Thickness(10, 0, 0, 0);
         Grid.SetRow(BrandFooter, 2);
         sidebar.Children.Add(BrandFooter);
-        Sidebar.Background = DarkTheme ? Brush(24, 16, 32, 235) : Brush(241, 235, 247, 245);
+        Sidebar.Background = SidebarSurface;
         Sidebar.Padding = new Thickness(20, 40, 20, 28);
         Sidebar.Child = sidebar;
         root.Children.Add(Sidebar);
@@ -307,6 +302,8 @@ public sealed partial class MainWindow : Window
 
     private void Render()
     {
+        renderRevision++;
+        calendarLoad?.Cancel();
         Title = "桌面组件 · " + (page switch
         {
             "todo" => "待办管理",
@@ -350,6 +347,8 @@ public sealed partial class MainWindow : Window
     private Border Card(UIElement content, int padding = 22) => new()
     {
         Background = Surface,
+        BorderBrush = CardStroke,
+        BorderThickness = new Thickness(1),
         CornerRadius = new CornerRadius(22),
         Padding = new Thickness(padding),
         Child = content
@@ -419,21 +418,13 @@ public sealed partial class MainWindow : Window
         PageSubtitle.Text = subtitle;
     }
 
-    private void RenderHome()
+    private async void RenderHome()
     {
         Heading("今天，先做重要的事。", DateTime.Now.ToString("M月d日 dddd") + " · 你的桌面工作台");
         using var todo = ReadJson(Path.Combine(todoRoot, "tasks.json"));
-        using var calendar = ReadJson(Path.Combine(calendarRoot, "calendar-cache.json"));
-        using var calendarState = ReadJson(Path.Combine(calendarRoot, "calendar-state.json"));
         int tasks = todo is null ? 0 : Items(todo.RootElement, "tasks")
             .Count(item => Value(item, "completed") != "True");
-        var today = DateTimeOffset.Now.Date;
-        var tomorrow = today.AddDays(1);
-        int events = (calendar is null ? [] : Items(calendar.RootElement, "events"))
-            .Concat(calendarState is null ? [] : Items(calendarState.RootElement, "local_events"))
-            .Count(item => DateTimeOffset.TryParse(Value(item, "start_at"), out var start)
-                && DateTimeOffset.TryParse(Value(item, "end_at"), out var end)
-                && start.ToLocalTime().DateTime < tomorrow && end.ToLocalTime().DateTime > today);
+        var revision = renderRevision;
         var hero = new StackPanel { Spacing = 14 };
         hero.Children.Add(Text(DateTime.Now.Hour switch
         {
@@ -451,10 +442,35 @@ public sealed partial class MainWindow : Window
         tiles.ColumnDefinitions.Add(new ColumnDefinition());
         tiles.ColumnDefinitions.Add(new ColumnDefinition());
         tiles.Children.Add(StatTile("待办事项", tasks.ToString("00"), "未完成", () => Navigate("todo")));
-        var calTile = StatTile("日历日程", events.ToString("00"), "今天", () => Navigate("calendar"));
+        var calTile = StatTile("日历日程", "…", "今天", () => Navigate("calendar"));
         Grid.SetColumn(calTile, 1);
         tiles.Children.Add(calTile);
         PageContent.Children.Add(tiles);
+        using var load = new CancellationTokenSource();
+        calendarLoad = load;
+        try
+        {
+            var today = new DateTimeOffset(DateTime.Today);
+            var response = await QueryCalendarAsync(new { from = today, to = today.AddDays(1) }, load.Token);
+            if (revision != renderRevision) return;
+            var count = Items(response, "events").Count();
+            var updated = StatTile("日历日程", count.ToString("00") + (Value(response, "truncated") == "True" ? "+" : ""), "今天", () => Navigate("calendar"));
+            Grid.SetColumn(updated, 1);
+            tiles.Children.Remove(calTile);
+            tiles.Children.Add(updated);
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception)
+        {
+            if (revision == renderRevision)
+            {
+                var unavailable = StatTile("日历日程", "—", "加载失败，点击重试", () => Render());
+                Grid.SetColumn(unavailable, 1);
+                tiles.Children.Remove(calTile);
+                tiles.Children.Add(unavailable);
+            }
+        }
+        finally { if (calendarLoad == load) calendarLoad = null; }
     }
 
     private FrameworkElement StatTile(string title, string number, string note, Action action)

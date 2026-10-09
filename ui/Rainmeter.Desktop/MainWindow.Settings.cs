@@ -2,7 +2,6 @@ using System.Diagnostics;
 using System.Globalization;
 using System.Text.Json;
 using System.Text.Json.Nodes;
-using Microsoft.UI.Composition.SystemBackdrops;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Media;
@@ -136,7 +135,6 @@ public sealed partial class MainWindow
     private void SetStyle(bool immersive)
     {
         studioStyle = immersive;
-        SystemBackdrop = immersive ? new DesktopAcrylicBackdrop() : new MicaBackdrop { Kind = MicaKind.Base };
         ApplyAppearance();
         SaveStyle(immersive);
         Render();
@@ -153,7 +151,12 @@ public sealed partial class MainWindow
 
     private void ApplyAppearance()
     {
+        // A XAML theme update can leave an existing backdrop target in fallback mode.
+        // Reattach the selected controller after the theme has been applied.
+        if (studioStyle) DisposeAcrylic();
+        else DisposeMica();
         if (Content is FrameworkElement root) root.RequestedTheme = DarkTheme ? ElementTheme.Dark : ElementTheme.Light;
+        ApplyMaterialBackdrop();
         Shell.Background = Canvas;
         if (Microsoft.UI.Windowing.AppWindowTitleBar.IsCustomizationSupported())
         {
@@ -164,9 +167,7 @@ public sealed partial class MainWindow
             AppWindow.TitleBar.ButtonHoverBackgroundColor = DarkTheme
                 ? Color.FromArgb(255, 75, 57, 91) : Color.FromArgb(255, 226, 215, 239);
         }
-        Sidebar.Background = DarkTheme
-            ? studioStyle ? Brush(24, 16, 32, 192) : Brush(24, 16, 32, 235)
-            : Brush(241, 235, 247, studioStyle ? 220 : 245);
+        Sidebar.Background = SidebarSurface;
         BrandTitle.Foreground = Ink;
         BrandSubtitle.Foreground = Muted;
         BrandFooter.Foreground = Muted;

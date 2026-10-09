@@ -76,40 +76,57 @@ internal static partial class CalendarApp
         if (root == "") throw new Exception("CalDAV 地址不能为空");
         root = root.TrimEnd('/');
         string properties = "<?xml version=\"1.0\" encoding=\"utf-8\"?><d:propfind xmlns:d=\"DAV:\" xmlns:c=\"urn:ietf:params:xml:ns:caldav\"><d:prop><d:current-user-principal/><c:calendar-home-set/><d:displayname/><d:resourcetype/><c:supported-calendar-component-set/></d:prop></d:propfind>";
-        DavResult wellKnown = Dav("PROPFIND", root + "/.well-known/caldav", credentials, properties, 0);
-        string davUri = !String.IsNullOrEmpty(wellKnown.Location) ? Resolve(root, wellKnown.Location) : root + "/dav/";
+        string origin = new Uri(root).GetLeftPart(UriPartial.Authority);
+        string davUri = root;
         DavResult dav = Dav("PROPFIND", davUri, credentials, properties, 0);
+        if (dav.Status != 207)
+        {
+            DavResult wellKnown = Dav("PROPFIND", origin + "/.well-known/caldav", credentials, properties, 0);
+            davUri = !String.IsNullOrEmpty(wellKnown.Location) ? Resolve(origin, wellKnown.Location) : origin + "/dav/";
+            dav = Dav("PROPFIND", davUri, credentials, properties, 0);
+        }
         if (dav.Status == 401) throw new Exception("CalDAV 账号或密码无效");
         if (dav.Status != 207) throw new Exception("CalDAV 服务发现失败：HTTP " + dav.Status);
 
         XmlDocument document = Xml(dav.Text);
+        List<CalendarInfo> direct = ParseCalendarCollections(document, davUri);
+        if (direct.Count > 0) return direct.First();
         XmlNamespaceManager namespaces = Ns(document);
         XmlNode home = document.SelectSingleNode("//c:calendar-home-set/d:href", namespaces);
         if (home == null)
         {
             XmlNode principal = document.SelectSingleNode("//d:current-user-principal/d:href", namespaces);
             if (principal == null) throw new Exception("CalDAV 未返回 current-user-principal");
-            DavResult principalResult = Dav("PROPFIND", Resolve(root, principal.InnerText), credentials, properties, 0);
+            DavResult principalResult = Dav("PROPFIND", Resolve(davUri, principal.InnerText), credentials, properties, 0);
             if (principalResult.Status != 207) throw new Exception("CalDAV principal 查询失败：HTTP " + principalResult.Status);
             XmlDocument principalDocument = Xml(principalResult.Text);
             home = principalDocument.SelectSingleNode("//c:calendar-home-set/d:href", Ns(principalDocument));
         }
         if (home == null) throw new Exception("CalDAV 未返回 calendar-home-set");
 
-        DavResult list = Dav("PROPFIND", Resolve(root, home.InnerText), credentials, properties, 1);
+        DavResult list = Dav("PROPFIND", Resolve(origin, home.InnerText), credentials, properties, 1);
         if (list.Status != 207) throw new Exception("日历列表读取失败：HTTP " + list.Status);
         XmlDocument listDocument = Xml(list.Text);
+        List<CalendarInfo> found = ParseCalendarCollections(listDocument, Resolve(origin, home.InnerText));
+        if (found.Count == 0) throw new Exception("没有找到支持 VEVENT 的日历");
+        return found.OrderBy(item => item.Name == "Default Calendar" ? 0 : 1).ThenBy(item => item.Name).First();
+    }
+
+    private static List<CalendarInfo> ParseCalendarCollections(XmlDocument listDocument, string root)
+    {
         XmlNamespaceManager listNamespaces = Ns(listDocument);
         List<CalendarInfo> found = new List<CalendarInfo>();
         foreach (XmlNode response in listDocument.SelectNodes("//d:response", listNamespaces))
         {
-            if (response.SelectSingleNode(".//d:resourcetype/c:calendar", listNamespaces) == null) continue;
+            XmlNode properties = response.SelectSingleNode("./d:propstat[contains(d:status, ' 200 ')]/d:prop[d:resourcetype/c:calendar]", listNamespaces);
+            if (properties == null) continue;
+            XmlNode components = properties.SelectSingleNode("./c:supported-calendar-component-set", listNamespaces);
+            if (components != null && components.SelectSingleNode("./c:comp[@name='VEVENT']", listNamespaces) == null) continue;
             XmlNode href = response.SelectSingleNode("./d:href", listNamespaces);
-            XmlNode name = response.SelectSingleNode(".//d:displayname", listNamespaces);
+            XmlNode name = properties.SelectSingleNode("./d:displayname", listNamespaces);
             if (href != null) found.Add(new CalendarInfo { Uri = Resolve(root, href.InnerText), Name = name == null ? "" : name.InnerText });
         }
-        if (found.Count == 0) throw new Exception("没有找到支持 VEVENT 的日历");
-        return found.OrderBy(item => item.Name == "Default Calendar" ? 0 : 1).ThenBy(item => item.Name).First();
+        return found;
     }
     private static XmlDocument Xml(string text){XmlDocument d=new XmlDocument();d.LoadXml(text);return d;} private static XmlNamespaceManager Ns(XmlDocument d){XmlNamespaceManager n=new XmlNamespaceManager(d.NameTable);n.AddNamespace("d","DAV:");n.AddNamespace("c","urn:ietf:params:xml:ns:caldav");return n;}
 

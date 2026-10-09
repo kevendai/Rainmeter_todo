@@ -168,6 +168,14 @@ internal static class PaidConsentProbe
         generated = ReadGenerated();
         Expect(MeterBlock(generated, "Status").Contains("已取消"), "cancelled 在磁贴页脚照实显示，实际 " + MeterBlock(generated, "Status").Trim());
         Expect(!MeterBlock(generated, "Status").Contains("失败"), "cancelled 不得渲染成「失败：…」（§11-#25）");
+        WriteText(Path.Combine(root, "PluginJobs", Arxiv + ".json"),
+            "{\"job_id\":\"probe\",\"state\":\"attention\",\"message\":\"正在获取和评分论文\"}");
+        RunTodo("Render");
+        Expect(MeterBlock(ReadGenerated(), "Status").Contains("正在获取和评分论文"), "取消前磁贴显示旧进度");
+        string output;
+        Expect(RunHost("Cancel " + Arxiv + " user_cancelled", out output, false) == 0, "取消论文确认成功");
+        generated = ReadGenerated();
+        Expect(MeterBlock(generated, "Status").Contains("已取消"), "取消后立即重绘磁贴，不得停在旧进度");
         try { File.Delete(Path.Combine(root, "PluginJobs", Arxiv + ".json")); } catch { }
     }
 

@@ -244,6 +244,12 @@ internal static partial class TodoApp
                     if (value.Length > 2048) throw new InvalidDataException("设备标识过长。");
                     config[key] = value;
                 }
+            if (pluginId == "io.github.kevendai.arxiv")
+                foreach (string key in new[]{"title_prompt", "abstract_prompt"})
+                    if (edits.ContainsKey(key) && !JsonUtil.String(config, key, "")
+                        .Contains("<INSERT_PAPER_LIST_HERE>"))
+                        throw new InvalidDataException((key == "title_prompt" ? "标题" : "摘要") +
+                            "评分提示词缺少论文插入占位符 <INSERT_PAPER_LIST_HERE>，请插入后再保存。");
             List<KeyValuePair<string, string>> previousBindings = selections.Select(x =>
                 new KeyValuePair<string, string>(x.Key, ServiceRegistry.BoundProvider(pluginId, x.Key))).ToList();
             try

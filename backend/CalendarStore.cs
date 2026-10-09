@@ -14,6 +14,49 @@ using RainmeterBackend;
 
 internal static partial class CalendarApp
 {
+    private static Dictionary<string,object> CalendarUiModel(Dictionary<string,object> cache,Dictionary<string,object> state,Dictionary<string,object> request)
+    {
+        string id=S(request,"id");
+        if(id!="") {
+            var found=FindEvent(cache,state,id);
+            return new Dictionary<string,object>{{"ok",true},{"events",found==null?new List<object>():new List<object>{CalendarUiEvent(found,state)}}};
+        }
+        DateTimeOffset? from=RuntimeUtil.Date(request,"from"),to=RuntimeUtil.Date(request,"to");
+        if(!from.HasValue||!to.HasValue||to<=from||(to.Value-from.Value).TotalDays>62)throw new InvalidDataException("日程查询范围必须在 62 天以内。");
+        var result=new List<object>();bool truncated=false;
+        var events=Events(cache).Concat(LocalEvents(state).SelectMany(master=>ExpandLocalSeriesWindow(master,from,to)));
+        foreach(var item in events){
+            var start=RuntimeUtil.Date(item,"start_at");var end=RuntimeUtil.Date(item,"end_at");
+            if(!start.HasValue||!end.HasValue||start>=to||end<=from)continue;
+            if(result.Count>=2000){truncated=true;break;}
+            result.Add(CalendarUiEvent(item,state));
+        }
+        return new Dictionary<string,object>{{"ok",true},{"events",result},{"truncated",truncated}};
+    }
+
+    private static Dictionary<string,object> CalendarUiEvent(Dictionary<string,object> item,Dictionary<string,object> state)
+    {
+        var result=new Dictionary<string,object>(item);
+        var master=LocalSeriesMaster(state,item);
+        if(master!=null){result["source"]="local";result["series_event"]=master;}
+        else if(S(result,"source")=="")result["source"]=LocalEvents(state).Any(e=>S(e,"id")==S(item,"id"))?"local":"caldav";
+        return result;
+    }
+
+    private static Dictionary<string,object> FindUiEvent(Dictionary<string,object> cache,Dictionary<string,object> state,Dictionary<string,object> input)
+    {
+        string id=S(input,"id");var start=RuntimeUtil.Date(input,"occurrence_start");
+        if(start.HasValue){
+            var remote=Events(cache).FirstOrDefault(e=>S(e,"id")==id);
+            if(remote!=null){remote["source"]="caldav";return remote;}
+            foreach(var master in LocalEvents(state)){
+                var found=ExpandLocalSeriesWindow(master,start.Value,start.Value.AddDays(1)).FirstOrDefault(e=>S(e,"id")==id);
+                if(found!=null){found["source"]="local";return found;}
+            }
+            return null;
+        }
+        return FindEvent(cache,state,id);
+    }
     private static Dictionary<string,object> NewCache(){return new Dictionary<string,object>{{"version",1},{"fetched_at",""},{"calendar_url",""},{"status",File.Exists(SecretPath)?"尚未同步":"CalDAV 未连接"},{"events",new List<object>()}};}
     private static Dictionary<string,object> NewState(){return new Dictionary<string,object>{{"version",1},{"series_rules",new List<object>()},{"conversions",new List<object>()},{"local_events",new List<object>()},{"hidden_events",new List<object>()}};}
     private static Dictionary<string,object> Load(string path,Dictionary<string,object> fallback){if(!File.Exists(path))return fallback;try{return JsonUtil.LoadObject(path);}catch{File.Copy(path,path+".corrupt-"+DateTime.Now.ToString("yyyyMMdd-HHmmss"),true);return fallback;}}

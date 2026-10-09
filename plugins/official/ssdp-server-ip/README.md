@@ -6,7 +6,7 @@
 
 首次配置会完整扫描并按 `SERVER / USN / IP` 列出设备；保存后以完整 USN 为身份，后续先探测上次 IP，未命中才扫描配置范围。插件输出 `server_ip`、`server`、`usn` 和 `location`，可通过 `{{plugin:io.github.kevendai.ssdp-server-ip:server_ip}}` 引用。
 
-此插件随主程序提供，但不在公开插件市场中展示。
+大网段扫描按 256 个地址分块，每个地址探测两轮并限制发送突发；接收缓冲区扩大到 1 MiB，降低密集请求或响应造成的漏扫。
 
 # 代管目标（1.1.0 起）
 

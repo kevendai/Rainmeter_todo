@@ -16,16 +16,56 @@ public sealed partial class MainWindow
 {
     private DateTime calendarMonth = new(DateTime.Today.Year, DateTime.Today.Month, 1);
     private DateTime selectedCalendarDay = DateTime.Today;
-    private (JsonElement? Event, string Source) FindCalendarEvent(string id)
+    private readonly Dictionary<string, JsonElement> calendarInstances = new(StringComparer.Ordinal);
+    private CancellationTokenSource? calendarLoad;
+    private int renderRevision;
+
+    private async Task<JsonElement> QueryCalendarAsync(object request, CancellationToken cancellation = default)
     {
-        using var cache = ReadJson(Path.Combine(calendarRoot, "calendar-cache.json"));
-        using var state = ReadJson(Path.Combine(calendarRoot, "calendar-state.json"));
-        if (cache is not null)
-            foreach (var item in Items(cache.RootElement, "events"))
-                if (Value(item, "id") == id) return (item.Clone(), "caldav");
-        if (state is not null)
-            foreach (var item in Items(state.RootElement, "local_events"))
-                if (Value(item, "id") == id) return (item.Clone(), "local");
+        var input = Path.Combine(Path.GetTempPath(), "rainmeter-calendar-query-" + Guid.NewGuid().ToString("N") + ".json");
+        var output = input + ".result.json";
+        try
+        {
+            await File.WriteAllTextAsync(input, JsonSerializer.Serialize(request), cancellation);
+            using var process = Process.Start(new ProcessStartInfo(Path.Combine(calendarRoot, "CalendarHost.exe"))
+            {
+                UseShellExecute = false, CreateNoWindow = true, ArgumentList = { "UiEvents", input }
+            }) ?? throw new InvalidOperationException("无法启动日历查询。");
+            using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellation);
+            timeout.CancelAfter(TimeSpan.FromSeconds(25));
+            try { await process.WaitForExitAsync(timeout.Token); }
+            catch (OperationCanceledException)
+            {
+                if (!process.HasExited) process.Kill();
+                await process.WaitForExitAsync();
+                if (cancellation.IsCancellationRequested) throw;
+                throw new TimeoutException("日程查询超时，请缩小日程范围后重试。");
+            }
+            using var result = ReadJson(output);
+            if (process.ExitCode != 0 || result is null || Value(result.RootElement, "ok") != "True")
+                throw new InvalidOperationException("日程加载失败，请刷新后重试。");
+            return result.RootElement.Clone();
+        }
+        finally
+        {
+            if (File.Exists(input)) File.Delete(input);
+            if (File.Exists(output)) File.Delete(output);
+        }
+    }
+
+    private async Task<(JsonElement? Event, string Source)> FindCalendarEvent(string id)
+    {
+        if (calendarInstances.TryGetValue(id, out var cached)) return (cached, Value(cached, "source", "local"));
+        try
+        {
+            var response = await QueryCalendarAsync(new { id });
+            foreach (var item in Items(response, "events"))
+            {
+                calendarInstances[id] = item.Clone();
+                return (item.Clone(), Value(item, "source", "local"));
+            }
+        }
+        catch (Exception ex) { ShowMessage(ex.Message); }
         return (null, "local");
     }
 
@@ -66,7 +106,8 @@ public sealed partial class MainWindow
         var result = input + ".result.json";
         try
         {
-            File.WriteAllText(input, JsonSerializer.Serialize(new { id, mode, hide }));
+            var occurrenceStart = calendarInstances.TryGetValue(id, out var instance) ? Value(instance, "start_at") : "";
+            File.WriteAllText(input, JsonSerializer.Serialize(new { id, mode, hide, occurrence_start = occurrenceStart }));
             using var process = Process.Start(new ProcessStartInfo(host)
             {
                 UseShellExecute = false, CreateNoWindow = true,
@@ -94,13 +135,13 @@ public sealed partial class MainWindow
         content.Children.Add(Text(Value(item, "title", "未命名日程"), 17, true));
         content.Children.Add(Text(recurring ? "可以只转换这一次，也可以让今后的周期自动转入待办。" : "时间与提醒会一并带入待办。", 13, muted: true));
         content.Children.Add(hide);
-        var dialog = new ContentDialog
+        var dialog = MaterialDialog(new ContentDialog
         {
             XamlRoot = Shell.XamlRoot, Title = "转为待办", Content = content,
             PrimaryButtonText = recurring ? "仅本次" : "转为待办",
             SecondaryButtonText = recurring ? "本次及今后" : "",
             CloseButtonText = "取消"
-        };
+        });
         var choice = await dialog.ShowAsync();
         if (choice == ContentDialogResult.None) return;
         try
@@ -114,14 +155,14 @@ public sealed partial class MainWindow
     private async Task ShowCalendarDeleteAsync(string id, JsonElement item)
     {
         var recurring = Value(item, "recurring") == "True";
-        var dialog = new ContentDialog
+        var dialog = MaterialDialog(new ContentDialog
         {
             XamlRoot = Shell.XamlRoot, Title = recurring ? "删除周期日程" : "删除日程",
             Content = Text(recurring ? "可以只在本机隐藏这一次，或删除整个周期日程。" : "确定删除这条日程吗？", 14),
             PrimaryButtonText = recurring ? "仅隐藏本次" : "删除",
             SecondaryButtonText = recurring ? "删除整个周期" : "",
             CloseButtonText = "取消"
-        };
+        });
         var choice = await dialog.ShowAsync();
         if (choice == ContentDialogResult.None) return;
         try
@@ -134,7 +175,8 @@ public sealed partial class MainWindow
 
     private async void ShowCalendarEditor(string? id)
     {
-        var (original, previousSource) = id is null ? (null, "local") : FindCalendarEvent(id);
+        var (original, previousSource) = id is null ? (null, "local") : await FindCalendarEvent(id);
+        var occurrenceStart = original is JsonElement occurrence ? Value(occurrence, "start_at") : "";
         if (id is not null && original is null) { ShowMessage("这条日程已不存在，请刷新后重试。"); return; }
         var preserveComplexRule = original is JsonElement protectedEvent && Value(protectedEvent, "recurrence_preserve") == "True";
         var editingSeries = original is JsonElement seriesEvent && Value(seriesEvent, "recurring") == "True";
@@ -155,7 +197,7 @@ public sealed partial class MainWindow
             && ruleParts.Keys.All(key => new[] { "FREQ", "INTERVAL", "BYDAY", "BYMONTH", "BYMONTHDAY", "COUNT", "UNTIL" }.Contains(key)));
         var initialStart = original is JsonElement oldStart
             ? ExistingLocalDate(Value(oldStart, "start_at")) ?? DateTimeOffset.Now
-            : DateTimeOffset.Now;
+            : new DateTimeOffset(selectedCalendarDay.Date.Add(DateTime.Now.TimeOfDay));
         var initialEnd = original is JsonElement oldEnd
             ? ExistingLocalDate(Value(oldEnd, "end_at")) ?? initialStart.AddHours(1)
             : initialStart.AddHours(1);
@@ -183,22 +225,14 @@ public sealed partial class MainWindow
         var ruleFrequency = ruleParts.TryGetValue("FREQ", out var rawFrequency) ? rawFrequency.ToLowerInvariant() : "none";
         repeat.SelectedIndex = supportedRule ? ruleFrequency switch { "daily" => 1, "weekly" => 2, "monthly" => 3, "yearly" => 4, _ => 0 } : 0;
         repeat.IsEnabled = supportedRule;
-        var repeatHint = Text(supportedRule ? "重复设置作用于整个日程系列。" : "此日程有复杂周期规则；保存时会保持原规则，日期与时间不可修改。", 12, muted: true);
-        var intervalBox = EditorControl(new TextBox { Header = "每隔几次重复", InputScope = new Microsoft.UI.Xaml.Input.InputScope
-        { Names = { new Microsoft.UI.Xaml.Input.InputScopeName { NameValue = Microsoft.UI.Xaml.Input.InputScopeNameValue.Number } } },
-            Text = ruleParts.TryGetValue("INTERVAL", out var originalInterval) ? originalInterval : "1" });
-        var weekdayChoices = new List<(int Day, CheckBox Choice)>();
-        var weekdayRow = new VariableSizedWrapGrid { Orientation = Orientation.Horizontal, ItemWidth = 78, ItemHeight = 34 };
-        var selectedWeekdays = ruleParts.TryGetValue("BYDAY", out var originalDays)
-            ? originalDays.Split(',').ToHashSet() : new HashSet<string>();
-        var dayCodes = new[] { "MO", "TU", "WE", "TH", "FR", "SA", "SU" };
-        var dayLabels = new[] { "周一", "周二", "周三", "周四", "周五", "周六", "周日" };
-        for (var day = 0; day < 7; day++)
-        {
-            var choice = new CheckBox { Content = dayLabels[day], IsChecked = selectedWeekdays.Contains(dayCodes[day]) };
-            weekdayChoices.Add((day + 1, choice));
-            weekdayRow.Children.Add(choice);
-        }
+        var repeatHint = Text(supportedRule
+            ? "按开始日期与起止时长重复；每月没有对应日期时跳过该月。"
+            : "此日程有复杂周期规则；保存时会保持原规则，日期与时间不可修改。", 12, muted: true);
+        var weekdayCodes = new[] { "", "MO", "TU", "WE", "TH", "FR", "SA", "SU" };
+        var originalWeeklyDays = ruleParts.TryGetValue("BYDAY", out var originalDays)
+            ? originalDays.Split(',').Select(day => Array.IndexOf(weekdayCodes, day))
+                .Where(day => day is >= 1 and <= 7).Distinct().ToArray()
+            : Array.Empty<int>();
         var endMode = EditorControl(new ComboBox { Header = "结束方式", HorizontalAlignment = HorizontalAlignment.Stretch });
         foreach (var (label, value) in new[] { ("一直重复", "never"), ("到指定日期", "until"), ("指定次数后", "count") })
             endMode.Items.Add(new ComboBoxItem { Content = label, Tag = value });
@@ -206,11 +240,9 @@ public sealed partial class MainWindow
         var untilDate = new CalendarDatePicker { Date = ruleParts.TryGetValue("UNTIL", out var originalUntil)
             && DateTime.TryParseExact(originalUntil[..Math.Min(8, originalUntil.Length)], "yyyyMMdd",
                 CultureInfo.InvariantCulture, DateTimeStyles.None, out var parsedUntil)
-                ? LocalPickerDate(parsedUntil) : LocalPickerDate(DateTime.Today.AddMonths(1)) };
+                ? LocalPickerDate(parsedUntil) : LocalPickerDate(initialStart.Date.AddMonths(1)) };
         var countBox = EditorControl(new TextBox { Header = "重复次数", Text = ruleParts.TryGetValue("COUNT", out var originalCount) ? originalCount : "10" });
         var repeatDetails = new StackPanel { Spacing = 10 };
-        repeatDetails.Children.Add(intervalBox);
-        repeatDetails.Children.Add(weekdayRow);
         repeatDetails.Children.Add(endMode);
         repeatDetails.Children.Add(untilDate);
         repeatDetails.Children.Add(countBox);
@@ -218,7 +250,6 @@ public sealed partial class MainWindow
         {
             var frequency = (repeat.SelectedItem as ComboBoxItem)?.Tag?.ToString();
             repeatDetails.Visibility = supportedRule && frequency != "none" ? Visibility.Visible : Visibility.Collapsed;
-            weekdayRow.Visibility = frequency == "weekly" ? Visibility.Visible : Visibility.Collapsed;
             var ending = (endMode.SelectedItem as ComboBoxItem)?.Tag?.ToString();
             untilDate.Visibility = ending == "until" ? Visibility.Visible : Visibility.Collapsed;
             countBox.Visibility = ending == "count" ? Visibility.Visible : Visibility.Collapsed;
@@ -239,9 +270,96 @@ public sealed partial class MainWindow
             reminderChoices.Add((minutes, choice));
             reminderPanel.Children.Add(choice);
         }
+        var customReminderValues = existingReminders.Except(reminderValues).ToHashSet();
+        var customReminderPanel = new VariableSizedWrapGrid
+        {
+            Orientation = Orientation.Horizontal,
+            ItemWidth = 142,
+            ItemHeight = 38
+        };
+        string ReminderLabel(int minutes) => minutes >= 1440 && minutes % 1440 == 0
+            ? $"{minutes / 1440} 天前"
+            : minutes >= 60 && minutes % 60 == 0 ? $"{minutes / 60} 小时前" : $"{minutes} 分钟前";
+        void RenderCustomReminders()
+        {
+            customReminderPanel.Children.Clear();
+            foreach (var minutes in customReminderValues.Order())
+                customReminderPanel.Children.Add(Action("提前 " + ReminderLabel(minutes) + "  ×", () =>
+                {
+                    customReminderValues.Remove(minutes);
+                    RenderCustomReminders();
+                }));
+        }
+        var amount = EditorControl(new TextBox
+        {
+            Header = "提前多久",
+            PlaceholderText = "例如 15",
+            InputScope = new Microsoft.UI.Xaml.Input.InputScope
+            {
+                Names = { new Microsoft.UI.Xaml.Input.InputScopeName
+                    { NameValue = Microsoft.UI.Xaml.Input.InputScopeNameValue.Number } }
+            }
+        });
+        var unit = EditorControl(new ComboBox { Header = "单位", HorizontalAlignment = HorizontalAlignment.Stretch });
+        foreach (var (label, multiplier) in new[] { ("分钟", 1), ("小时", 60), ("天", 1440) })
+            unit.Items.Add(new ComboBoxItem { Content = label, Tag = multiplier });
+        unit.SelectedIndex = 0;
+        var customReminderError = Text("可设置 1 分钟至 365 天。", 12, muted: true);
+        var customReminderInput = new Grid { ColumnSpacing = 10 };
+        customReminderInput.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(2, GridUnitType.Star) });
+        customReminderInput.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        customReminderInput.Children.Add(amount);
+        Grid.SetColumn(unit, 1);
+        customReminderInput.Children.Add(unit);
+        var customReminderEditor = new StackPanel { Spacing = 8, Visibility = Visibility.Collapsed };
+        customReminderEditor.Children.Add(customReminderInput);
+        customReminderEditor.Children.Add(customReminderError);
+        void AddCustomReminder()
+        {
+            if (!int.TryParse(amount.Text.Trim(), out var value) || value < 1)
+            {
+                customReminderError.Text = "请输入大于 0 的整数。";
+                return;
+            }
+            var multiplier = (unit.SelectedItem as ComboBoxItem)?.Tag is int selectedMultiplier
+                ? selectedMultiplier : 1;
+            var total = (long)value * multiplier;
+            if (total > 525600)
+            {
+                customReminderError.Text = "提醒不能早于日程开始前 365 天。";
+                return;
+            }
+            if (reminderValues.Contains((int)total))
+            {
+                var quickChoice = reminderChoices.First(item => item.Minutes == (int)total).Choice;
+                quickChoice.IsChecked = true;
+            }
+            else
+            {
+                customReminderValues.Add((int)total);
+                RenderCustomReminders();
+            }
+            amount.Text = "";
+            customReminderError.Text = "可设置 1 分钟至 365 天。";
+            customReminderEditor.Visibility = Visibility.Collapsed;
+        }
+        RenderCustomReminders();
+        var customReminderActions = Row(Action("添加自定义提醒", () =>
+        {
+            customReminderEditor.Visibility = customReminderEditor.Visibility == Visibility.Visible
+                ? Visibility.Collapsed : Visibility.Visible;
+            if (customReminderEditor.Visibility == Visibility.Visible)
+                amount.Focus(Microsoft.UI.Xaml.FocusState.Programmatic);
+        }));
+        customReminderEditor.Children.Add(Row(
+            Action("添加", AddCustomReminder, true),
+            Action("取消", () => customReminderEditor.Visibility = Visibility.Collapsed)));
         var reminderSection = new StackPanel { Spacing = 6 };
         reminderSection.Children.Add(Text("提醒 · 日程开始前", 13, true));
         reminderSection.Children.Add(reminderPanel);
+        reminderSection.Children.Add(customReminderActions);
+        reminderSection.Children.Add(customReminderPanel);
+        reminderSection.Children.Add(customReminderEditor);
         startHour.IsEnabled = startMinute.IsEnabled = endHour.IsEnabled = endMinute.IsEnabled = !isAllDay;
         allDay.Toggled += (_, _) => startHour.IsEnabled = startMinute.IsEnabled =
             endHour.IsEnabled = endMinute.IsEnabled = !allDay.IsOn;
@@ -251,7 +369,7 @@ public sealed partial class MainWindow
         if (hasCalDav || previousSource == "caldav")
             source.Items.Add(new ComboBoxItem { Content = "CalDAV 日历", Tag = "caldav" });
         source.SelectedIndex = previousSource == "caldav" || id is null && hasCalDav ? 1 : 0;
-        source.IsEnabled = id is null;
+        source.IsEnabled = id is null || previousSource == "local" && hasCalDav;
         var error = Text("", 12, muted: true);
         var timeHeader = new Grid();
         timeHeader.ColumnDefinitions.Add(new ColumnDefinition());
@@ -272,7 +390,10 @@ public sealed partial class MainWindow
                 ? Visibility.Collapsed : Visibility.Visible);
         moreToggle.HorizontalAlignment = HorizontalAlignment.Left;
         var fields = new StackPanel { Spacing = 16, HorizontalAlignment = HorizontalAlignment.Stretch };
-        fields.Children.Add(Text(id is null ? "为这一天留一段时间。桌面日程磁贴会同步显示。" : "修改日程信息并同步到原来的日历来源。", 13, muted: true));
+        fields.Children.Add(Text(id is null ? "为这一天留一段时间。桌面日程磁贴会同步显示。"
+            : previousSource == "local" && hasCalDav
+                ? "可以修改本地日程，或保存到 CalDAV；远端保存成功后将移除本地副本。"
+                : "修改日程信息并同步到原来的日历来源。", 13, muted: true));
         fields.Children.Add(source);
         fields.Children.Add(title);
         fields.Children.Add(timeHeader);
@@ -309,20 +430,33 @@ public sealed partial class MainWindow
                     throw new ArgumentException("结束时间必须晚于开始时间。");
                 if (!supportedRule && (startsAt != Value(original!.Value, "start_at") || endsAt != Value(original.Value, "end_at") || allDay.IsOn != isAllDay))
                     throw new ArgumentException("复杂周期的日期与时间已锁定。");
-                if (!int.TryParse(intervalBox.Text, out var repeatInterval) || repeatInterval < 1 || repeatInterval > 365)
-                    throw new ArgumentException("重复间隔须为 1 到 365。");
+                var selectedFrequency = (repeat.SelectedItem as ComboBoxItem)?.Tag?.ToString() ?? "none";
+                var repeatInterval = selectedFrequency == ruleFrequency
+                    && ruleParts.TryGetValue("INTERVAL", out var oldInterval)
+                    && int.TryParse(oldInterval, out var parsedInterval)
+                    && parsedInterval is >= 1 and <= 365 ? parsedInterval : 1;
                 if (!int.TryParse(countBox.Text, out var repeatCount) || repeatCount < 1 || repeatCount > 10000)
                     throw new ArgumentException("重复次数须为 1 到 10000。");
-                if ((repeat.SelectedItem as ComboBoxItem)?.Tag?.ToString() == "weekly"
-                    && !weekdayChoices.Any(item => item.Choice.IsChecked == true))
-                    throw new ArgumentException("请至少选择一个重复日。");
                 if ((endMode.SelectedItem as ComboBoxItem)?.Tag?.ToString() == "until" && untilDate.Date is null)
                     throw new ArgumentException("请选择周期结束日期。");
                 if (editingSeries && seriesConfirmation.IsChecked != true)
                     throw new ArgumentException("请先确认要修改整个周期日程。");
+                var startDayOfWeek = DateTimeOffset.Parse(startsAt).DayOfWeek;
+                var startWeekday = startDayOfWeek == DayOfWeek.Sunday ? 7 : (int)startDayOfWeek;
+                var timingUnchanged = original is JsonElement existingEvent
+                    && DateTimeOffset.TryParse(Value(existingEvent, "start_at"), out var originalStart)
+                    && DateTimeOffset.TryParse(Value(existingEvent, "end_at"), out var originalEnd)
+                    && originalStart == DateTimeOffset.Parse(startsAt)
+                    && originalEnd == DateTimeOffset.Parse(endsAt)
+                    && allDay.IsOn == isAllDay;
+                var repeatWeekdays = selectedFrequency == "weekly"
+                    ? selectedFrequency == ruleFrequency && timingUnchanged && originalWeeklyDays.Length > 0
+                        ? originalWeeklyDays : new[] { startWeekday }
+                    : Array.Empty<int>();
                 await SaveCalendarDraftAsync(new
                 {
                     id = id ?? "",
+                    occurrence_start = occurrenceStart,
                     source = (source.SelectedItem as ComboBoxItem)?.Tag?.ToString() ?? "local",
                     title = title.Text.Trim(),
                     start_at = startsAt,
@@ -331,13 +465,14 @@ public sealed partial class MainWindow
                     location = location.Text.Trim(),
                     url = url.Text.Trim(),
                     description = description.Text,
-                    reminders = existingReminders.Except(reminderValues)
-                        .Concat(reminderChoices.Where(item => item.Choice.IsChecked == true).Select(item => item.Minutes)).ToArray(),
+                    reminders = customReminderValues
+                        .Concat(reminderChoices.Where(item => item.Choice.IsChecked == true).Select(item => item.Minutes))
+                        .Distinct().Order().ToArray(),
                     recurrence = new
                     {
                         frequency = supportedRule ? (repeat.SelectedItem as ComboBoxItem)?.Tag?.ToString() ?? "none" : "preserve",
                         interval = repeatInterval,
-                        weekdays = weekdayChoices.Where(item => item.Choice.IsChecked == true).Select(item => item.Day).ToArray(),
+                        weekdays = repeatWeekdays,
                         end_mode = (endMode.SelectedItem as ComboBoxItem)?.Tag?.ToString() ?? "never",
                         count = repeatCount,
                         until = untilDate.Date?.LocalDateTime.ToString("yyyy-MM-dd") ?? ""
@@ -360,7 +495,7 @@ public sealed partial class MainWindow
 
     private async void ShowCalendarDetail(string id)
     {
-        var (item, source) = FindCalendarEvent(id);
+        var (item, source) = await FindCalendarEvent(id);
         if (item is not JsonElement eventData) { ShowMessage("这条日程已不存在，请刷新后重试。"); return; }
         var content = new StackPanel { Spacing = 12, MinWidth = 340 };
         content.Children.Add(Text(Value(eventData, "title", "未命名日程"), 20, true));
@@ -371,7 +506,7 @@ public sealed partial class MainWindow
         var description = Value(eventData, "description");
         if (description != "") content.Children.Add(Text(description, 14, muted: true));
         content.Children.Add(Text(source == "caldav" ? "CalDAV 日历" : "本地日历", 12, muted: true));
-        var dialog = new ContentDialog
+        var dialog = MaterialDialog(new ContentDialog
         {
             XamlRoot = Shell.XamlRoot,
             Title = "日程详情",
@@ -380,7 +515,7 @@ public sealed partial class MainWindow
             SecondaryButtonText = "转为待办",
             CloseButtonText = "关闭",
             DefaultButton = ContentDialogButton.Close
-        };
+        });
         var deleteRequested = false;
         content.Children.Add(Action("删除日程", () => { deleteRequested = true; dialog.Hide(); }));
         var action = await dialog.ShowAsync();
@@ -389,16 +524,115 @@ public sealed partial class MainWindow
         else if (action == ContentDialogResult.Secondary) await ShowCalendarConvertAsync(id, eventData);
     }
 
-    private void RenderCalendar()
+    private readonly Dictionary<DateTime, (string Stamp, JsonElement Response)> calendarMonths = new();
+    private bool calendarSyncing;
+
+    private async Task SyncCalendarAsync()
     {
+        if (calendarSyncing) return;
+        calendarSyncing = true;
+        string? error = null;
+        if (page == "calendar") Render();
+        try
+        {
+            using var process = Process.Start(new ProcessStartInfo(Path.Combine(calendarRoot, "CalendarHost.exe"))
+            {
+                UseShellExecute = false, CreateNoWindow = true, ArgumentList = { "Sync" }
+            }) ?? throw new InvalidOperationException("无法启动日程同步。");
+            using var timeout = new CancellationTokenSource(TimeSpan.FromMinutes(2));
+            try { await process.WaitForExitAsync(timeout.Token); }
+            catch (OperationCanceledException)
+            {
+                if (!process.HasExited) process.Kill();
+                throw new TimeoutException("日程同步超时，请检查远程日历连接。");
+            }
+            if (process.ExitCode != 0) throw new InvalidOperationException("日程同步失败，请检查远程日历连接。");
+            // The remote host may update the cache without changing the local state stamp.
+            calendarMonths.Clear();
+        }
+        catch (Exception ex) { error = ex.Message; }
+        finally
+        {
+            calendarSyncing = false;
+            if (page == "calendar")
+            {
+                Render();
+                if (error is not null) ShowMessage(error);
+            }
+        }
+    }
+
+    private string CalendarDataStamp()
+    {
+        string Stamp(string name)
+        {
+            var file = new FileInfo(Path.Combine(calendarRoot, name));
+            return file.Exists ? file.LastWriteTimeUtc.Ticks + ":" + file.Length : "missing";
+        }
+        return Stamp("calendar-state.json") + "|" + Stamp("calendar-cache.json");
+    }
+
+    private async void RenderCalendar()
+    {
+        var revision = renderRevision;
+        var month = calendarMonth;
+        var stamp = CalendarDataStamp();
+        var hasCached = calendarMonths.TryGetValue(month, out var cached);
+        // Draw immediately, including during refresh. Only data changes require a host query.
+        if (hasCached)
+        {
+            DrawCalendar(cached.Response);
+            if (cached.Stamp == stamp) return;
+        }
+        else
+        {
+            using var empty = JsonDocument.Parse("{\"events\":[]}");
+            DrawCalendar(empty.RootElement, false);
+        }
+        using var load = new CancellationTokenSource();
+        calendarLoad = load;
+        try
+        {
+            var first = month.AddDays(-(((int)month.DayOfWeek + 6) % 7));
+            var response = await QueryCalendarAsync(new { from = new DateTimeOffset(first), to = new DateTimeOffset(first.AddDays(42)) }, load.Token);
+            if (revision != renderRevision) return;
+            // If files changed during the query, retain the old stamp so the next render reloads.
+            if (calendarMonths.Count >= 3 && !calendarMonths.ContainsKey(month))
+                calendarMonths.Remove(calendarMonths.Keys.First());
+            calendarMonths[month] = (stamp, response);
+            DrawCalendar(response);
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception ex)
+        {
+            if (revision == renderRevision) PageContent.Children.Add(Text(ex.Message, 13, muted: true));
+        }
+        finally { if (calendarLoad == load) calendarLoad = null; }
+    }
+
+    private void DrawCalendar(JsonElement response, bool loaded = true)
+    {
+        PageContent.Children.Clear();
         Heading("日程管理", "桌面继续显示日程磁贴；这里按月浏览、按天查看安排。");
+        var syncButton = Action(calendarSyncing ? "正在同步…" : "同步", () => _ = SyncCalendarAsync());
+        syncButton.IsEnabled = !calendarSyncing;
         PageContent.Children.Add(Row(
-            Action("新增日程", () => ShowCalendarEditor(null), true),
-            Action("同步", () => Calendar("Sync"))));
-        using var cache = ReadJson(Path.Combine(calendarRoot, "calendar-cache.json"));
+            Action("新增日程", () => ShowCalendarEditor(null), true), syncButton));
+        calendarInstances.Clear();
+        foreach (var item in Items(response, "events")) calendarInstances[Value(item, "id")] = item.Clone();
+        if (Value(response, "truncated") == "True") PageContent.Children.Add(Text("日程较多，本次显示前 2000 项。", 13, muted: true));
         using var state = ReadJson(Path.Combine(calendarRoot, "calendar-state.json"));
-        var events = (cache is null ? [] : Items(cache.RootElement, "events"))
-            .Concat(state is null ? [] : Items(state.RootElement, "local_events"))
+        var hidden = new HashSet<string>(StringComparer.Ordinal);
+        if (state is not null)
+        {
+            foreach (var conversion in Items(state.RootElement, "conversions"))
+                if (Value(conversion, "hide_event") != "False")
+                    hidden.Add(Value(conversion, "occurrence_key"));
+            foreach (var occurrence in Items(state.RootElement, "hidden_events"))
+                hidden.Add(Value(occurrence, "occurrence_key"));
+        }
+        var events = calendarInstances.Values
+            .Where(item => !hidden.Contains(Value(item, "occurrence_key")))
             .Where(item => DateTimeOffset.TryParse(Value(item, "start_at"), out _))
             .OrderBy(item => DateTimeOffset.Parse(Value(item, "start_at"))).ToArray();
         var monthBar = new Grid { ColumnSpacing = 10 };
@@ -465,9 +699,19 @@ public sealed partial class MainWindow
             monthGrid.Children.Add(dayButton);
         }
         PageContent.Children.Add(monthGrid);
+        var dayDetails = new StackPanel { Spacing = 16 };
+        PageContent.Children.Add(dayDetails);
+        RenderCalendarDay(dayDetails, events, loaded);
+        registerPageWheelTargets?.Invoke(PageContent);
+    }
+
+    private void RenderCalendarDay(StackPanel dayDetails, JsonElement[] events, bool loaded)
+    {
+        dayDetails.Children.Clear();
+        if (!loaded) { dayDetails.Children.Add(Text("正在读取日程…", 13, muted: true)); return; }
         var selected = events.Where(item => CalendarOverlapsDay(item, selectedCalendarDay)).ToArray();
-        PageContent.Children.Add(Text(selectedCalendarDay.ToString("M 月 d 日 dddd") + "  ·  " + selected.Length + " 项", 19, true));
-        if (selected.Length == 0) { Empty("这一天暂无日程。"); return; }
+        dayDetails.Children.Add(Text(selectedCalendarDay.ToString("M 月 d 日 dddd") + "  ·  " + selected.Length + " 项", 19, true));
+        if (selected.Length == 0) { dayDetails.Children.Add(Card(Text("这一天暂无日程。", 16, muted: true), 32)); return; }
         foreach (var item in selected)
         {
             var id = Value(item, "id");
@@ -487,7 +731,7 @@ public sealed partial class MainWindow
             var actions = Row(Action("详情", () => ShowCalendarDetail(id)), Action("编辑", () => ShowCalendarEditor(id)));
             Grid.SetColumn(actions, 2);
             row.Children.Add(actions);
-            PageContent.Children.Add(Card(row, 17));
+            dayDetails.Children.Add(Card(row, 17));
         }
     }
 

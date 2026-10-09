@@ -14,6 +14,9 @@ namespace Rainmeter.Desktop;
 
 public sealed partial class MainWindow
 {
+    private string todoQuery = "";
+    private int todoFilter;
+    private readonly HashSet<string> selectedTodoIds = new(StringComparer.Ordinal);
     private async void RunTodoAction(string action, string id = "")
     {
         var path = Path.Combine(todoRoot, "TodoHost.exe");
@@ -146,7 +149,7 @@ public sealed partial class MainWindow
 
     private async void DeleteTodo(string id, string title)
     {
-        var dialog = new ContentDialog
+        var dialog = MaterialDialog(new ContentDialog
         {
             XamlRoot = Shell.XamlRoot,
             Title = "删除待办？",
@@ -154,47 +157,144 @@ public sealed partial class MainWindow
             PrimaryButtonText = "删除",
             CloseButtonText = "取消",
             DefaultButton = ContentDialogButton.Close
-        };
+        });
         if (await dialog.ShowAsync() != ContentDialogResult.Primary) return;
-        try { todoRepository.Delete(id); RunTodoAction("Render"); Render(); }
+        try { todoRepository.Delete(id); selectedTodoIds.Remove(id); RunTodoAction("RenderAndRefresh"); Render(); }
         catch (Exception ex) { ShowMessage(ex.Message); }
     }
 
     private void RenderTodo()
     {
         Heading("待办管理", "桌面仍以磁贴展示；在这里整理、编辑和安排它们。");
-        PageContent.Children.Add(Row(Action("新增待办", () => ShowTodoEditor(null), true), Action("同步", () => RunTodoAction("Refresh"))));
+        PageContent.Children.Add(Row(
+            Action("新增待办", () => ShowTodoEditor(null), true),
+            Action("完成 / 恢复所选", () => ToggleSelectedTodos()),
+            Action("删除所选", () => _ = DeleteSelectedTodosAsync()),
+            Action("同步", () => RunTodoAction("Refresh"))));
         using var state = ReadJson(Path.Combine(todoRoot, "tasks.json"));
         if (state is null) { Empty("还没有待办数据。"); return; }
-        var tasks = Items(state.RootElement, "tasks").ToArray();
+        var tasks = Items(state.RootElement, "tasks").Select(item => item.Clone()).ToArray();
         if (tasks.Length == 0) { Empty("一切就绪。新增一条待办，开始安排今天。"); return; }
-        var pending = tasks.Where(task => Value(task, "completed") != "True")
+
+        var results = new StackPanel { Spacing = 10 };
+        var search = EditorControl(new TextBox { PlaceholderText = "标题或标签", Text = todoQuery });
+        search.TextChanged += (_, _) =>
+        {
+            selectedTodoIds.Clear();
+            todoQuery = search.Text;
+            RenderTodoResults(tasks, results);
+        };
+        PageContent.Children.Add(search);
+        var now = DateTimeOffset.Now;
+        var tabs = Row();
+        var filters = new[] { (Value: 0, Name: "全部"),
+            (Value: 1, Name: "逾期"), (Value: 2, Name: "未开始"),
+            (Value: 3, Name: "待办"), (Value: 4, Name: "已办") };
+        foreach (var filter in filters)
+        {
+            var current = filter.Value;
+            var count = tasks.Count(task => TodoMatchesFilter(task, current, now));
+            tabs.Children.Add(Action($"{filter.Name}  {count}", () =>
+            {
+                selectedTodoIds.Clear();
+                todoFilter = current;
+                Render();
+            }, todoFilter == current));
+        }
+        PageContent.Children.Add(tabs);
+        PageContent.Children.Add(results);
+        RenderTodoResults(tasks, results);
+    }
+
+    private static bool TodoMatchesFilter(JsonElement task, int filter, DateTimeOffset now)
+    {
+        var completed = Value(task, "completed") == "True";
+        var due = TodoManagementDate(task, "due_at");
+        var available = TodoManagementDate(task, "available_from");
+        var overdue = !completed && due.HasValue && now > due.Value;
+        var future = !completed && available.HasValue && now < available.Value;
+        return filter switch
+        {
+            1 => overdue,
+            2 => future,
+            3 => !completed && !overdue && !future,
+            4 => completed,
+            _ => true
+        };
+    }
+
+    private void RenderTodoResults(JsonElement[] tasks, StackPanel results)
+    {
+        results.Children.Clear();
+        var query = todoQuery.Trim();
+        var shown = tasks.Where(task => TodoMatchesFilter(task, todoFilter, DateTimeOffset.Now))
+            .Where(task => query == "" || Value(task, "title").Contains(query, StringComparison.OrdinalIgnoreCase)
+                || Items(task, "labels").Any(label => (label.GetString() ?? "").Contains(query, StringComparison.OrdinalIgnoreCase)))
+            .ToArray();
+        if (shown.Length == 0)
+        {
+            results.Children.Add(Text("没有符合条件的待办。", 13, muted: true));
+            return;
+        }
+        var pending = shown.Where(task => Value(task, "completed") != "True")
             .OrderBy(task => TodoManagementDate(task, "due_at").HasValue ? 0 : 1)
             .ThenBy(task => TodoManagementDate(task, "due_at") ?? DateTimeOffset.MaxValue)
             .ThenBy(task => TodoManagementDate(task, "created_at") ?? DateTimeOffset.MinValue)
             .ThenBy(task => Value(task, "id"), StringComparer.Ordinal)
             .ToArray();
-        var completed = tasks.Where(task => Value(task, "completed") == "True")
+        var completed = shown.Where(task => Value(task, "completed") == "True")
             .OrderByDescending(task => TodoManagementDate(task, "completed_at") ?? DateTimeOffset.MinValue)
             .ThenBy(task => Value(task, "id"), StringComparer.Ordinal)
             .ToArray();
-        RenderTodoSection("未完成", pending, false);
-        RenderTodoSection("已完成", completed, true);
+        if (pending.Length > 0) RenderTodoSection(results, "未完成", pending, false);
+        if (completed.Length > 0) RenderTodoSection(results, "已完成", completed, true);
+    }
+
+    private void ToggleSelectedTodos()
+    {
+        if (selectedTodoIds.Count == 0) { ShowMessage("请先勾选要完成或恢复的待办。"); return; }
+        try
+        {
+            todoRepository.ToggleMany(selectedTodoIds);
+            selectedTodoIds.Clear();
+            Render();
+            RunTodoAction("RenderAndRefresh");
+        }
+        catch (Exception ex) { ShowMessage("批量操作未完成：" + ex.Message); }
+    }
+
+    private async Task DeleteSelectedTodosAsync()
+    {
+        if (selectedTodoIds.Count == 0) { ShowMessage("请先勾选要删除的待办。"); return; }
+        var count = selectedTodoIds.Count;
+        var dialog = MaterialDialog(new ContentDialog
+        {
+            XamlRoot = Shell.XamlRoot,
+            Title = "删除所选待办？",
+            Content = Text($"将删除勾选的 {count} 项待办。", 14),
+            PrimaryButtonText = "删除",
+            CloseButtonText = "取消",
+            DefaultButton = ContentDialogButton.Close
+        });
+        if (await dialog.ShowAsync() != ContentDialogResult.Primary) return;
+        try
+        {
+            todoRepository.DeleteMany(selectedTodoIds);
+            selectedTodoIds.Clear();
+            Render();
+            RunTodoAction("RenderAndRefresh");
+        }
+        catch (Exception ex) { ShowMessage("批量删除未完成：" + ex.Message); }
     }
 
     private static DateTimeOffset? TodoManagementDate(JsonElement task, string field)
         => DateTimeOffset.TryParse(Value(task, field), CultureInfo.InvariantCulture,
             DateTimeStyles.RoundtripKind, out var value) ? value : null;
 
-    private void RenderTodoSection(string heading, JsonElement[] tasks, bool done)
+    private void RenderTodoSection(StackPanel results, string heading, JsonElement[] tasks, bool done)
     {
-        PageContent.Children.Add(Text($"{heading} · {tasks.Length}", 18, true));
-        if (tasks.Length == 0)
-        {
-            PageContent.Children.Add(Text(done ? "还没有已完成的待办。" : "当前没有未完成的待办。", 13, muted: true));
-            return;
-        }
-        foreach (var task in tasks.Take(100))
+        results.Children.Add(Text($"{heading} · {tasks.Length}", 18, true));
+        foreach (var task in tasks)
         {
             var id = Value(task, "id");
             var title = Value(task, "title", "未命名待办");
@@ -203,16 +303,20 @@ public sealed partial class MainWindow
             row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(28) });
             row.ColumnDefinitions.Add(new ColumnDefinition());
             row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-            var check = new CheckBox { IsChecked = done, VerticalAlignment = VerticalAlignment.Center };
-            check.Click += (_, _) => RunTodoAction("Toggle", id);
-            row.Children.Add(check);
+            var selected = new CheckBox { IsChecked = selectedTodoIds.Contains(id),
+                VerticalAlignment = VerticalAlignment.Center };
+            selected.Click += (_, _) => SetTodoSelected(id, selected.IsChecked == true);
+            row.Children.Add(selected);
             var details = new StackPanel { Spacing = 4, VerticalAlignment = VerticalAlignment.Center };
             var titleText = Text(title, 16, !done, done);
             titleText.MaxLines = 1;
             titleText.TextTrimming = TextTrimming.CharacterEllipsis;
             details.Children.Add(titleText);
             var due = Value(task, "due_at");
-            var summary = new[] { due == "" ? "" : "截止 " + DisplayDate(due),
+            var labels = string.Join("、", Items(task, "labels").Select(label => label.GetString()));
+            var available = Value(task, "available_from");
+            var summary = new[] { labels, available == "" ? "" : "开始 " + DisplayDate(available),
+                due == "" ? "" : "截止 " + DisplayDate(due),
                 note.Length == 0 ? "" : note.ReplaceLineEndings(" ") }
                 .Where(value => value != "");
             var summaryText = Text(string.Join(" · ", summary), 12, muted: true);
@@ -223,14 +327,36 @@ public sealed partial class MainWindow
             row.Children.Add(details);
             var actions = Row();
             if (Value(task, "target") != "") actions.Children.Add(Action("打开", () => RunTodoAction("Open", id)));
+            actions.Children.Add(Action(done ? "恢复" : "完成", () => RunTodoAction("Toggle", id)));
             actions.Children.Add(Action("编辑", () => ShowTodoEditor(id)));
             actions.Children.Add(Action("删除", () => DeleteTodo(id, title)));
             Grid.SetColumn(actions, 2);
             row.Children.Add(actions);
             var card = Card(row, 15);
             card.Opacity = done ? 0.7 : 1;
-            PageContent.Children.Add(card);
+            card.Tapped += (_, args) =>
+            {
+                if (TodoTapCameFromAction(args.OriginalSource, card)) return;
+                var isSelected = !selectedTodoIds.Contains(id);
+                SetTodoSelected(id, isSelected);
+                selected.IsChecked = isSelected;
+            };
+            results.Children.Add(card);
         }
+    }
+
+    private void SetTodoSelected(string id, bool selected)
+    {
+        if (selected) selectedTodoIds.Add(id);
+        else selectedTodoIds.Remove(id);
+    }
+
+    private static bool TodoTapCameFromAction(object? source, DependencyObject card)
+    {
+        for (var current = source as DependencyObject; current is not null && current != card;
+            current = VisualTreeHelper.GetParent(current))
+            if (current is Button or CheckBox) return true;
+        return false;
     }
 
 }

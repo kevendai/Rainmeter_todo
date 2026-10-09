@@ -146,6 +146,11 @@ internal static partial class CalendarApp
 
     private static IEnumerable<Dictionary<string,object>> ExpandLocalSeries(Dictionary<string,object> master)
     {
+        return ExpandLocalSeriesWindow(master,null,null);
+    }
+
+    private static IEnumerable<Dictionary<string,object>> ExpandLocalSeriesWindow(Dictionary<string,object> master,DateTimeOffset? from,DateTimeOffset? to)
+    {
         string raw=S(master,"rrule");if(raw==""){yield return master;yield break;}
         DateTimeOffset? startValue=RuntimeUtil.Date(master,"start_at"),endValue=RuntimeUtil.Date(master,"end_at");if(!startValue.HasValue||!endValue.HasValue){yield return master;yield break;}
         RecurrenceSpec spec=RecurrenceFromEvent(master);if(spec.Preserve||spec.Frequency=="none"){yield return master;yield break;}
@@ -153,9 +158,20 @@ internal static partial class CalendarApp
         if(spec.EndMode=="until")limit=spec.Until.Date;
         else if(spec.EndMode=="count")limit=DateTime.MaxValue.Date;
         else {limit=DateTime.Today.AddYears(2);if(start.Date>limit)limit=start.Date.AddYears(2);}
+        if(to.HasValue)limit=spec.EndMode=="until"? (limit<to.Value.Date?limit:to.Value.Date):to.Value.Date;
         int emitted=0,maxCount=spec.EndMode=="count"?Math.Max(1,spec.Count):Int32.MaxValue;
-        foreach(DateTimeOffset occurrenceStart in RecurrenceStarts(spec,start,limit)){
+        // Skip old infinite daily/weekly cycles before allocating any instances.
+        DateTimeOffset iterationStart=start;
+        if(from.HasValue && spec.EndMode!="count" && (spec.Frequency=="daily"||spec.Frequency=="weekly")){
+            double days=(from.Value-start-duration).TotalDays;
+            long cycleDays=(long)Math.Max(1,spec.Interval)*(spec.Frequency=="weekly"?7:1);
+            long cycles=Math.Max(0,(long)Math.Floor(days/cycleDays)-1);
+            iterationStart=LocalDateTime(start.Date.AddDays(cycles*cycleDays),start);
+        }
+        foreach(DateTimeOffset occurrenceStart in RecurrenceStarts(spec,iterationStart,limit)){
             if(emitted>=maxCount)yield break;emitted++;
+            if(to.HasValue && occurrenceStart>=to.Value)yield break;
+            if(from.HasValue && occurrenceStart.Add(duration)<=from.Value)continue;
             Dictionary<string,object> occurrence=new Dictionary<string,object>(master);string recurrence=occurrenceStart.ToUniversalTime().ToString("o",CultureInfo.InvariantCulture),key=S(master,"uid")+"|"+recurrence;
             occurrence["series_id"]=S(master,"id");occurrence["series_start_at"]=S(master,"start_at");occurrence["id"]=RuntimeUtil.Sha256Hex(key).Substring(0,32);occurrence["occurrence_key"]=key;occurrence["recurrence_id"]=recurrence;occurrence["start_at"]=RuntimeUtil.Iso(occurrenceStart);occurrence["end_at"]=RuntimeUtil.Iso(occurrenceStart.Add(duration));occurrence["recurring"]=true;
             ApplyReminders(occurrence,Reminders(master),occurrenceStart);DateTimeOffset? originalReminder=RuntimeUtil.Date(master,"reminder_at");if(originalReminder.HasValue&&CustomAlarms(master).Count>0){DateTimeOffset shifted=occurrenceStart.Add(originalReminder.Value-start);DateTimeOffset? generated=RuntimeUtil.Date(occurrence,"reminder_at");if(!generated.HasValue||shifted<generated.Value)occurrence["reminder_at"]=RuntimeUtil.Iso(shifted);}occurrence["reminder_count"]=Reminders(occurrence).Count+CustomAlarms(occurrence).Count;

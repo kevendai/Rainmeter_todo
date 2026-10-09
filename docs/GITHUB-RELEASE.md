@@ -4,6 +4,8 @@ Release binaries live only in GitHub Release assets. The repository contains sou
 
 ## Build
 
+For the next version update, move the `未发布` section in `docs\RELEASE-NOTES.md` into the matching numeric version section with the actual release date. Include these pending changes and the release notes in the GitHub source commit, then use that version section for the GitHub Release description. This is the user's requested publication timing; the pending notes alone do not trigger a release.
+
 Run from the repository root:
 
 ```powershell

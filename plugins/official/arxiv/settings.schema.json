@@ -1,23 +1,124 @@
 {
   "type": "object",
   "properties": {
-    "enabled": {"type":"boolean","title":"启用论文推荐","default":true,"x-section":"基本","x-order":1},
-    "categories": {"type":"string","title":"包含分类（逗号分隔）","default":"","x-section":"基本","x-order":2},
-    "exclude_categories": {"type":"string","title":"排除分类（逗号分隔）","default":"","x-section":"基本","x-order":3},
-    "import_count": {"type":"integer","title":"每天导入数量","minimum":1,"maximum":20,"default":5,"x-section":"基本","x-order":4},
-    "cache_days": {"type":"integer","title":"缓存保留天数","minimum":1,"maximum":90,"default":14,"x-section":"基本","x-order":5},
-
-    "title_prompt": {"type":"multiline","title":"标题评分提示词","default":"","x-section":"评分","x-order":10},
-    "abstract_prompt": {"type":"multiline","title":"摘要评分提示词","default":"","x-section":"评分","x-order":11},
-    "title_threshold": {"type":"integer","title":"标题进入摘要评分阈值","minimum":0,"maximum":10,"default":7,"x-section":"评分","x-order":12},
-    "title_batch_size": {"type":"integer","title":"标题批大小","minimum":1,"maximum":50,"default":10,"x-section":"评分","x-order":13},
-    "abstract_batch_size": {"type":"integer","title":"摘要批大小","minimum":1,"maximum":20,"default":3,"x-section":"评分","x-order":14},
-
-    "paper_snapshot_provider": {"type":"string","title":"论文同步","default":"","x-service":"paper_snapshot_provider@1","x-section":"Provider","x-order":20},
-    "ai_provider": {"type":"string","title":"AI 评分","default":"","x-service":"ai_provider@1","x-section":"Provider","x-order":21},
-    "translate_enabled": {"type":"boolean","title":"启用标题翻译","default":false,"x-requires":"translation_provider@1","x-section":"Provider","x-order":22},
-    "translation_provider": {"type":"string","title":"翻译","default":"","x-service":"translation_provider@1","x-section":"Provider","x-order":23},
-
-    "rss_enabled": {"type":"boolean","title":"启用本地论文 RSS","default":false,"x-section":"RSS","x-order":30}
+    "enabled": {
+      "type": "boolean",
+      "title": "启用论文推荐",
+      "default": true,
+      "x-section": "基本",
+      "x-order": 1
+    },
+    "categories": {
+      "type": "string",
+      "title": "包含分类（逗号分隔）",
+      "default": "",
+      "x-section": "基本",
+      "x-order": 2
+    },
+    "exclude_categories": {
+      "type": "string",
+      "title": "排除分类（逗号分隔）",
+      "default": "",
+      "x-section": "基本",
+      "x-order": 3
+    },
+    "import_count": {
+      "type": "integer",
+      "title": "每天导入数量",
+      "minimum": 1,
+      "maximum": 20,
+      "default": 5,
+      "x-section": "基本",
+      "x-order": 4
+    },
+    "cache_days": {
+      "type": "integer",
+      "title": "缓存保留天数",
+      "minimum": 1,
+      "maximum": 90,
+      "default": 14,
+      "x-section": "基本",
+      "x-order": 5
+    },
+    "title_prompt": {
+      "type": "multiline",
+      "title": "标题评分提示词",
+      "default": "You are given a list of paper titles, each associated with a unique ID.\r\n\r\nInput format:\r\nEach line contains one paper in the format:\r\nID: <paper title>\r\n\r\nNow evaluate the following papers:\r\n<INSERT_PAPER_LIST_HERE>\r\n\r\nAssign an integer score from 0 to 10 to every paper.\r\n\r\nEvaluation criteria:\r\n1. Likely relevance and usefulness to an active research workflow.\r\n2. Methodological novelty and potential scientific contribution.\r\n3. Transferability of the main idea to related research problems.\r\n\r\nScore standard (absolute):\r\n- 9-10: exceptional potential value, novelty and broad research impact.\r\n- 7-8: clearly valuable, with a useful or transferable method.\r\n- 5-6: potentially useful but uncertain, incremental or narrowly relevant.\r\n- 0-4: low expected relevance or research value.\r\n\r\nGuidelines:\r\n- Judge the underlying methodology rather than keywords.\r\n- Prioritize reusable scientific ideas over superficial application similarity.\r\n- Use the full scale meaningfully and avoid assigning the same score to most papers.\r\n\r\nOutput requirements (STRICT):\r\nReturn only one valid JSON object in this exact shape: {\"scores\":{\"1\":8,\"2\":6}}.\r\nInclude all and only the supplied IDs. Do not add explanations or Markdown.",
+      "x-section": "评分",
+      "x-order": 10
+    },
+    "abstract_prompt": {
+      "type": "multiline",
+      "title": "摘要评分提示词",
+      "default": "You are given a list of papers with titles and abstracts.\r\n\r\nEvaluate the following papers:\r\n<INSERT_PAPER_LIST_HERE>\r\n\r\nAssign an integer score from 0 to 50 to every paper.\r\n\r\nScoring rules:\r\n0-10:\r\n- Weakly motivated, low relevance, or little identifiable technical contribution.\r\n\r\n10-20:\r\n- Narrow or incremental work with limited transferability or evidence.\r\n\r\n20-30:\r\n- Solid research with some useful ideas, but moderate novelty or impact.\r\n\r\n30-40:\r\n- Strong method, clear contribution and convincing evidence.\r\n\r\n40-50:\r\n- Exceptional novelty, relevance, methodological value and likely research impact.\r\n\r\nAdjustments:\r\n- Reward available code, strong experiments, robustness and broad transferability without exceeding 50.\r\n\r\nUse the full range and avoid clustering scores.\r\n\r\nOutput requirements (STRICT):\r\nReturn only one valid JSON object in this exact shape: {\"scores\":{\"1\":42,\"2\":26}}.\r\nInclude all and only the supplied IDs. Do not add explanations or Markdown.",
+      "x-section": "评分",
+      "x-order": 11
+    },
+    "title_threshold": {
+      "type": "integer",
+      "title": "标题进入摘要评分阈值",
+      "minimum": 0,
+      "maximum": 10,
+      "default": 7,
+      "x-section": "评分",
+      "x-order": 12
+    },
+    "title_batch_size": {
+      "type": "integer",
+      "title": "标题批大小",
+      "minimum": 1,
+      "maximum": 50,
+      "default": 10,
+      "x-section": "评分",
+      "x-order": 13
+    },
+    "abstract_batch_size": {
+      "type": "integer",
+      "title": "摘要批大小",
+      "minimum": 1,
+      "maximum": 20,
+      "default": 3,
+      "x-section": "评分",
+      "x-order": 14
+    },
+    "paper_snapshot_provider": {
+      "type": "string",
+      "title": "论文同步",
+      "default": "",
+      "x-service": "paper_snapshot_provider@1",
+      "x-section": "Provider",
+      "x-order": 20
+    },
+    "ai_provider": {
+      "type": "string",
+      "title": "AI 评分",
+      "default": "",
+      "x-service": "ai_provider@1",
+      "x-section": "Provider",
+      "x-order": 21
+    },
+    "translate_enabled": {
+      "type": "boolean",
+      "title": "启用标题翻译",
+      "default": false,
+      "x-requires": "translation_provider@1",
+      "x-section": "Provider",
+      "x-order": 22
+    },
+    "translation_provider": {
+      "type": "string",
+      "title": "翻译",
+      "default": "",
+      "x-service": "translation_provider@1",
+      "x-section": "Provider",
+      "x-order": 23
+    },
+    "rss_enabled": {
+      "type": "boolean",
+      "title": "启用本地论文 RSS",
+      "default": false,
+      "x-section": "RSS",
+      "x-order": 30
+    }
   }
 }
