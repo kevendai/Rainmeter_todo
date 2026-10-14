@@ -287,7 +287,8 @@ public sealed partial class MainWindow
                 sections.Children.Add(BuildSsdpScanner(id, edits));
             var error = Text("", 12, muted: true);
             sections.Children.Add(error);
-            var dialog = EditorDialog(name + " · 配置", sections, "保存配置");
+            var dialog = EditorDialog(name + " · 配置", sections, "保存配置",
+                id == aiPlugin ? 600 : 560);
             if (dialog.Content is ScrollViewer scroller) scroller.MaxHeight = 640;
             dialog.PrimaryButtonClick += async (_, args) =>
             {

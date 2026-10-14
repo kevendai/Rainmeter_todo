@@ -39,10 +39,9 @@ internal static partial class TodoApp
             if (attention.Count > 1) hint += "（另有 " + (attention.Count - 1) + " 个插件也在等待确认）";
             Meter(lines, "AttentionSurface", "Meter=Shape", "X=16", "Y=" + y, "Shape=Rectangle 0,0,488,56,14 | Fill Color 253,246,227,246 | Stroke Color 232,196,106,255 | StrokeWidth 1");
             Meter(lines, "AttentionIcon", "Meter=String", "X=40", "Y=" + (y + 30), "FontFace=" + TileIconFont.Name, "FontSize=12", "FontColor=176,124,26,255", "StringAlign=CenterCenter", "AntiAlias=1", "Text=\xE7BA");
-            Meter(lines, "AttentionTitle", "Meter=String", "MeterStyle=StyleText", "X=64", "Y=" + (y + 9), "W=262", "H=20", "FontSize=10", "FontColor=122,84,20,255", "ClipString=2", "Text=需要确认：" + hint);
-            Meter(lines, "AttentionHint", "Meter=String", "MeterStyle=StyleText", "X=64", "Y=" + (y + 32), "W=262", "H=16", "FontSize=9", "FontColor=150,116,58,255", "Text=继续会用你的 API Key 调用一次模型并计费");
-            Meter(lines, "AttentionButton", "Meter=Shape", "X=340", "Y=" + (y + 14), "Shape=Rectangle 0,0,150,28,9 | Fill Color 217,144,20,255 | Stroke Color 217,144,20,255 | StrokeWidth 1", Action("PluginConfirmAttention", pendingAttention.PluginId), "ToolTipText=" + pendingAttention.Name + " · 点这里确认是否使用 AI");
-            Meter(lines, "AttentionButtonText", "Meter=String", "X=415", "Y=" + (y + 28), "FontFace=#FontFace#", "FontSize=9", "FontColor=255,255,255,255", "StringAlign=CenterCenter", "AntiAlias=1", "Text=使用 DeepSeek AI", Action("PluginConfirmAttention", pendingAttention.PluginId), "ToolTipText=使用 DeepSeek AI");
+            Meter(lines, "AttentionTitle", "Meter=String", "MeterStyle=StyleText", "X=64", "Y=" + (y + 18), "W=262", "H=20", "FontSize=10", "FontColor=122,84,20,255", "ClipString=2", "Text=需要确认：" + hint);
+            Meter(lines, "AttentionButton", "Meter=Shape", "X=340", "Y=" + (y + 14), "Shape=Rectangle 0,0,150,28,9 | Fill Color 217,144,20,255 | Stroke Color 217,144,20,255 | StrokeWidth 1", Action("PluginConfirmAttention", pendingAttention.PluginId), "ToolTipText=" + pendingAttention.Name + " · 打开确认窗口后再选择是否使用 AI");
+            Meter(lines, "AttentionButtonText", "Meter=String", "X=415", "Y=" + (y + 28), "FontFace=#FontFace#", "FontSize=9", "FontColor=255,255,255,255", "StringAlign=CenterCenter", "AntiAlias=1", "Text=打开确认窗口", Action("PluginConfirmAttention", pendingAttention.PluginId), "ToolTipText=打开确认窗口");
             y += 64;
         }
 
@@ -134,6 +133,7 @@ internal static partial class TodoApp
         foreach (string root in Directory.GetDirectories(PluginPaths.Plugins))
         {
             string id = Path.GetFileName(root);
+            if (id == "io.github.kevendai.arxiv" && PaperWorkerActive()) continue;
             try
             {
                 PluginManifest manifest = PluginRuntime.Resolve(id, true);
@@ -153,6 +153,21 @@ internal static partial class TodoApp
             catch { }
         }
         return attention;
+    }
+
+    private static bool PaperWorkerActive()
+    {
+        using (var mutex = new System.Threading.Mutex(false, @"Global\RainmeterTodoPaperWorker"))
+        {
+            bool acquired = false;
+            try
+            {
+                try { acquired = mutex.WaitOne(0); }
+                catch (System.Threading.AbandonedMutexException) { acquired = true; }
+                return !acquired;
+            }
+            finally { if (acquired) mutex.ReleaseMutex(); }
+        }
     }
 
 }

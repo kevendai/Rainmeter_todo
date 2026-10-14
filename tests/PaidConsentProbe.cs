@@ -151,7 +151,7 @@ internal static class PaidConsentProbe
         string generated = ReadGenerated();
         Expect(generated.Contains("AttentionButton") && generated.Contains("AttentionButtonText"), "attention ⇒ 磁贴渲染出可点按钮");
         Expect(generated.Contains("\"PluginConfirmAttention\" \"" + Source + "\""), "按钮执行 PluginConfirmAttention <pluginId>");
-        Expect(generated.Contains("使用 DeepSeek AI"), "按钮文案是「使用 DeepSeek AI」");
+        Expect(generated.Contains("打开确认窗口"), "按钮明确表示打开确认窗口");
         Expect(MeterBlock(generated, "AttentionTitle").Contains("需要确认"), "横幅文案表明这是「需要确认」而不是失败");
 
         WriteJob("declined");

@@ -479,6 +479,13 @@ internal static partial class TodoApp
     private static PaperSyncResult RunPaperSyncFlow(Dictionary<string, object> state, bool manual, string paperDate, bool replaceToday)
     {
         PaperSyncResult result = new PaperSyncResult();
+        // Partial checkpoints also exist during a live paid run. A concurrent tile
+        // refresh must not interpret them as an interrupted job or ask for consent.
+        if (IsPaperJobRunning())
+        {
+            result.Summary = ReadPaperJobDesktopMessage("论文后台评分正在运行");
+            return result;
+        }
         PaperSettings settings = LoadPaperSettings();
         string today = String.IsNullOrWhiteSpace(paperDate) ? DateTime.Now.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture) : paperDate;
         if (!settings.Enabled)

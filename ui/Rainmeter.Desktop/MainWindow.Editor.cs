@@ -23,6 +23,8 @@ public sealed partial class MainWindow
 
     private ContentDialog MaterialDialog(ContentDialog dialog)
     {
+        if (!dialog.Resources.ContainsKey("ContentDialogMaxWidth"))
+            SetDialogWidth(dialog, 480, false);
         var primaryStyle = new Style(typeof(Button))
         {
             BasedOn = (Style)Application.Current.Resources["AccentButtonStyle"]
@@ -68,18 +70,23 @@ public sealed partial class MainWindow
             return null;
         }
 
-        var space = FindNamed<Grid>(dialog, "DialogSpace");
-        if (space is null || space.Children.OfType<SystemBackdropElement>().Any()) return;
+        var background = FindNamed<Border>(dialog, "BackgroundElement");
+        if (background?.Child is not Grid original ||
+            original.Children.OfType<SystemBackdropElement>().Any()) return;
         var backdrop = new SystemBackdropElement
         {
-            CornerRadius = new CornerRadius(20),
-            Margin = new Thickness(-24, -20, -24, -20),
+            CornerRadius = dialog.CornerRadius,
+            Margin = new Thickness(0),
             SystemBackdrop = studioStyle
                 ? new DesktopAcrylicBackdrop()
                 : new MicaBackdrop { Kind = MicaKind.Base }
         };
-        Grid.SetRowSpan(backdrop, 2);
-        space.Children.Insert(0, backdrop);
+        // Cover the outer surface rather than the padded title/content/button grid.
+        var surface = new Grid { CornerRadius = dialog.CornerRadius };
+        background.Child = null;
+        surface.Children.Add(backdrop);
+        surface.Children.Add(original);
+        background.Child = surface;
         if (FindNamed<ScrollViewer>(dialog, "ContentScrollViewer")?.Content is Grid contentGrid)
             contentGrid.Background = Brush(255, 255, 255, 0);
     }
@@ -107,9 +114,17 @@ public sealed partial class MainWindow
         return control;
     }
 
-    private ContentDialog EditorDialog(string title, UIElement content, string primaryText)
+    private void SetDialogWidth(ContentDialog dialog, double preferredWidth, bool fixedWidth)
     {
-        var width = Math.Min(680, Math.Max(360, Shell.ActualWidth - 80));
+        var availableWidth = Shell.ActualWidth > 0 ? Math.Max(0, Shell.ActualWidth - 48) : preferredWidth;
+        var width = Math.Min(preferredWidth, availableWidth);
+        dialog.Resources["ContentDialogMinWidth"] = fixedWidth ? width : Math.Min(320, width);
+        dialog.Resources["ContentDialogMaxWidth"] = width;
+    }
+
+    private ContentDialog EditorDialog(string title, UIElement content, string primaryText,
+        double preferredWidth = 520)
+    {
         var dialog = new ContentDialog
         {
             Title = Text(title, 23, true),
@@ -122,13 +137,11 @@ public sealed partial class MainWindow
                 HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
                 HorizontalContentAlignment = HorizontalAlignment.Stretch
             },
-            Width = width,
             PrimaryButtonText = primaryText,
             CloseButtonText = "取消",
             DefaultButton = ContentDialogButton.Primary
         };
-        dialog.Resources["ContentDialogMinWidth"] = width;
-        dialog.Resources["ContentDialogMaxWidth"] = width;
+        SetDialogWidth(dialog, preferredWidth, true);
         if (dialog.Content is ScrollViewer scroller)
             ForwardHandledWheel(content, scroller);
         return MaterialDialog(dialog);
