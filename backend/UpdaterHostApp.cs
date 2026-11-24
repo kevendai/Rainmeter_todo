@@ -31,6 +31,7 @@ namespace RainmeterUpdater
         private static readonly JavaScriptSerializer Json = new JavaScriptSerializer { MaxJsonLength = 8 * 1024 * 1024, RecursionLimit = 64 };
         private static readonly string LogRoot = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "RainmeterDesktopWidgets", "Updater");
         private static readonly string ErrorLog = Path.Combine(LogRoot, "last-error.log");
+        private static string ProgressRoot = LogRoot;
         // Unattended runs (and the automated update-chain tests) must never block
         // on a modal dialog; the switch and the environment variable are both
         // honoured because an older parent cannot forward a flag it never knew.
@@ -63,6 +64,7 @@ namespace RainmeterUpdater
             }
             catch (Exception ex)
             {
+                WriteDownloadProgress("failed", "更新失败：" + ex.Message, 0, 0);
                 try { Directory.CreateDirectory(LogRoot); File.WriteAllText(ErrorLog, DateTimeOffset.Now.ToString("o") + "\r\n" + ex + "\r\n", new UTF8Encoding(false)); } catch { }
                 if (!Quiet) try { Console.Error.WriteLine("更新失败：" + ex.Message + "；错误日志：" + ErrorLog); } catch { }
                 return 1;
@@ -189,18 +191,34 @@ namespace RainmeterUpdater
                 File.WriteAllText(Path.Combine(worker, "gone.txt"), "gone", Encoding.UTF8);
                 TryDeleteWorkerPackage(worker);
                 if (Directory.Exists(Path.GetDirectoryName(worker))) return 8;
+                ProgressRoot = root;
+                using (var input = new MemoryStream(new byte[200000]))
+                using (var output = new MemoryStream())
+                {
+                    CopyDownload(input, output, 200000);
+                    var progress = Json.Deserialize<Dictionary<string, object>>(File.ReadAllText(Path.Combine(root, "download-progress.json")));
+                    if (output.Length != 200000 || Convert.ToInt64(progress["received"]) != 200000
+                        || Convert.ToInt64(progress["total"]) != 200000) return 9;
+                }
+                using (var input = new MemoryStream(new byte[10]))
+                using (var output = new MemoryStream())
+                    try { CopyDownload(input, output, 20); return 10; } catch (EndOfStreamException) { }
+                using (var input = new MemoryStream(new byte[10]))
+                using (var output = new MemoryStream()) CopyDownload(input, output, -1);
                 return 0;
             }
-            finally { TryDeleteDirectory(root); }
+            finally { ProgressRoot = LogRoot; TryDeleteDirectory(root); }
         }
 
         private static void CheckAndInstall(Options options)
         {
+            WriteDownloadProgress("checking", "正在检查更新", 0, 0);
             string latestTag = GetLatestTag(options.Repository);
             string latestVersion = NormalizeVersion(latestTag);
             int comparison = CompareVersions(latestVersion, options.CurrentVersion);
             if (comparison <= 0)
             {
+                WriteDownloadProgress("completed", "当前已是最新版本", 0, 0);
                 if (!Quiet) Console.WriteLine(comparison == 0 ? "已经是最新版本：" + latestTag : "当前版本比最新发布版更新。");
                 return;
             }
@@ -219,10 +237,12 @@ namespace RainmeterUpdater
             try
             {
                 DownloadVerifiedReleaseAsset(options.Repository, latestTag, asset, zip);
+                WriteDownloadProgress("extracting", "校验通过，正在解压更新包", 0, 0);
                 ZipArchiveReader.Extract(zip, extract, MaxArchiveBytes, MaxEntryBytes, MaxArchiveBytes, MaxEntries);
                 string packageRoot = FindPackageRoot(extract);
                 string updater = Path.Combine(packageRoot, "Updater", "UpdaterHost.exe");
                 if (!File.Exists(updater)) throw new InvalidDataException("更新包中缺少 UpdaterHost.exe。");
+                WriteDownloadProgress("installing", "下载完成，正在安装，界面将自动重启", 0, 0);
                 using (Process child = Process.Start(new ProcessStartInfo(updater, BuildArguments("InstallPackage", packageRoot, options.RainmeterRoot, options.Activate) + " -WaitForProcessId " + Process.GetCurrentProcess().Id.ToString(CultureInfo.InvariantCulture)) { UseShellExecute = false, CreateNoWindow = false, WorkingDirectory = temp }))
                 {
                     if (child == null) throw new InvalidOperationException("无法启动新版本更新器。");
@@ -400,6 +420,7 @@ namespace RainmeterUpdater
                 expectedHash = match.Groups[1].Value;
             }
             DownloadFile(baseUrl + Uri.EscapeDataString(asset), destination, 120);
+            WriteDownloadProgress("verifying", "下载完成，正在校验文件", new FileInfo(destination).Length, new FileInfo(destination).Length);
             if (!Sha256(destination).Equals(expectedHash, StringComparison.OrdinalIgnoreCase)) throw new InvalidDataException("下载文件 SHA256 校验失败。");
         }
 
@@ -438,13 +459,51 @@ namespace RainmeterUpdater
                     using (HttpWebResponse response = (HttpWebResponse)CreateRequest(url, "GET", seconds).GetResponse())
                     {
                         if (response.ContentLength > MaxArchiveBytes) throw new InvalidDataException("更新包超过大小限制。");
-                        using (Stream input = response.GetResponseStream()) using (FileStream output = File.Create(path)) CopyLimited(input, output, MaxArchiveBytes);
+                        using (Stream input = response.GetResponseStream()) using (FileStream output = File.Create(path))
+                            CopyDownload(input, output, response.ContentLength);
                     }
                     return;
                 }
                 catch (Exception ex) { last = ex; Thread.Sleep(400 * (attempt + 1)); }
             }
             throw last;
+        }
+
+        private static void WriteDownloadProgress(string phase, string message, long received, long total)
+        {
+            // Status is advisory; an unavailable UI must not break installation.
+            try
+            {
+                Directory.CreateDirectory(ProgressRoot);
+                string path = Path.Combine(ProgressRoot, "download-progress.json");
+                string temp = path + "." + Process.GetCurrentProcess().Id + ".tmp";
+                File.WriteAllText(temp, Json.Serialize(new { phase = phase, message = message,
+                    received = received, total = total, updated_at = DateTimeOffset.UtcNow.ToString("o") }), new UTF8Encoding(false));
+                if (File.Exists(path)) File.Replace(temp, path, null); else File.Move(temp, path);
+            }
+            catch { }
+        }
+
+        private static void CopyDownload(Stream input, Stream output, long length)
+        {
+            byte[] buffer = new byte[81920];
+            long received = 0;
+            var clock = Stopwatch.StartNew();
+            WriteDownloadProgress("downloading", "正在下载更新包", 0, length);
+            int read;
+            while ((read = input.Read(buffer, 0, buffer.Length)) > 0)
+            {
+                received += read;
+                if (received > MaxArchiveBytes) throw new InvalidDataException("更新包超过大小限制。");
+                output.Write(buffer, 0, read);
+                if (clock.ElapsedMilliseconds >= 250)
+                {
+                    WriteDownloadProgress("downloading", "正在下载更新包", received, length);
+                    clock.Restart();
+                }
+            }
+            if (length >= 0 && received != length) throw new EndOfStreamException("更新包下载不完整。");
+            WriteDownloadProgress("downloading", "下载完成", received, length);
         }
 
         private static Roots GetRoots(string root)

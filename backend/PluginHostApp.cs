@@ -93,6 +93,7 @@ internal static class PluginHostApp
             }
             else
             {
+                string summary=JsonUtil.String(result.Payload,"summary","已完成");
                 if (action == "Values") UpdateValues(baseDir, id, result);
                 bool importsTasks=sync||ActionImportsTasks(id,pluginAction);
                 if (result.Ok && !JobHasState(id,"cancelled") && (importsTasks || action == "Transform"))
@@ -102,10 +103,12 @@ internal static class PluginHostApp
                         drafts = new[] { JsonUtil.Object(JsonUtil.Get(result.Payload, "task")) };
                     else
                         drafts = JsonUtil.Array(JsonUtil.Get(result.Payload, "tasks")).Select(JsonUtil.Object);
-                    response["import"] = TodoExternalImport.Import(Path.Combine(baseDir, "tasks.json"), id, drafts);
-                    if (importsTasks) RefreshTodo(baseDir);
+                    var imported = TodoExternalImport.Import(Path.Combine(baseDir, "tasks.json"), id, drafts);
+                    response["import"] = imported;
+                    summary = ImportSummary(id, summary, imported);
                 }
-                WriteTerminalState(id,result.Ok?"completed":"failed",result.Ok?1:0,1,result.Ok?JsonUtil.String(result.Payload,"summary","已完成"):result.Error);
+                WriteTerminalState(id,result.Ok?"completed":"failed",result.Ok?1:0,1,result.Ok?summary:result.Error);
+                if (result.Ok && importsTasks && response.ContainsKey("import")) RefreshTodo(baseDir);
             }
             if (outputPath != "") JsonUtil.SaveAtomic(outputPath, response); else Console.Out.WriteLine(JsonUtil.Serialize(response));
             return result.Ok ? 0 : 1;
@@ -159,7 +162,9 @@ internal static class PluginHostApp
                 }
                 if(!result.Ok){failures++;WriteTerminalState(id,"failed",0,1,result.Error);continue;}
                 if(JobHasState(id,"cancelled"))continue;
-                IEnumerable<Dictionary<string,object>> drafts=JsonUtil.Array(JsonUtil.Get(result.Payload,"tasks")).Select(JsonUtil.Object);TodoExternalImport.Import(Path.Combine(baseDir,"tasks.json"),id,drafts);WriteTerminalState(id,"completed",1,1,JsonUtil.String(result.Payload,"summary","已完成"));
+                var drafts=JsonUtil.Array(JsonUtil.Get(result.Payload,"tasks")).Select(JsonUtil.Object);
+                var imported=TodoExternalImport.Import(Path.Combine(baseDir,"tasks.json"),id,drafts);
+                WriteTerminalState(id,"completed",1,1,ImportSummary(id,JsonUtil.String(result.Payload,"summary","已完成"),imported));
             }catch(Exception ex){failures++;WriteTerminalState(id,"failed",0,1,ex.Message);}
         }
         RefreshTodo(baseDir);return failures==0?0:1;
@@ -243,6 +248,22 @@ internal static class PluginHostApp
     }
     private static void WriteJobState(string id,string state,int current,int total,string message){WriteJob(id,new Dictionary<string,object>{{"state",state},{"current",current},{"total",total},{"message",message??""}});}
     private static bool JobHasState(string id,string state){string path=Path.Combine(PluginPaths.Jobs,id+".json");if(!File.Exists(path))return false;try{return JsonUtil.String(JsonUtil.LoadObject(path),"state","")==state;}catch{return false;}}
+    private static string ImportSummary(string id, string summary, Dictionary<string,object> imported)
+    {
+        if (id != "io.github.kevendai.arxiv") return summary;
+        int created = JsonUtil.Int(imported, "created", 0);
+        int existing = JsonUtil.Int(imported, "updated", 0) + JsonUtil.Int(imported, "skipped", 0);
+        int invalid = JsonUtil.Int(imported, "invalid", 0);
+        int total = created + existing + invalid;
+        if (total == 0) return summary;
+        string warning = "";
+        int separator = summary.IndexOf('；');
+        if (summary.StartsWith("已添加 ", StringComparison.Ordinal) && separator >= 0)
+            warning = summary.Substring(separator);
+        return "推荐 " + total + " 篇 · 新增 " + created + " 篇 · 已有 " + existing + " 篇"
+            + (invalid > 0 ? " · 导入失败 " + invalid + " 篇" : "") + warning;
+    }
+
     private static void WriteFailureUnlessCancelled(string id,string message){WriteTerminalState(id,"failed",0,1,message);}
 
     // 写终态。**取消优先**：CancelPlugin 已经标了 cancelled 就绝不覆盖（规格 §4.6-6）。

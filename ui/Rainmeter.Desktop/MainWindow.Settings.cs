@@ -97,13 +97,59 @@ public sealed partial class MainWindow
             var dialog = EditorDialog("检查更新", content, "启动升级");
             if (await dialog.ShowAsync() == ContentDialogResult.Primary)
             {
+                var started = DateTimeOffset.UtcNow;
                 if (await RunTodoHostAsync("UiStartUpdate", "") != 0)
                     throw new InvalidOperationException("更新器未能启动，请查看程序日志。");
-                await ShowNoticeAsync("检查更新", "已启动升级程序，请按后续提示完成更新。");
+                await ShowUpdateProgressAsync(started);
             }
         }
         catch (Exception ex) { await ShowNoticeAsync("检查更新失败", ex.Message); }
         finally { try { File.Delete(resultPath); } catch { } }
+    }
+
+    private async Task ShowUpdateProgressAsync(DateTimeOffset started)
+    {
+        var message = Text("正在准备下载更新包…", 15, true);
+        var bar = new ProgressBar { Minimum = 0, Maximum = 100, IsIndeterminate = true,
+            HorizontalAlignment = HorizontalAlignment.Stretch };
+        var detail = Text("正在连接下载服务器", 13, muted: true);
+        var content = new StackPanel { Spacing = 16 };
+        content.Children.Add(message);
+        content.Children.Add(bar);
+        content.Children.Add(detail);
+        content.Children.Add(Text("隐藏此窗口后更新仍会继续。安装时界面将自动关闭。", 13, muted: true));
+        var dialog = MaterialDialog(new ContentDialog { Title = "版本更新", Content = content, CloseButtonText = "隐藏" });
+        var path = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+            "RainmeterDesktopWidgets", "Updater", "download-progress.json");
+        var timer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(300) };
+        timer.Tick += (_, _) =>
+        {
+            try
+            {
+                using var data = ReadJson(path);
+                if (data is null) return;
+                var root = data.RootElement;
+                if (!DateTimeOffset.TryParse(Value(root, "updated_at"), out var updated) || updated < started) return;
+                message.Text = Value(root, "message");
+                var phase = Value(root, "phase");
+                long.TryParse(Value(root, "received"), out var received);
+                long.TryParse(Value(root, "total"), out var total);
+                bar.IsIndeterminate = total <= 0 && phase != "failed" && phase != "completed";
+                bar.Value = total > 0 ? Math.Clamp(100.0 * received / total, 0, 100) : 0;
+                detail.Text = total > 0
+                    ? $"{bar.Value:0}% · {received / 1048576.0:0.0} / {total / 1048576.0:0.0} MB"
+                    : received > 0 ? $"已下载 {received / 1048576.0:0.0} MB" : message.Text;
+                if (phase == "failed" || phase == "completed")
+                {
+                    dialog.CloseButtonText = "关闭";
+                    timer.Stop();
+                }
+            }
+            catch { /* An atomic status replacement may overlap a read; retry next tick. */ }
+        };
+        timer.Start();
+        try { await dialog.ShowAsync(); }
+        finally { timer.Stop(); }
     }
 
     private Border SettingsRow(Symbol icon, string title, string subtitle, FrameworkElement trailing)

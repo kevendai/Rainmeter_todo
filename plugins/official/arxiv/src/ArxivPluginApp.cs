@@ -21,7 +21,7 @@ internal static partial class TodoApp
     // TodoUpdateService is shared with the host for translation helpers; this
     // plugin never launches the host updater.
     private static string UpdaterExecutable { get { return ""; } }
-    private static readonly string AppVersion="2.0.7";
+    private static readonly string AppVersion="2.0.8";
     private static Dictionary<string,object> PluginState;
     private sealed class EditorResult { public string Title,Target,Note,Available,Due;public List<string> Labels; }
     private delegate void LockedStateAction(Dictionary<string,object> state,ref bool refresh);
@@ -67,7 +67,10 @@ internal static partial class TodoApp
                 return Emit(requestId,true,new Dictionary<string,object>{{"summary",upload},{"remote_exists",upload=="remote_exists"}},null);
             }
             // 后台/定时同步（trigger=startup）今天已经跑过就不再走一遍 —— 沿用 2.0.4 的 startup 短路。
-            bool manual=!String.Equals(JsonUtil.String(context,"trigger","manual"),"startup",StringComparison.OrdinalIgnoreCase);
+            string trigger=JsonUtil.String(context,"trigger","manual");
+            bool manual=String.Equals(trigger,"manual",StringComparison.OrdinalIgnoreCase)
+                || String.Equals(trigger,"tile_refresh",StringComparison.OrdinalIgnoreCase)
+                || String.Equals(trigger,"user",StringComparison.OrdinalIgnoreCase);
             List<Dictionary<string,object>> completedCache;
             if(!manual&&JsonUtil.String(persisted,"last_sync_date","")==date&&
                TryUseLocalCache(date,settings,out completedCache))
@@ -191,6 +194,14 @@ internal static partial class TodoApp
             if(JsonUtil.String(ask.Attention,"resume_action","")!=ResumeAction)return 79;
             if(!JsonUtil.Bool(JsonUtil.Object(JsonUtil.Get(ask.Attention,"resume_input")),"allow_paid_ai",false))return 80;
             if(JsonUtil.String(ask.Attention,"message","").IndexOf("测试 AI",StringComparison.Ordinal)<0)return 81;
+            // An unreachable snapshot service during an automatic refresh is quiet;
+            // a manual refresh above still offers the existing paid-consent choice.
+            var snapshot=JsonUtil.Object(JsonUtil.Get(JsonUtil.Object(JsonUtil.Get(context,"services")),"paper_snapshot_provider"));
+            snapshot["provider_id"]="io.github.test.snapshot";
+            snapshot["available"]=true;
+            ApplyJobContext(context,empty);
+            PaperSyncResult automatic=RunPaperSyncFlow(PluginState,false,date,false,DateTime.Today.AddHours(12));
+            if(!automatic.Ok||automatic.Attention!=null||!automatic.Summary.StartsWith("远端论文同步暂不可用",StringComparison.Ordinal))return 94;
             // 82-83：同一天已拒绝过 ⇒ 后台同步不再用 attention 打扰（磁贴上仍留着可点入口）。
             // 这个断言与时区/时段无关：窗口外会提前返回，窗口内走"已拒绝"分支，两条都不该出 attention。
             Environment.SetEnvironmentVariable(ServiceClient.DeclinedTodayVariable,"1");

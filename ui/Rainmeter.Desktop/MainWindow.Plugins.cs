@@ -241,6 +241,9 @@ public sealed partial class MainWindow
         });
         var cancelled = false;
         var cancelling = false;
+        var progressVisible = false;
+        var closeWindowRequested = false;
+        dialog.Closed += (_, _) => progressVisible = false;
         async Task CancelAsync()
         {
             if (cancelling || process.HasExited) return;
@@ -278,12 +281,24 @@ public sealed partial class MainWindow
         void OnWindowClosing(Microsoft.UI.Windowing.AppWindow sender,
             Microsoft.UI.Windowing.AppWindowClosingEventArgs args)
         {
+            // A hidden progress dialog can still be awaiting its worker. It must
+            // not keep an invisible veto over the main window's close button.
+            if (!progressVisible || process.HasExited) return;
             args.Cancel = true;
+            closeWindowRequested = true;
             _ = CancelAndReportAsync();
         }
         async Task CancelAndReportAsync()
         {
-            try { await CancelAsync(); }
+            try
+            {
+                await CancelAsync();
+                if (closeWindowRequested && (cancelled || process.HasExited))
+                {
+                    AppWindow.Closing -= OnWindowClosing;
+                    Close();
+                }
+            }
             catch (Exception ex) { phase.Text = "取消未完成：" + ex.Message; cancelling = false; }
         }
         async Task ObserveAsync()
@@ -322,6 +337,7 @@ public sealed partial class MainWindow
         try
         {
             await Task.Delay(200);
+            progressVisible = true;
             var shown = dialog.ShowAsync();
             await ObserveAsync();
             if (!cancelled) await wait;
@@ -330,6 +346,7 @@ public sealed partial class MainWindow
         }
         finally
         {
+            progressVisible = false;
             AppWindow.Closing -= OnWindowClosing;
             dialog.Hide();
         }
@@ -954,7 +971,7 @@ public sealed partial class MainWindow
             "io.github.kevendai.calendar-to-todo" => "日程转待办",
             "io.github.kevendai.paper-snapshot-sync" => "论文快照同步",
             "io.github.kevendai.ai-deepseek" => "DeepSeek AI 评分",
-            "io.github.kevendai.translate-tencent" => "腾讯云翻译",
+            "io.github.kevendai.translate-tencent" => "翻译插件",
             "io.github.kevendai.ssdp-server-ip" => "SSDP 服务器 IP 同步",
             _ => fallback != "" ? fallback : id.Split('.').LastOrDefault()?.Replace('-', ' ') ?? "未命名插件"
         };
@@ -966,7 +983,7 @@ public sealed partial class MainWindow
             "io.github.kevendai.calendar-to-todo" => "按规则把日程转换为待办，保留来源和时间。",
             "io.github.kevendai.paper-snapshot-sync" => "将论文推荐快照同步到服务器，便于多设备共享。",
             "io.github.kevendai.ai-deepseek" => "为论文等插件提供 DeepSeek AI 评分服务。",
-            "io.github.kevendai.translate-tencent" => "提供腾讯云机器翻译服务。",
+            "io.github.kevendai.translate-tencent" => "提供腾讯云和 Azure 翻译服务。",
             "io.github.kevendai.ssdp-server-ip" => "自动发现服务器 IP，端口仍由你手动设置。",
             _ => fallback != "" ? fallback : "用这款插件扩展你的桌面工作台。"
         };

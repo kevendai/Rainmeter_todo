@@ -476,7 +476,7 @@ internal static partial class TodoApp
         public Dictionary<string, object> Attention;
     }
 
-    private static PaperSyncResult RunPaperSyncFlow(Dictionary<string, object> state, bool manual, string paperDate, bool replaceToday)
+    private static PaperSyncResult RunPaperSyncFlow(Dictionary<string, object> state, bool manual, string paperDate, bool replaceToday, DateTime? localNow = null)
     {
         PaperSyncResult result = new PaperSyncResult();
         // Partial checkpoints also exist during a live paid run. A concurrent tile
@@ -495,7 +495,7 @@ internal static partial class TodoApp
         }
         if (!manual)
         {
-            DateTime now = DateTime.Now;
+            DateTime now = localNow ?? DateTime.Now;
             if (now.TimeOfDay < TimeSpan.FromHours(8) || now.TimeOfDay > TimeSpan.FromHours(20)) { result.Summary = "不在同步时段"; return result; }
             List<Dictionary<string,object>> completedCache;
             if (JsonUtil.String(Meta(state), "last_arxiv_sync_date", "") == today &&
@@ -586,6 +586,12 @@ internal static partial class TodoApp
                 return result;
             }
             remoteError = snapshot.Failed ? snapshot.Error : "远端暂无 " + today + " 的推荐结果";
+            if (snapshot.Failed && !manual && !PaidAiAllowed)
+            {
+                result.Summary = "远端论文同步暂不可用：" + snapshot.Error + "；将在下次刷新时重试";
+                Meta(state)["status"] = result.Summary;
+                return result;
+            }
         }
         else remoteError = "未安装论文同步插件";
 

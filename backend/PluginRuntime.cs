@@ -138,7 +138,7 @@ namespace RainmeterBackend
             {"io.github.kevendai.calendar-to-todo","日程转待办"},
             {"io.github.kevendai.paper-snapshot-sync","论文快照同步"},
             {"io.github.kevendai.ai-deepseek","DeepSeek AI 评分"},
-            {"io.github.kevendai.translate-tencent","腾讯云翻译"},
+            {"io.github.kevendai.translate-tencent","翻译插件"},
             {"io.github.kevendai.ssdp-server-ip","SSDP 服务器 IP 同步"}
         };
 

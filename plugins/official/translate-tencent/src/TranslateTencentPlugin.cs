@@ -28,7 +28,8 @@ using RainmeterBackend;
 internal static class TranslateTencentPlugin
 {
     private const string PluginId="io.github.kevendai.translate-tencent";
-    private const string PluginVersion="1.0.0";
+    private const string PluginVersion="1.1.0";
+    private const string AzureEndpoint="https://api.cognitive.microsofttranslator.com/translate";
     private const string DefaultEndpoint="https://tmt.tencentcloudapi.com";
     private const string ApiVersion="2018-03-21";
     private const string ApiAction="TextTranslateBatch";
@@ -105,8 +106,9 @@ internal static class TranslateTencentPlugin
         Client client=BuildClient(config,secret);
         RequireCredentials(client);
         List<string> texts=ReadTexts(input,client.MaxTexts);
-        string source=ResolveLanguage(FirstNonEmpty(JsonUtil.String(input,"source_language",""),client.SourceLanguage),true);
-        string target=ResolveLanguage(FirstNonEmpty(JsonUtil.String(input,"target_language",""),client.TargetLanguage),false);
+        string source=ProviderLanguage(client,FirstNonEmpty(JsonUtil.String(input,"source_language",""),client.SourceLanguage),true);
+        string target=ProviderLanguage(client,FirstNonEmpty(JsonUtil.String(input,"target_language",""),client.TargetLanguage),false);
+        string cacheSource=client.Azure?"azure:"+source:source;
 
         // 源=目标时翻译没有意义，直接原样返回：既不花钱也不该假装配了一次。
         if(source!="auto"&&String.Equals(source,target,StringComparison.OrdinalIgnoreCase))
@@ -117,7 +119,7 @@ internal static class TranslateTencentPlugin
                 {"translations",unchanged},
                 {"source_language",source},{"target_language",target},
                 {"usage",new Dictionary<string,object>{{"translated_chars",0},{"requests",0},{"cached",0}}},
-                {"notes",new List<object>{"源语言与目标语言相同，未调用腾讯云接口（不产生费用）"}}},null);
+                {"notes",new List<object>{"源语言与目标语言相同，未调用翻译接口（不产生费用）"}}},null);
         }
 
         Dictionary<string,object> cache=client.UseCache?LoadCache():null;
@@ -126,7 +128,7 @@ internal static class TranslateTencentPlugin
         int cachedCount=0;
         for(int index=0;index<texts.Count;index++)
         {
-            string hit=cache==null?null:CacheGet(cache,source,target,texts[index]);
+            string hit=cache==null?null:CacheGet(cache,cacheSource,target,texts[index]);
             if(hit!=null){results[index]=hit;cachedCount++;}else pending.Add(index);
         }
         foreach(List<int> chunk in SplitChunks(texts,pending,ChunkCharBudget))
@@ -135,12 +137,12 @@ internal static class TranslateTencentPlugin
             foreach(int index in chunk)payload.Add(texts[index]);
             List<string> translated=TranslateChunk(client,payload,source,target);
             if(translated.Count!=payload.Count)
-                throw new Failure("协议错误（protocol_error）：腾讯云返回 "+translated.Count.ToString(CultureInfo.InvariantCulture)
+                throw new Failure("协议错误（protocol_error）：翻译服务返回 "+translated.Count.ToString(CultureInfo.InvariantCulture)
                     +" 条译文，但本次请求了 "+payload.Count.ToString(CultureInfo.InvariantCulture)+" 条，长度不一致，已丢弃这一批结果。",false);
             for(int offset=0;offset<chunk.Count;offset++)
             {
                 results[chunk[offset]]=translated[offset];
-                if(cache!=null)CacheSet(cache,source,target,texts[chunk[offset]],translated[offset]);
+                if(cache!=null)CacheSet(cache,cacheSource,target,texts[chunk[offset]],translated[offset]);
             }
         }
         if(cache!=null)SaveCache(cache);
@@ -166,12 +168,12 @@ internal static class TranslateTencentPlugin
     {
         Client client=BuildClient(config,secret);
         RequireCredentials(client);
-        string source=ResolveLanguage(client.SourceLanguage,true);
-        string target=ResolveLanguage(client.TargetLanguage,false);
+        string source=ProviderLanguage(client,client.SourceLanguage,true);
+        string target=ProviderLanguage(client,client.TargetLanguage,false);
         string probe="translation service check";
         List<string> translated=TranslateChunk(client,new List<string>{probe},source,target);
         if(translated.Count!=1||translated[0].Trim()=="")
-            throw new Failure("腾讯云返回的译文为空，请检查语言设置（源语言 / 目标语言）。",false);
+            throw new Failure("翻译服务返回的译文为空，请检查语言设置（源语言 / 目标语言）。",false);
         return Emit(requestId,true,new Dictionary<string,object>{
             {"message","翻译服务可用"},
             {"source_language",source},{"target_language",target},
@@ -192,11 +194,11 @@ internal static class TranslateTencentPlugin
         Uri uri;
         if(!Uri.TryCreate(client.Endpoint,UriKind.Absolute,out uri)||(uri.Scheme!="http"&&uri.Scheme!="https"))
             throw new Failure("接口地址必须是 http(s) URL，实际为「"+client.Endpoint+"」",false);
-        string source=ResolveLanguage(client.SourceLanguage,true);
-        string target=ResolveLanguage(client.TargetLanguage,false);
+        string source=ProviderLanguage(client,client.SourceLanguage,true);
+        string target=ProviderLanguage(client,client.TargetLanguage,false);
         List<object> notes=new List<object>();
         if(uri.Query!="")notes.Add("接口地址带查询参数：TC3 签名不覆盖查询串（官方接口不使用查询参数），请确认你的网关不需要它参与签名。");
-        if(source=="auto")notes.Add("源语言为 auto：由腾讯云自动识别，个别短标题可能识别错语种；固定为 en 可以避免。");
+        if(source=="auto")notes.Add("源语言为 auto：由翻译服务自动识别，个别短标题可能识别错语种；固定为 en 可以避免。");
         return Emit(requestId,true,new Dictionary<string,object>{
             {"message","设置有效"},
             {"endpoint",client.Endpoint},
@@ -275,6 +277,18 @@ internal static class TranslateTencentPlugin
         new string[]{"zh","zh-TW","en","ja","ko","fr","es","it","de","tr","ru","pt","vi","id","th","ms","ar","hi"},
         StringComparer.OrdinalIgnoreCase);
 
+    private static string ProviderLanguage(Client client,string code,bool source)
+    {
+        if(!client.Azure)return ResolveLanguage(code,source);
+        code=code.Trim().ToLowerInvariant();
+        if(source&&(code==""||code=="auto"))return "auto";
+        if(code=="zh"||code=="zh-cn"||code=="zh-hans")return "zh-Hans";
+        if(code=="zh-tw"||code=="zh-hk"||code=="zh-hant")return "zh-Hant";
+        if(code=="auto"||!System.Text.RegularExpressions.Regex.IsMatch(code,@"\A[a-z]{2,3}(?:-[a-z0-9]{2,8})*\z"))
+            throw new Failure("Azure 语言代码无效："+code,false);
+        return code;
+    }
+
     private static string ResolveLanguage(string code,bool source)
     {
         string key=(code??"").Trim().ToLowerInvariant();
@@ -316,6 +330,7 @@ internal static class TranslateTencentPlugin
         public string SecretId="",SecretKey="";
         public string SourceLanguage=DefaultSourceLanguage,TargetLanguage=DefaultTargetLanguage;
         public bool UseCache=true;
+        public bool Azure;
         public int TimeoutSeconds=DefaultTimeoutSeconds,MaxTexts=DefaultMaxTexts;
         public int Requests;
         private DateTimeOffset lastRequest=DateTimeOffset.MinValue;
@@ -352,6 +367,15 @@ internal static class TranslateTencentPlugin
         client.SecretId=FirstNonEmpty(JsonUtil.String(config,"secret_id",""),
             JsonUtil.String(secret,"secret_id","")).Trim();
         client.SecretKey=JsonUtil.String(secret,"secret_key","").Trim();
+        string provider=JsonUtil.String(config,"provider","tencent");
+        if(provider!="tencent"&&provider!="azure")throw new Failure("翻译服务只能选择 tencent 或 azure。",false);
+        client.Azure=provider=="azure";
+        if(client.Azure)
+        {
+            client.Endpoint=AzureEndpoint;
+            client.Region=JsonUtil.String(config,"azure_region","").Trim();
+            client.SecretKey=JsonUtil.String(secret,"azure_key","").Trim();
+        }
         client.TimeoutSeconds=Clamp(JsonUtil.Int(config,"timeout_seconds",DefaultTimeoutSeconds),10,600);
         client.MaxTexts=Clamp(JsonUtil.Int(config,"max_texts_per_call",DefaultMaxTexts),1,MaxTextsHardLimit);
         return client;
@@ -366,8 +390,13 @@ internal static class TranslateTencentPlugin
 
     private static void RequireCredentials(Client client)
     {
+        if(client.Azure)
+        {
+            if(client.SecretKey=="")throw new Failure("请先在「翻译插件」设置里填写 Azure Translator 密钥。",true);
+            return;
+        }
         if(client.SecretId==""||client.SecretKey=="")
-            throw new Failure("请先在「腾讯云翻译」插件设置里填写 Secret ID 与 Secret Key",true);
+            throw new Failure("请先在「翻译插件」设置里填写腾讯 Secret ID 与 Secret Key",true);
     }
 
     private static string NormalizeHttpUrl(string value)
@@ -517,6 +546,7 @@ internal static class TranslateTencentPlugin
 
     private static List<string> TranslateChunk(Client client,List<string> texts,string source,string target)
     {
+        if(client.Azure)return TranslateAzure(client,texts,source,target);
         string body=BuildBody(texts,source,target);
         for(int attempt=0;;attempt++)
         {
@@ -535,6 +565,57 @@ internal static class TranslateTencentPlugin
             }
             Thread.Sleep(RetryDelays[attempt]+new Random(unchecked(Environment.TickCount*31+Thread.CurrentThread.ManagedThreadId)).Next(150,600));
         }
+    }
+
+    private static List<string> TranslateAzure(Client client,List<string> texts,string source,string target)
+    {
+        var items=new List<Dictionary<string,string>>();
+        foreach(string text in texts)items.Add(new Dictionary<string,string>{{"Text",text}});
+        byte[] body=Encoding.UTF8.GetBytes(JsonUtil.Serialize(items));
+        string url=AzureEndpoint+"?api-version=3.0&to="+Uri.EscapeDataString(target);
+        if(source!="auto")url+="&from="+Uri.EscapeDataString(source);
+        ServicePointManager.SecurityProtocol|=(SecurityProtocolType)3072;
+        client.Throttle();
+        var request=(HttpWebRequest)WebRequest.Create(url);
+        request.Method="POST";
+        request.AllowAutoRedirect=false;
+        request.ContentType=ContentType;
+        request.Timeout=request.ReadWriteTimeout=client.TimeoutSeconds*1000;
+        request.ContentLength=body.Length;
+        request.Headers["Ocp-Apim-Subscription-Key"]=client.SecretKey;
+        if(client.Region!="")request.Headers["Ocp-Apim-Subscription-Region"]=client.Region;
+        client.Requests++;
+        try
+        {
+            using(var stream=request.GetRequestStream())stream.Write(body,0,body.Length);
+            using(var response=request.GetResponse())
+            using(var reader=new StreamReader(response.GetResponseStream(),Encoding.UTF8))
+                return ParseAzureTargets(reader.ReadToEnd());
+        }
+        catch(WebException ex)
+        {
+            using(var response=ex.Response as HttpWebResponse)
+            {
+                if(response==null)throw new Failure("连接 Azure Translator 失败："+ex.Status,false);
+                int status=(int)response.StatusCode;
+                string hint=status==401?"，请检查密钥和资源区域":status==403?"，请检查资源授权与额度":status==429?"，请求超出限额":"";
+                throw new Failure("Azure Translator 请求失败（HTTP "+status+"）"+hint+"。",status==401||status==403);
+            }
+        }
+    }
+
+    private static List<string> ParseAzureTargets(string json)
+    {
+        var result=new List<string>();
+        foreach(object row in JsonUtil.Array(JsonUtil.Deserialize(json)))
+        {
+            var translations=JsonUtil.Array(JsonUtil.Get(JsonUtil.Object(row),"translations"));
+            if(translations.Count!=1)throw new Failure("Azure 返回的译文结构无效。",false);
+            string text=JsonUtil.String(JsonUtil.Object(translations[0]),"text","");
+            if(String.IsNullOrWhiteSpace(text))throw new Failure("Azure 返回空译文。",false);
+            result.Add(text);
+        }
+        return result;
     }
 
     // 每次尝试都重新取时间戳并重新签名（TC3 的 Timestamp 参与签名，且与服务器时间偏差 >5 分钟必失败）。
@@ -787,6 +868,12 @@ internal static class TranslateTencentPlugin
     // ── 离线自检（不联网；退出码 70 起）──────────────────────────────────────
     private static int RunSelfTests()
     {
+        Client azure=BuildClient(new Dictionary<string,object>{{"provider","azure"},{"azure_region","eastasia"}},
+            new Dictionary<string,object>{{"azure_key","test-key"},{"secret_key","tencent-key"}});
+        if(!azure.Azure||azure.Endpoint!=AzureEndpoint||azure.Region!="eastasia"||azure.SecretKey!="test-key")return 80;
+        if(ProviderLanguage(azure,"zh",false)!="zh-Hans"||ProviderLanguage(azure,"auto",true)!="auto")return 81;
+        var azureResult=ParseAzureTargets("[{\"translations\":[{\"text\":\"第一\"}]},{\"translations\":[{\"text\":\"第二\"}]}]");
+        if(azureResult.Count!=2||azureResult[0]!="第一"||azureResult[1]!="第二")return 82;
         quietDiagnostics=true;
         // 70：TC3 签名的**已知答案**——全部取自腾讯云官方文档的示例，逐字节比对。
         //     这是本插件最值得钉死的地方：签名拼错时接口只会回一个 SignatureFailure，

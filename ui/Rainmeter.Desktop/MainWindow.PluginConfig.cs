@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Text;
 using System.Text.Json;
 using Microsoft.UI.Xaml;
+using Microsoft.UI.Xaml.Automation;
 using Microsoft.UI.Xaml.Controls;
 
 namespace Rainmeter.Desktop;
@@ -71,6 +72,16 @@ public sealed partial class MainWindow
             var name = Value(model.RootElement, "name", "插件");
             const string paperPlugin = "io.github.kevendai.arxiv";
             const string aiPlugin = "io.github.kevendai.ai-deepseek";
+            bool translation = id == "io.github.kevendai.translate-tencent";
+            if (translation) name = "翻译插件";
+            static string TranslationProvider(string key) => key switch
+            {
+                "secret_id" or "secret_key" or "api_endpoint" or "region" => "tencent",
+                "azure_key" or "azure_region" => "azure",
+                _ => ""
+            };
+            ComboBox? translationProvider = null;
+            var providerCards = new List<(FrameworkElement Card, string Provider)>();
             static bool IsPaperScoringSetting(string key) => key is "title_prompt" or "abstract_prompt"
                 or "categories" or "exclude_categories" or "title_threshold"
                 or "title_batch_size" or "abstract_batch_size";
@@ -218,6 +229,29 @@ public sealed partial class MainWindow
                         edits[key] = () => toggle.IsOn;
                         item.Children.Add(toggle);
                     }
+                    else if (translation && key == "azure_region")
+                    {
+                        var regions = EditorControl(new ComboBox { HorizontalAlignment = HorizontalAlignment.Stretch });
+                        regions.Items.Add(new ComboBoxItem { Content = "全局（Global）", Tag = "" });
+                        var regionNames = new[]
+                        {
+                            "Australia East", "Brazil South", "Canada Central", "Central India", "Central US",
+                            "East Asia", "East US", "East US 2", "France Central", "Japan East", "Japan West",
+                            "Korea Central", "North Central US", "North Europe", "South Africa North",
+                            "South Central US", "Southeast Asia", "Sweden Central", "UAE North", "UK South",
+                            "West Central US", "West Europe", "West US", "West US 2"
+                        };
+                        var savedRegion = ConfigFieldValue(field).Trim().ToLowerInvariant();
+                        if (savedRegion == "global") savedRegion = "";
+                        foreach (var region in regionNames)
+                            regions.Items.Add(new ComboBoxItem { Content = region, Tag = region.Replace(" ", "").ToLowerInvariant() });
+                        if (!regions.Items.OfType<ComboBoxItem>().Any(option => (string)option.Tag == savedRegion))
+                            regions.Items.Add(new ComboBoxItem { Content = savedRegion, Tag = savedRegion });
+                        regions.SelectedItem = regions.Items.OfType<ComboBoxItem>()
+                            .First(option => (string)option.Tag == savedRegion);
+                        edits[key] = () => (regions.SelectedItem as ComboBoxItem)?.Tag;
+                        item.Children.Add(regions);
+                    }
                     else if (field.TryGetProperty("options", out var choicesJson) &&
                         choicesJson.ValueKind == JsonValueKind.Array && choicesJson.GetArrayLength() > 0)
                     {
@@ -226,12 +260,15 @@ public sealed partial class MainWindow
                         foreach (var option in choicesJson.EnumerateArray())
                         {
                             var label = option.ValueKind == JsonValueKind.String ? option.GetString() ?? "" : option.GetRawText();
-                            choices.Items.Add(new ComboBoxItem { Content = label, Tag = label });
+                            var display = translation && key == "provider"
+                                ? label == "azure" ? "Azure Translator" : "腾讯云" : label;
+                            choices.Items.Add(new ComboBoxItem { Content = display, Tag = label });
                         }
                         var current = ConfigFieldValue(field);
                         choices.SelectedItem = choices.Items.OfType<ComboBoxItem>()
                             .FirstOrDefault(choice => choice.Tag?.ToString() == current) ?? choices.Items[0];
                         edits[key] = () => choices.IsEnabled ? (choices.SelectedItem as ComboBoxItem)?.Tag?.ToString() : null;
+                        if (translation && key == "provider") translationProvider = choices;
                         item.Children.Add(choices);
                     }
                     else if (Value(field, "secret") == "True")
@@ -280,8 +317,26 @@ public sealed partial class MainWindow
                         }
                     }
                     section.Children.Add(item);
+                    if (translation && TranslationProvider(key) is { Length: > 0 } provider)
+                        providerCards.Add((item, provider));
                 }
-                sections.Children.Add(Card(section, 18));
+                var card = Card(section, 18);
+                sections.Children.Add(card);
+                if (translation && group.Key is "腾讯云" or "Azure")
+                    providerCards.Add((card, group.Key == "Azure" ? "azure" : "tencent"));
+            }
+            string SelectedTranslationProvider() => (translationProvider?.SelectedItem as ComboBoxItem)?.Tag?.ToString() ?? "tencent";
+            bool IsVisibleSetting(string key) => !translation || TranslationProvider(key) == "" ||
+                TranslationProvider(key) == SelectedTranslationProvider();
+            if (translationProvider is not null)
+            {
+                void UpdateProviderVisibility()
+                {
+                    foreach (var (element, provider) in providerCards)
+                        element.Visibility = provider == SelectedTranslationProvider() ? Visibility.Visible : Visibility.Collapsed;
+                }
+                translationProvider.SelectionChanged += (_, _) => UpdateProviderVisibility();
+                UpdateProviderVisibility();
             }
             if (Value(model.RootElement, "scan") == "True")
                 sections.Children.Add(BuildSsdpScanner(id, edits));
@@ -298,6 +353,7 @@ public sealed partial class MainWindow
                     var values = new Dictionary<string, object?>();
                     foreach (var edit in edits)
                     {
+                        if (!IsVisibleSetting(edit.Key)) continue;
                         var value = edit.Value();
                         if (value is not null) values[edit.Key] = value;
                     }
@@ -314,7 +370,7 @@ public sealed partial class MainWindow
                             .ToDictionary(entry => entry.Key, entry => entry.Value)
                         : new Dictionary<string, object?>();
                     foreach (var key in paperValues.Keys) values.Remove(key);
-                    var clear_secrets = clearSecrets.Where(entry => entry.Value.IsChecked == true)
+                    var clear_secrets = clearSecrets.Where(entry => IsVisibleSetting(entry.Key) && entry.Value.IsChecked == true)
                         .Select(entry => entry.Key).ToArray();
                     using var result = await PluginConfigCommandAsync("UiPluginConfigSave", id,
                         new { values, clear_secrets });
@@ -523,9 +579,26 @@ public sealed partial class MainWindow
                 "显示 " + choices.Items.Count + " / " + devices.Count + " 台设备。";
         }
         systems.SelectionChanged += (_, _) => ApplySystemFilter();
-        var search = Action("搜索设备", () => _ = SearchSsdpDevicesAsync(id, edits, systems,
-            devices, ApplySystemFilter, status));
+        var progress = new ProgressBar { Visibility = Visibility.Collapsed };
+        AutomationProperties.SetName(progress, "设备搜索进度");
+        var search = new Button { Content = "搜索设备" };
+        search.Click += async (_, _) =>
+        {
+            search.IsEnabled = false;
+            systems.IsEnabled = false;
+            progress.IsIndeterminate = true;
+            progress.Visibility = Visibility.Visible;
+            try { await SearchSsdpDevicesAsync(id, edits, systems, devices, ApplySystemFilter, status); }
+            finally
+            {
+                progress.IsIndeterminate = false;
+                progress.Visibility = Visibility.Collapsed;
+                systems.IsEnabled = devices.Count > 0;
+                search.IsEnabled = true;
+            }
+        };
         section.Children.Add(search);
+        section.Children.Add(progress);
         section.Children.Add(systems);
         section.Children.Add(choices);
         section.Children.Add(status);

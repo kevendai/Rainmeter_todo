@@ -1,13 +1,14 @@
 {
   "id": "io.github.kevendai.arxiv",
-  "name": "arXiv Paper Recommendation",
+  "name": "arXiv 论文推荐",
   "channel": "stable",
   "official": true,
-  "version": "2.0.7",
+  "version": "2.0.8",
   "api_version": 1,
   "min_host_version": "2.1.0",
-  "download": "https://github.com/kevendai/Rainmeter_todo-plugin-registry/releases/download/arxiv-v2.0.7/arxiv-2.0.7.rwplugin",
-  "sha256": "6a5fc7c83ebc7839ff380a85cb8cc07bd27701f942b6988e33c43a91ab8c61b2",
-  "release_notes": "修复中断评分恢复、提示词校验和远端快照确认上传流程。",
-  "homepage": "https://github.com/kevendai/Rainmeter_todo-plugin-registry/tree/master/official-plugins/arxiv"
+  "download": "https://github.com/kevendai/Rainmeter_todo-plugin-registry/releases/download/arxiv-v2.0.8/arxiv-2.0.8.rwplugin",
+  "sha256": "82880b43735376ea78d7b4be17162d79883dc7b96358735d320913c5b7303af7",
+  "release_notes": "自动刷新遇到远端连接失败时不弹出 AI 评分确认。",
+  "homepage": "https://github.com/kevendai/Rainmeter_todo-plugin-registry/tree/master/official-plugins/arxiv",
+  "description": "从 arXiv 抓取当日论文、按你的评分提示词打分并导入待办。AI 评分、标题翻译与远端快照分别由 AI / 翻译 / 论文快照 Provider 提供。"
 }

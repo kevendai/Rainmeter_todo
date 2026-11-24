@@ -1,4 +1,8 @@
-# 腾讯云翻译（`io.github.kevendai.translate-tencent`）
+# 翻译插件（`io.github.kevendai.translate-tencent`）
+
+在插件配置中选择 `tencent` 或 `azure`。既有安装默认继续使用腾讯云，原有配置和凭据可直接使用。
+
+Azure 使用 `https://api.cognitive.microsofttranslator.com/` 的 Translator v3 接口。填写订阅密钥，区域资源还需填写资源区域（例如 `eastasia`）。全局 Translator 资源可以留空。保存后可用“测试连接”验证配置。
 
 v2.1 官方 **翻译 Provider**，实现 `translation_provider@1`。规格：`docs/V2.1-PROVIDER-INTERFACE.md` §7.3。
 `billing: "may_charge"` —— 腾讯云机器翻译（TMT）按字符计费，每月有免费额度，用完继续调用会产生费用。
