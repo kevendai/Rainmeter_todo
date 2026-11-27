@@ -217,6 +217,8 @@ namespace RainmeterBackend
         public static string BrokerHostExe { get { return Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"PluginHost.exe"); } }
 
         private const int MaxLineChars=1024*1024,MaxOutputChars=4*1024*1024,MaxLogChars=1024*1024;
+        // Snapshot responses carry up to 8 MiB of paper JSON plus the result envelope.
+        private const int MaxSnapshotLineChars = 8 * 1024 * 1024 + 64 * 1024;
         private static string LoadHostVersion(){string path=Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"app-version.txt");if(File.Exists(path)){string value=File.ReadAllText(path,Encoding.UTF8).Trim();if(Regex.IsMatch(value,@"^\d+\.\d+\.\d+$"))return value;}return "0.0.0";}
         public static Dictionary<string,object> Current(string id){string p=Path.Combine(PluginPaths.PluginRoot(id),"current.json");return File.Exists(p)?JsonUtil.LoadObject(p):new Dictionary<string,object>();}
         public static PluginManifest Resolve(string id,bool enabled)
@@ -287,18 +289,36 @@ namespace RainmeterBackend
 
             using(Process p=new Process{StartInfo=info,EnableRaisingEvents=true})
             {
-                int total=0;
+                bool snapshotRead = id == "io.github.kevendai.paper-snapshot-sync" && action == "get_snapshot";
+                int lineLimit = snapshotRead ? MaxSnapshotLineChars : MaxLineChars;
+                int outputLimit = snapshotRead ? MaxSnapshotLineChars + MaxOutputChars : MaxOutputChars;
                 if(!p.Start())throw new InvalidOperationException("无法启动插件");if(progress!=null)progress(new Dictionary<string,object>{{"type","host_start"},{"pid",p.Id},{"entry",entry},{"process_started_at",p.StartTime.ToUniversalTime().ToString("o",CultureInfo.InvariantCulture)},{"current",0},{"total",0},{"message","插件进程已启动"}});
                 StreamReader stdout=new StreamReader(p.StandardOutput.BaseStream,Encoding.UTF8,false,4096),stderr=new StreamReader(p.StandardError.BaseStream,Encoding.UTF8,false,4096);
-                Thread outputThread=new Thread(delegate(){string line;while((line=stdout.ReadLine())!=null){Dictionary<string,object> liveProgress=null;lock(gate){total+=line.Length;if(line.Length>MaxLineChars||total>MaxOutputChars)lines.Add("__OVERSIZE__");else{lines.Add(line);try{Dictionary<string,object> live=JsonUtil.Object(JsonUtil.Deserialize(line));if(JsonUtil.String(live,"type","")=="progress"&&JsonUtil.String(live,"request_id","")==requestId)liveProgress=live;}catch{}}}if(liveProgress!=null&&progress!=null)try{progress(liveProgress);}catch(Exception ex){lock(gate){if(progressError==null)progressError=ex;}}}}),errorThread=new Thread(delegate(){char[] buffer=new char[2048];int count;while((count=stderr.Read(buffer,0,buffer.Length))>0)lock(gate){if(errors.Length<MaxLogChars)errors.Append(buffer,0,Math.Min(count,MaxLogChars-errors.Length));}});outputThread.IsBackground=true;errorThread.IsBackground=true;outputThread.Start();errorThread.Start();
+                bool oversized = false;
+                Thread outputThread = new Thread(delegate()
+                {
+                    oversized = !ReadPluginOutput(stdout, lineLimit, outputLimit, delegate(string line)
+                    {
+                        lines.Add(line);
+                        if (progress == null || line.Length > MaxLineChars) return;
+                        Dictionary<string,object> live;
+                        try { live = JsonUtil.Object(JsonUtil.Deserialize(line)); }
+                        catch { return; }
+                        if (JsonUtil.String(live,"type","") != "progress" ||
+                            JsonUtil.String(live,"request_id","") != requestId) return;
+                        try { progress(live); }
+                        catch (Exception ex) { if (progressError == null) progressError = ex; }
+                    });
+                });
+                Thread errorThread=new Thread(delegate(){char[] buffer=new char[2048];int count;while((count=stderr.Read(buffer,0,buffer.Length))>0)lock(gate){if(errors.Length<MaxLogChars)errors.Append(buffer,0,Math.Min(count,MaxLogChars-errors.Length));}});outputThread.IsBackground=true;errorThread.IsBackground=true;outputThread.Start();errorThread.Start();
                 byte[] requestBytes=Encoding.UTF8.GetBytes(JsonUtil.Serialize(request)+"\n");p.StandardInput.BaseStream.Write(requestBytes,0,requestBytes.Length);p.StandardInput.BaseStream.Close();
                 if(!p.WaitForExit(Math.Max(1,timeoutSeconds)*1000)){try{p.Kill();}catch{}throw new TimeoutException("插件执行超时");}
-                p.WaitForExit();outputThread.Join(2000);errorThread.Join(2000);File.WriteAllText(Path.Combine(PluginPaths.Logs,id+".log"),errors.ToString(),RuntimeUtil.Utf8NoBom);
+                p.WaitForExit();if(!outputThread.Join(2000))throw new InvalidDataException("未能完整读取插件输出");errorThread.Join(2000);File.WriteAllText(Path.Combine(PluginPaths.Logs,id+".log"),errors.ToString(),RuntimeUtil.Utf8NoBom);
+                if(oversized)throw new InvalidDataException("插件输出超过限制");
                 if(progressError!=null)throw new InvalidOperationException("插件进度处理失败",progressError);
                 PluginCallResult result=null;
                 foreach(string line in lines)
                 {
-                    if(line=="__OVERSIZE__")throw new InvalidDataException("插件输出超过限制");
                     Dictionary<string,object> msg;try{msg=JsonUtil.Object(JsonUtil.Deserialize(line));}catch{throw new InvalidDataException("插件 stdout 包含非法 JSON");}
                     if(JsonUtil.String(msg,"request_id","")!=requestId)throw new InvalidDataException("插件响应 request_id 不匹配");
                     string type=JsonUtil.String(msg,"type","");
@@ -313,6 +333,33 @@ namespace RainmeterBackend
                 if(p.ExitCode!=0&&result.Ok)throw new InvalidDataException("插件异常退出："+p.ExitCode.ToString(CultureInfo.InvariantCulture));
                 return result;
             }
+        }
+
+        internal static bool ReadPluginOutput(TextReader reader, int lineLimit, int outputLimit, Action<string> accept)
+        {
+            var line = new StringBuilder();
+            int total = 0;
+            bool previousCr = false;
+            int ch;
+            while ((ch = reader.Read()) >= 0)
+            {
+                if (++total > outputLimit || (ch != '\r' && ch != '\n' && line.Length >= lineLimit))
+                {
+                    // Drain the pipe without retaining further output so the child can exit.
+                    char[] discard = new char[4096];
+                    while (reader.Read(discard, 0, discard.Length) > 0) { }
+                    return false;
+                }
+                if (ch == '\r' || ch == '\n')
+                {
+                    if (ch != '\n' || !previousCr) accept(line.ToString());
+                    line.Length = 0;
+                }
+                else line.Append((char)ch);
+                previousCr = ch == '\r';
+            }
+            if (line.Length != 0) accept(line.ToString());
+            return true;
         }
 
         // 插件进程需要 RW_PLUGIN_DATA_DIR / RW_WINDOW_SCALE 两个环境变量。不能直接写

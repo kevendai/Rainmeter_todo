@@ -403,18 +403,18 @@ public sealed partial class MainWindow
         fields.Children.Add(repeatDetails);
         fields.Children.Add(repeatHint);
         fields.Children.Add(reminderSection);
-        var seriesConfirmation = new CheckBox { Content = "我知道保存会修改整个周期日程及后续重复项" };
-        if (editingSeries) fields.Children.Add(seriesConfirmation);
         fields.Children.Add(moreToggle);
         fields.Children.Add(extras);
         fields.Children.Add(error);
         var dialog = EditorDialog(id is null ? "新建日程" : "编辑日程", fields,
             id is null ? "创建日程" : "保存修改");
+        Func<Task>? saveSeries = null;
         dialog.PrimaryButtonClick += async (_, args) =>
         {
             var deferral = args.GetDeferral();
             try
             {
+                error.Text = "";
                 var startsAt = PickerIso(startDate, startHour, startMinute) ?? throw new ArgumentException("请选择开始日期。");
                 var endsAt = PickerIso(endDate, endHour, endMinute) ?? throw new ArgumentException("请选择结束日期。");
                 if (allDay.IsOn)
@@ -439,8 +439,6 @@ public sealed partial class MainWindow
                     throw new ArgumentException("重复次数须为 1 到 10000。");
                 if ((endMode.SelectedItem as ComboBoxItem)?.Tag?.ToString() == "until" && untilDate.Date is null)
                     throw new ArgumentException("请选择周期结束日期。");
-                if (editingSeries && seriesConfirmation.IsChecked != true)
-                    throw new ArgumentException("请先确认要修改整个周期日程。");
                 var startDayOfWeek = DateTimeOffset.Parse(startsAt).DayOfWeek;
                 var startWeekday = startDayOfWeek == DayOfWeek.Sunday ? 7 : (int)startDayOfWeek;
                 var timingUnchanged = original is JsonElement existingEvent
@@ -453,7 +451,7 @@ public sealed partial class MainWindow
                     ? selectedFrequency == ruleFrequency && timingUnchanged && originalWeeklyDays.Length > 0
                         ? originalWeeklyDays : new[] { startWeekday }
                     : Array.Empty<int>();
-                await SaveCalendarDraftAsync(new
+                var draft = new
                 {
                     id = id ?? "",
                     occurrence_start = occurrenceStart,
@@ -477,13 +475,34 @@ public sealed partial class MainWindow
                         count = repeatCount,
                         until = untilDate.Date?.LocalDateTime.ToString("yyyy-MM-dd") ?? ""
                     }
-                });
+                };
+                if (editingSeries) saveSeries = () => SaveCalendarDraftAsync(draft);
+                else await SaveCalendarDraftAsync(draft);
             }
             catch (Exception ex) { error.Text = ex.Message; args.Cancel = true; }
             finally { deferral.Complete(); }
         };
         Title = id is null ? "桌面组件 · 新建日程" : "桌面组件 · 编辑日程";
-        try { await dialog.ShowAsync(); }
+        try
+        {
+            while (true)
+            {
+                saveSeries = null;
+                var result = await dialog.ShowAsync();
+                if (result != ContentDialogResult.Primary || saveSeries is null) break;
+                var confirmation = MaterialDialog(new ContentDialog
+                {
+                    Title = "确认修改周期日程",
+                    Content = Text("保存后，本次修改将应用到整个周期日程，包括后续重复项。", 14),
+                    PrimaryButtonText = "确认修改",
+                    CloseButtonText = "返回编辑",
+                    DefaultButton = ContentDialogButton.Close
+                });
+                if (await confirmation.ShowAsync() != ContentDialogResult.Primary) continue;
+                try { await saveSeries(); break; }
+                catch (Exception ex) { error.Text = ex.Message; }
+            }
+        }
         catch (Exception ex)
         {
             Render();
